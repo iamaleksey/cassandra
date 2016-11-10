@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +45,7 @@ import com.datastax.driver.core.DataType;
 import com.datastax.driver.core.TypeCodec;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -55,6 +57,9 @@ import org.apache.cassandra.service.ClientWarn;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+
+import static com.google.common.collect.Iterables.any;
+import static com.google.common.collect.Iterables.transform;
 
 /**
  * Base class for User Defined Functions.
@@ -214,6 +219,24 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
                                              keyspaceMetadata);
     }
 
+    public static UDFunction tryCreate(FunctionName name,
+                                       List<ColumnIdentifier> argNames,
+                                       List<AbstractType<?>> argTypes,
+                                       AbstractType<?> returnType,
+                                       boolean calledOnNullInput,
+                                       String language,
+                                       String body)
+    {
+        try
+        {
+            return create(name, argNames, argTypes, returnType, calledOnNullInput, language, body);
+        }
+        catch (InvalidRequestException e)
+        {
+            return createBrokenFunction(name, argNames, argTypes, returnType, calledOnNullInput, language, body, e);
+        }
+    }
+
     public static UDFunction create(FunctionName name,
                                     List<ColumnIdentifier> argNames,
                                     List<AbstractType<?>> argTypes,
@@ -222,7 +245,7 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
                                     String language,
                                     String body)
     {
-        UDFunction.assertUdfsEnabled(language);
+        assertUdfsEnabled(language);
 
         switch (language)
         {
@@ -579,6 +602,26 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
     protected static ByteBuffer decompose(TypeCodec<Object> codec, ProtocolVersion protocolVersion, Object value)
     {
         return value == null ? null : UDHelper.serialize(codec, protocolVersion, value);
+    }
+
+    @Override
+    public boolean referencesUserType(ByteBuffer name)
+    {
+        return any(argTypes(), t -> t.referencesUserType(name)) || returnType.referencesUserType(name);
+    }
+
+    public UDFunction withUpdatedUserType(UserType udt)
+    {
+        if (!referencesUserType(udt.name))
+            return this;
+
+        return tryCreate(name,
+                         argNames,
+                         Lists.newArrayList(transform(argTypes, t -> t.withUpdatedUserType(udt))),
+                         returnType.withUpdatedUserType(udt),
+                         calledOnNullInput,
+                         language,
+                         body);
     }
 
     @Override

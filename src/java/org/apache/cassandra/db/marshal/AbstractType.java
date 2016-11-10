@@ -456,9 +456,29 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
             ByteBufferUtil.skipWithVIntLength(in);
     }
 
-    public boolean referencesUserType(String userTypeName)
+    public boolean referencesUserType(ByteBuffer name)
     {
         return false;
+    }
+
+    /**
+     * Returns an instance of this type with all references to the provided user type recursively replaced with its new
+     * definition.
+     */
+    public AbstractType<?> withUpdatedUserType(UserType udt)
+    {
+        return this;
+    }
+
+    /**
+     * Replace any instances of UserType with equivalent TupleType-s.
+     *
+     * We need it for dropped_columns, to allow safely dropping unused user types later without retaining any references
+     * to them in system_schema.dropped_columns.
+     */
+    public AbstractType<?> expandUserTypes()
+    {
+        return this;
     }
 
     public boolean referencesDuration()

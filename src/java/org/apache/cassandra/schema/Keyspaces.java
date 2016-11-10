@@ -18,18 +18,21 @@
 package org.apache.cassandra.schema;
 
 import java.util.Iterator;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import javax.annotation.Nullable;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.MapDifference;
-import com.google.common.collect.Maps;
+import com.google.common.collect.*;
+
+import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
 
 public final class Keyspaces implements Iterable<KeyspaceMetadata>
 {
+    private static final Keyspaces NONE = builder().build();
+
     private final ImmutableMap<String, KeyspaceMetadata> keyspaces;
     private final ImmutableMap<TableId, TableMetadata> tables;
 
@@ -46,7 +49,7 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
 
     public static Keyspaces none()
     {
-        return builder().build();
+        return NONE;
     }
 
     public static Keyspaces of(KeyspaceMetadata... keyspaces)
@@ -69,16 +72,37 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         return keyspaces.keySet();
     }
 
+    /**
+     * Get the keyspace with the specified name
+     *
+     * @param name a non-qualified keyspace name
+     * @return an empty {@link Optional} if the table name is not found; a non-empty optional of {@link KeyspaceMetadata} otherwise
+     */
+    public Optional<KeyspaceMetadata> get(String name)
+    {
+        return Optional.ofNullable(keyspaces.get(name));
+    }
+
     @Nullable
     public KeyspaceMetadata getNullable(String name)
     {
         return keyspaces.get(name);
     }
 
+    public boolean containsKeyspace(String name)
+    {
+        return keyspaces.containsKey(name);
+    }
+
     @Nullable
     public TableMetadata getTableOrViewNullable(TableId id)
     {
         return tables.get(id);
+    }
+
+    public boolean isEmpty()
+    {
+        return keyspaces.isEmpty();
     }
 
     public Keyspaces filter(Predicate<KeyspaceMetadata> predicate)
@@ -97,19 +121,19 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         if (keyspace == null)
             throw new IllegalStateException(String.format("Keyspace %s doesn't exists", name));
 
-        return builder().add(filter(k -> k != keyspace)).build();
+        return filter(k -> k != keyspace);
     }
 
     public Keyspaces withAddedOrUpdated(KeyspaceMetadata keyspace)
     {
-        return builder().add(filter(k -> !k.name.equals(keyspace.name)))
+        return builder().add(Iterables.filter(this, k -> !k.name.equals(keyspace.name)))
                         .add(keyspace)
                         .build();
     }
 
-    MapDifference<String, KeyspaceMetadata> diff(Keyspaces other)
+    public void validate()
     {
-        return Maps.difference(keyspaces, other.keyspaces);
+        keyspaces.values().forEach(KeyspaceMetadata::validate);
     }
 
     @Override
@@ -165,6 +189,65 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         {
             keyspaces.forEach(this::add);
             return this;
+        }
+    }
+
+    /**
+     * Calculates the difference between two schemas.
+     *
+     * Has two modes of operation:
+     *
+     * 1. Mode.ON_DISK - compares schemas as they would be serialized, e.g. ignores differences in UserType-s for tables,
+     *    and only takes into account the names of UDTs, as we only store type names in system_schema.tables
+     * 2. Mode.IN_MEMORY - compares metadata objects thoroughly, accounting for every object in the graph. e.g. two TableMetadata
+     *    objects would be considered different if a UDT they refer to has added a new field
+     *
+     * @param before schema before the changes
+     * @param after schema after the changes
+     * @param mode of comparison to make - in memory or on disk representations
+     */
+    static KeyspacesDiff diff(Keyspaces before, Keyspaces after, Diff.Mode mode)
+    {
+        return KeyspacesDiff.diff(before, after, mode);
+    }
+
+    public static final class KeyspacesDiff
+    {
+        static final KeyspacesDiff NONE = new KeyspacesDiff(Keyspaces.none(), Keyspaces.none(), ImmutableList.of());
+
+        public final Keyspaces created;
+        public final Keyspaces dropped;
+        public final ImmutableList<KeyspaceDiff> altered;
+
+        private KeyspacesDiff(Keyspaces created, Keyspaces dropped, ImmutableList<KeyspaceDiff> altered)
+        {
+            this.created = created;
+            this.dropped = dropped;
+            this.altered = altered;
+        }
+
+        private static KeyspacesDiff diff(Keyspaces before, Keyspaces after, Diff.Mode mode)
+        {
+            if (before == after)
+                return NONE;
+
+            Keyspaces created = after.filter(k -> !before.containsKeyspace(k.name));
+            Keyspaces dropped = before.filter(k -> !after.containsKeyspace(k.name));
+
+            ImmutableList.Builder<KeyspaceDiff> altered = ImmutableList.builder();
+            before.forEach(keyspaceBefore ->
+            {
+                KeyspaceMetadata keyspaceAfter = after.getNullable(keyspaceBefore.name);
+                if (null != keyspaceAfter)
+                    KeyspaceMetadata.diff(keyspaceBefore, keyspaceAfter, mode).ifPresent(altered::add);
+            });
+
+            return new KeyspacesDiff(created, dropped, altered.build());
+        }
+
+        public boolean isEmpty()
+        {
+            return created.isEmpty() && dropped.isEmpty() && altered.isEmpty();
         }
     }
 }

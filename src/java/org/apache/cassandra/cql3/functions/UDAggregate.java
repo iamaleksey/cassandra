@@ -21,15 +21,21 @@ import java.nio.ByteBuffer;
 import java.util.*;
 
 import com.google.common.base.Objects;
+import com.google.common.collect.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.datastax.driver.core.TypeCodec;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
+
+import static com.google.common.collect.Iterables.any;
+import static com.google.common.collect.Iterables.transform;
 
 /**
  * Base class for user-defined-aggregates.
@@ -55,13 +61,13 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
         super(name, argTypes, returnType);
         this.stateFunction = stateFunc;
         this.finalFunction = finalFunc;
-        this.stateType = stateFunc != null ? stateFunc.returnType() : null;
-        this.stateTypeCodec = stateType != null ? UDHelper.codecFor(UDHelper.driverType(stateType)) : null;
-        this.returnTypeCodec = returnType != null ? UDHelper.codecFor(UDHelper.driverType(returnType)) : null;
+        this.stateType = stateFunc.returnType();
+        this.stateTypeCodec = UDHelper.codecFor(UDHelper.driverType(stateType));
+        this.returnTypeCodec = UDHelper.codecFor(UDHelper.driverType(returnType));
         this.initcond = initcond;
     }
 
-    public static UDAggregate create(Functions functions,
+    public static UDAggregate create(Collection<UDFunction> functions,
                                      FunctionName name,
                                      List<AbstractType<?>> argTypes,
                                      AbstractType<?> returnType,
@@ -69,7 +75,6 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
                                      FunctionName finalFunc,
                                      AbstractType<?> stateType,
                                      ByteBuffer initcond)
-    throws InvalidRequestException
     {
         List<AbstractType<?>> stateTypes = new ArrayList<>(argTypes.size() + 1);
         stateTypes.add(stateType);
@@ -78,32 +83,45 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
         return new UDAggregate(name,
                                argTypes,
                                returnType,
-                               resolveScalar(functions, name, stateFunc, stateTypes),
-                               finalFunc != null ? resolveScalar(functions, name, finalFunc, finalTypes) : null,
+                               findFunction(name, functions, stateFunc, stateTypes),
+                               null == finalFunc ? null : findFunction(name, functions, finalFunc, finalTypes),
                                initcond);
     }
 
-    public static UDAggregate createBroken(FunctionName name,
-                                           List<AbstractType<?>> argTypes,
-                                           AbstractType<?> returnType,
-                                           ByteBuffer initcond,
-                                           InvalidRequestException reason)
+    private static UDFunction findFunction(FunctionName udaName, Collection<UDFunction> functions, FunctionName name, List<AbstractType<?>> arguments)
     {
-        return new UDAggregate(name, argTypes, returnType, null, null, initcond)
-        {
-            public Aggregate newAggregate() throws InvalidRequestException
-            {
-                throw new InvalidRequestException(String.format("Aggregate '%s' exists but hasn't been loaded successfully for the following reason: %s. "
-                                                                + "Please see the server log for more details",
-                                                                this,
-                                                                reason.getMessage()));
-            }
-        };
+        return functions.stream()
+                        .filter(f -> f.name().equals(name) && Functions.typesMatch(f.argTypes(), arguments))
+                        .findFirst()
+                        .orElseThrow(() -> new ConfigurationException(String.format("Unable to find function %s referenced by UDA %s", name, udaName)));
     }
 
     public boolean hasReferenceTo(Function function)
     {
         return stateFunction == function || finalFunction == function;
+    }
+
+    @Override
+    public boolean referencesUserType(ByteBuffer name)
+    {
+        return any(argTypes(), t -> t.referencesUserType(name))
+            || returnType.referencesUserType(name)
+            || (null != stateType && stateType.referencesUserType(name))
+            || stateFunction.referencesUserType(name)
+            || (null != finalFunction && finalFunction.referencesUserType(name));
+    }
+
+    public UDAggregate withUpdatedUserType(Collection<UDFunction> udfs, UserType udt)
+    {
+        if (!referencesUserType(udt.name))
+            return this;
+
+        return new UDAggregate(name,
+                               Lists.newArrayList(transform(argTypes, t -> t.withUpdatedUserType(udt))),
+                               returnType.withUpdatedUserType(udt),
+                               findFunction(name, udfs, stateFunction.name(), stateFunction.argTypes()),
+                               null == finalFunction ? null : findFunction(name, udfs, finalFunction.name(), finalFunction.argTypes()),
+                               initcond);
     }
 
     @Override
@@ -212,23 +230,6 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
                 needsInit = true;
             }
         };
-    }
-
-    private static ScalarFunction resolveScalar(Functions functions, FunctionName aName, FunctionName fName, List<AbstractType<?>> argTypes) throws InvalidRequestException
-    {
-        Optional<Function> fun = functions.find(fName, argTypes);
-        if (!fun.isPresent())
-            throw new InvalidRequestException(String.format("Referenced state function '%s %s' for aggregate '%s' does not exist",
-                                                            fName,
-                                                            Arrays.toString(UDHelper.driverTypes(argTypes)),
-                                                            aName));
-
-        if (!(fun.get() instanceof ScalarFunction))
-            throw new InvalidRequestException(String.format("Referenced state function '%s %s' for aggregate '%s' is not a scalar function",
-                                                            fName,
-                                                            Arrays.toString(UDHelper.driverTypes(argTypes)),
-                                                            aName));
-        return (ScalarFunction) fun.get();
     }
 
     @Override
