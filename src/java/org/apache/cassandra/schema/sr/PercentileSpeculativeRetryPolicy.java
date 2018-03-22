@@ -67,6 +67,6 @@ public class PercentileSpeculativeRetryPolicy implements SpeculativeRetryPolicy
     @Override
     public String toString()
     {
-        return String.format("%.2fPERCENTILE", percentile);
+        return String.format("%.2fp", percentile);
     }
 }
