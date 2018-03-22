@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.schema.sr;
 
-import java.math.BigDecimal;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -41,7 +40,7 @@ public interface SpeculativeRetryPolicy
                                                          "(?<val1>[0-9.]+)?(?<op1>P|PERCENTILE|MS)?([,\\s]*)" +
                                                          "(?<val2>[0-9.]+)?(?<op2>P|PERCENTILE|MS)?\\)?$",
                                                          Pattern.CASE_INSENSITIVE);
-    public static final SpeculativeRetryPolicy DEFAULT = new PercentileSpeculativeRetryPolicy(new BigDecimal(0.99));
+    public static final SpeculativeRetryPolicy DEFAULT = new PercentileSpeculativeRetryPolicy(99.0);
 
     boolean isDynamic();
 
@@ -57,15 +56,16 @@ public interface SpeculativeRetryPolicy
             case "percentile":
             {
                 double value = Double.parseDouble(valueStr);
-                if (value > 100 || value < 0)
+                if (value >= 100.0 || value <= 0)
                     throw new ConfigurationException(String.format("PERCENTILE should be between 0 and 100 " +
                                                                    "(not %s)", valueStr));
-                return new PercentileSpeculativeRetryPolicy(new BigDecimal(value / 100));
+                return new PercentileSpeculativeRetryPolicy(value);
             }
             case "ms":
             {
+                // we've always treated this as long, but let's parse as double for compatibility for now
                 double value = Double.parseDouble(valueStr);
-                return new FixedSpeculativeRetryPolicy(value);
+                return new FixedSpeculativeRetryPolicy((int) value);
             }
             default:
                 throw new ConfigurationException(String.format("invalid speculative_retry type: %s", typeStr));

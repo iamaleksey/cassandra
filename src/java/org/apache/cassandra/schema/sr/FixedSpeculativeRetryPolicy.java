@@ -26,9 +26,9 @@ import com.codahale.metrics.Timer;
 
 public class FixedSpeculativeRetryPolicy implements SpeculativeRetryPolicy
 {
-    private final double speculateAtMilliseconds;
+    private final int speculateAtMilliseconds;
 
-    public FixedSpeculativeRetryPolicy(double speculateAtMilliseconds)
+    public FixedSpeculativeRetryPolicy(int speculateAtMilliseconds)
     {
         this.speculateAtMilliseconds = speculateAtMilliseconds;
     }
@@ -42,7 +42,7 @@ public class FixedSpeculativeRetryPolicy implements SpeculativeRetryPolicy
     @Override
     public long calculateThreshold(Timer readLatency)
     {
-        return TimeUnit.MILLISECONDS.toNanos((long) speculateAtMilliseconds);
+        return TimeUnit.MILLISECONDS.toNanos(speculateAtMilliseconds);
     }
 
     @Override
@@ -69,6 +69,6 @@ public class FixedSpeculativeRetryPolicy implements SpeculativeRetryPolicy
     @Override
     public String toString()
     {
-        return String.format("%.2fMS", speculateAtMilliseconds);
+        return String.format("%dms", speculateAtMilliseconds);
     }
 }

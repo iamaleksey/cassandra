@@ -18,32 +18,29 @@
 
 package org.apache.cassandra.schema.sr;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
-
 import com.google.common.base.Objects;
 
 import com.codahale.metrics.Timer;
 
 public class PercentileSpeculativeRetryPolicy implements SpeculativeRetryPolicy
 {
-    private final BigDecimal percentile;
+    private final double percentile;
 
-    public PercentileSpeculativeRetryPolicy(BigDecimal percentile)
+    public PercentileSpeculativeRetryPolicy(double percentile)
     {
-        this.percentile = percentile.setScale(2, RoundingMode.HALF_DOWN);
+        this.percentile = percentile;
     }
 
     @Override
     public boolean isDynamic()
     {
-        return false;
+        return true;
     }
 
     @Override
     public long calculateThreshold(Timer readLatency)
     {
-        return (long) (readLatency.getSnapshot().getValue(percentile.doubleValue() / 100) * 1000d);
+        return (long) readLatency.getSnapshot().getValue(percentile / 100);
     }
 
     @Override
@@ -58,7 +55,7 @@ public class PercentileSpeculativeRetryPolicy implements SpeculativeRetryPolicy
         if (!(obj instanceof PercentileSpeculativeRetryPolicy))
             return false;
         PercentileSpeculativeRetryPolicy rhs = (PercentileSpeculativeRetryPolicy) obj;
-        return Objects.equal(percentile, rhs.percentile);
+        return percentile == rhs.percentile;
     }
 
     @Override
@@ -70,6 +67,6 @@ public class PercentileSpeculativeRetryPolicy implements SpeculativeRetryPolicy
     @Override
     public String toString()
     {
-        return String.format("%.1fPERCENTILE", percentile.doubleValue() * 100);
+        return String.format("%.2fPERCENTILE", percentile);
     }
 }

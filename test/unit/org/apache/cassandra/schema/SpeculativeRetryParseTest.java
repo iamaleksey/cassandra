@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.schema;
 
-import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collection;
 
@@ -61,26 +60,40 @@ public class SpeculativeRetryParseTest
         {
             return Arrays.asList(new Object[][]{
                                  { "NONE", NeverSpeculativeRetryPolicy.INSTANCE },
-                                 { "NEVER", NeverSpeculativeRetryPolicy.INSTANCE },
-                                 { "ALWAYS", AlwaysSpeculativeRetryPolicy.INSTANCE },
-                                 { "10PERCENTILE", new PercentileSpeculativeRetryPolicy(new BigDecimal(0.10)) },
-                                 { "121.1ms", new FixedSpeculativeRetryPolicy(121.1) },
-                                 { "21.7MS", new FixedSpeculativeRetryPolicy(21.7) },
                                  { "None", NeverSpeculativeRetryPolicy.INSTANCE },
                                  { "Never", NeverSpeculativeRetryPolicy.INSTANCE },
+                                 { "NEVER", NeverSpeculativeRetryPolicy.INSTANCE },
+
+                                 { "ALWAYS", AlwaysSpeculativeRetryPolicy.INSTANCE },
                                  { "Always", AlwaysSpeculativeRetryPolicy.INSTANCE },
-                                 { "21.1percentile", new PercentileSpeculativeRetryPolicy(new BigDecimal(0.211)) },
-                                 { "78.11p", new PercentileSpeculativeRetryPolicy(new BigDecimal(0.7811)) },
-                                 { "max(99p,53ms)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(new BigDecimal(0.99)),
+
+                                 { "95PERCENTILE", new PercentileSpeculativeRetryPolicy(95.0) },
+                                 { "99PERCENTILE", new PercentileSpeculativeRetryPolicy(99.0) },
+                                 { "99.5PERCENTILE", new PercentileSpeculativeRetryPolicy(99.5) },
+                                 { "99.9PERCENTILE", new PercentileSpeculativeRetryPolicy(99.9) },
+                                 { "99.95PERCENTILE", new PercentileSpeculativeRetryPolicy(99.95) },
+                                 { "99.99PERCENTILE", new PercentileSpeculativeRetryPolicy(99.99) },
+                                 { "21.1percentile", new PercentileSpeculativeRetryPolicy(21.1) },
+                                 { "78.11p", new PercentileSpeculativeRetryPolicy(78.11) },
+
+
+                                 { "1ms", new FixedSpeculativeRetryPolicy(1) },
+                                 { "10ms", new FixedSpeculativeRetryPolicy(10) },
+                                 { "100ms", new FixedSpeculativeRetryPolicy(100) },
+                                 { "1000ms", new FixedSpeculativeRetryPolicy(1000) },
+                                 { "121.1ms", new FixedSpeculativeRetryPolicy(121) },
+                                 { "21.7MS", new FixedSpeculativeRetryPolicy(21) },
+
+                                 { "max(99p,53ms)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(99.0),
                                                                                      new FixedSpeculativeRetryPolicy(53),
                                                                                      Function.MAX) },
-                                 { "max(53ms,99p)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(new BigDecimal(0.99)),
+                                 { "max(53ms,99p)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(99.0),
                                                                                      new FixedSpeculativeRetryPolicy(53),
                                                                                      Function.MAX) },
-                                 { "MIN(70MS,90PERCENTILE)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(new BigDecimal(0.90)),
+                                 { "MIN(70MS,90PERCENTILE)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(90.0),
                                                                                               new FixedSpeculativeRetryPolicy(70),
                                                                                               Function.MIN) },
-                                 { "MIN(70MS,  90PERCENTILE)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(new BigDecimal(0.90)),
+                                 { "MIN(70MS,  90PERCENTILE)", new HybridSpeculativeRetryPolicy(new PercentileSpeculativeRetryPolicy(90.0),
                                                                                                 new FixedSpeculativeRetryPolicy(70),
                                                                                                 Function.MIN) }
                                  }
