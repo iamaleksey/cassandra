@@ -1,5 +1,6 @@
 4.0
- * Abstract write path for pluggable storage (CASSANDRA-14118)
+ * Eliminate background repair and probablistic read_repair_chance table options
+   (CASSANDRA-13910)
  * nodetool describecluster should be more informative (CASSANDRA-13853)
  * Compaction performance improvements (CASSANDRA-14261) 
  * Refactor Pair usage to avoid boxing ints/longs (CASSANDRA-14260)
