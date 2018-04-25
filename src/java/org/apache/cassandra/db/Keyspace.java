@@ -39,6 +39,7 @@ import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
 import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -170,6 +171,17 @@ public class Keyspace
     public static ColumnFamilyStore openAndGetStore(TableMetadata table)
     {
         return open(table.keyspace).getColumnFamilyStore(table.id);
+    }
+
+    /**
+     * Returns the {@code IndexRegistry} associated to the specified table.
+     *
+     * @param table the table metadata
+     * @return the {@code IndexRegistry} associated to the specified table
+     */
+    public static IndexRegistry openAndGetIndexRegistry(TableMetadata table)
+    {
+        return table.isVirtual() ? IndexRegistry.EMPTY : openAndGetStore(table).indexManager;
     }
 
     /**
