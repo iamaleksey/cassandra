@@ -21,7 +21,10 @@
 package org.apache.cassandra.index;
 
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Optional;
 
+import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.schema.IndexMetadata;
 
 /**
@@ -34,9 +37,45 @@ import org.apache.cassandra.schema.IndexMetadata;
  */
 public interface IndexRegistry
 {
+    /**
+     * An empty {@code IndexRegistry}
+     */
+    public static final IndexRegistry EMPTY = new IndexRegistry()
+    {
+        @Override
+        public void unregisterIndex(Index index)
+        {
+        }
+
+        @Override
+        public void registerIndex(Index index)
+        {
+        }
+
+        @Override
+        public Collection<Index> listIndexes()
+        {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public Index getIndex(IndexMetadata indexMetadata)
+        {
+            return null;
+        }
+
+        @Override
+        public Optional<Index> getBestIndexFor(RowFilter.Expression expression)
+        {
+            return Optional.empty();
+        }
+    };
+
     void registerIndex(Index index);
     void unregisterIndex(Index index);
 
     Index getIndex(IndexMetadata indexMetadata);
     Collection<Index> listIndexes();
+
+    Optional<Index> getBestIndexFor(RowFilter.Expression expression);
 }

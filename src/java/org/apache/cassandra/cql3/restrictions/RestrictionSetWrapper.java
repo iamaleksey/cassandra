@@ -24,7 +24,8 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.functions.Function;
 import org.apache.cassandra.db.filter.RowFilter;
-import org.apache.cassandra.index.SecondaryIndexManager;
+import org.apache.cassandra.index.IndexRegistry;
+
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.commons.lang3.builder.ToStringStyle;
 
@@ -45,10 +46,10 @@ class RestrictionSetWrapper implements Restrictions
     }
 
     public void addRowFilterTo(RowFilter filter,
-                               SecondaryIndexManager indexManager,
+                               IndexRegistry indexRegistry,
                                QueryOptions options)
     {
-        restrictions.addRowFilterTo(filter, indexManager, options);
+        restrictions.addRowFilterTo(filter, indexRegistry, options);
     }
 
     public List<ColumnMetadata> getColumnDefs()
@@ -71,9 +72,9 @@ class RestrictionSetWrapper implements Restrictions
         return restrictions.size();
     }
 
-    public boolean hasSupportingIndex(SecondaryIndexManager indexManager)
+    public boolean hasSupportingIndex(IndexRegistry indexRegistry)
     {
-        return restrictions.hasSupportingIndex(indexManager);
+        return restrictions.hasSupportingIndex(indexRegistry);
     }
 
     public ColumnMetadata getFirstColumn()
