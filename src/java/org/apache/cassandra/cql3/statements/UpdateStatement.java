@@ -29,8 +29,10 @@ import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.CompactTables;
 import org.apache.cassandra.db.Slice;
+import org.apache.cassandra.db.VirtualTable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.Pair;
@@ -105,6 +107,21 @@ public class UpdateStatement extends ModificationStatement
                 op.execute(updateBuilder.partitionKey(), params);
             updateBuilder.add(params.buildRow());
         }
+
+        if (updatesVirtualRows())
+        {
+            params.newRow(clustering);
+            VirtualTable t = Schema.instance.getVirtualTable(params.metadata);
+            for (Operation op : getVirtualOperations()) {
+                if (t.writable())
+                {
+                    op.execute(updateBuilder.partitionKey(), params);
+                }
+                else
+                    throw new org.apache.cassandra.exceptions.InvalidRequestException(String.format("Virtual table %s.%s is not writable", params.metadata.keyspace, params.metadata.name));
+            }
+            t.mutate(updateBuilder.partitionKey(), params.buildRow());
+        }
     }
 
     @Override
@@ -174,7 +191,7 @@ public class UpdateStatement extends ModificationStatement
                 {
                     Operation operation = new Operation.SetValue(value).prepare(metadata, def);
                     operation.collectMarkerSpecification(boundNames);
-                    operations.add(operation);
+                    operations.add(operation, metadata.isVirtual());
                 }
             }
 
@@ -242,7 +259,7 @@ public class UpdateStatement extends ModificationStatement
                 {
                     Operation operation = new Operation.SetValue(raw).prepare(metadata, def);
                     operation.collectMarkerSpecification(boundNames);
-                    operations.add(operation);
+                    operations.add(operation, metadata.isVirtual());
                 }
             }
 
@@ -310,7 +327,7 @@ public class UpdateStatement extends ModificationStatement
 
                 Operation operation = entry.right.prepare(metadata, def);
                 operation.collectMarkerSpecification(boundNames);
-                operations.add(operation);
+                operations.add(operation, metadata.isVirtual());
             }
 
             StatementRestrictions restrictions = newRestrictions(metadata,

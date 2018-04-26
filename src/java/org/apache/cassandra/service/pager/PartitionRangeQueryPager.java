@@ -31,10 +31,12 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
 {
     private volatile DecoratedKey lastReturnedKey;
     private volatile PagingState.RowMark lastReturnedRow;
+    private PartitionRangeReadCommand readCommand;
 
     public PartitionRangeQueryPager(PartitionRangeReadCommand command, PagingState state, ProtocolVersion protocolVersion)
     {
         super(command, protocolVersion);
+        readCommand = command;
 
         if (state != null)
         {
@@ -44,7 +46,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         }
     }
 
-    public PartitionRangeQueryPager(ReadCommand command,
+    private PartitionRangeQueryPager(ReadCommand command,
                                     ProtocolVersion protocolVersion,
                                     DecoratedKey lastReturnedKey,
                                     PagingState.RowMark lastReturnedRow,
@@ -52,6 +54,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
                                     int remainingInPartition)
     {
         super(command, protocolVersion);
+        this.readCommand = (PartitionRangeReadCommand) command;
         this.lastReturnedKey = lastReturnedKey;
         this.lastReturnedRow = lastReturnedRow;
         restoreState(lastReturnedKey, remaining, remainingInPartition);
@@ -59,7 +62,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
 
     public PartitionRangeQueryPager withUpdatedLimit(DataLimits newLimits)
     {
-        return new PartitionRangeQueryPager(command.withUpdatedLimit(newLimits),
+        return new PartitionRangeQueryPager(readCommand.withUpdatedLimit(newLimits),
                                             protocolVersion,
                                             lastReturnedKey,
                                             lastReturnedRow,
@@ -74,7 +77,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
              : new PagingState(lastReturnedKey.getKey(), lastReturnedRow, maxRemaining(), remainingInPartition());
     }
 
-    protected ReadCommand nextPageReadCommand(int pageSize)
+    protected ReadQuery nextPageReadCommand(int pageSize)
     throws RequestExecutionException
     {
         DataLimits limits;
@@ -89,10 +92,11 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         {
             // We want to include the last returned key only if we haven't achieved our per-partition limit, otherwise, don't bother.
             boolean includeLastKey = remainingInPartition() > 0 && lastReturnedRow != null;
-            AbstractBounds<PartitionPosition> bounds = makeKeyBounds(lastReturnedKey, includeLastKey);
+            AbstractBounds<PartitionPosition> bounds = makeKeyBounds(((PartitionRangeReadCommand)command).dataRange().keyRange(),
+                    lastReturnedKey, includeLastKey);
             if (includeLastKey)
             {
-                pageRange = fullRange.forPaging(bounds, command.metadata().comparator, lastReturnedRow.clustering(command.metadata()), false);
+                pageRange = fullRange.forPaging(bounds, readCommand.metadata().comparator, lastReturnedRow.clustering(readCommand.metadata()), false);
                 limits = command.limits().forPaging(pageSize, lastReturnedKey.getKey(), remainingInPartition());
             }
             else
@@ -111,7 +115,7 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         {
             lastReturnedKey = key;
             if (last.clustering() != Clustering.STATIC_CLUSTERING)
-                lastReturnedRow = PagingState.RowMark.create(command.metadata(), last, protocolVersion);
+                lastReturnedRow = PagingState.RowMark.create(readCommand.metadata(), last, protocolVersion);
         }
     }
 
@@ -121,20 +125,4 @@ public class PartitionRangeQueryPager extends AbstractQueryPager
         return key.equals(lastReturnedKey);
     }
 
-    private AbstractBounds<PartitionPosition> makeKeyBounds(PartitionPosition lastReturnedKey, boolean includeLastKey)
-    {
-        AbstractBounds<PartitionPosition> bounds = ((PartitionRangeReadCommand)command).dataRange().keyRange();
-        if (bounds instanceof Range || bounds instanceof Bounds)
-        {
-            return includeLastKey
-                 ? new Bounds<PartitionPosition>(lastReturnedKey, bounds.right)
-                 : new Range<PartitionPosition>(lastReturnedKey, bounds.right);
-        }
-        else
-        {
-            return includeLastKey
-                 ? new IncludingExcludingBounds<PartitionPosition>(lastReturnedKey, bounds.right)
-                 : new ExcludingBounds<PartitionPosition>(lastReturnedKey, bounds.right);
-        }
-    }
 }

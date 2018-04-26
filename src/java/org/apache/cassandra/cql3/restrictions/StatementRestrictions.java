@@ -34,6 +34,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTreeSet;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -102,6 +103,11 @@ public final class StatementRestrictions
     private boolean hasRegularColumnsRestrictions;
 
     /**
+     * instance of virtual table if against a virtual table or null for normal tables
+     */
+    public final VirtualTable virtualTable;
+
+    /**
      * Creates a new empty <code>StatementRestrictions</code>.
      *
      * @param type the type of statement
@@ -117,6 +123,7 @@ public final class StatementRestrictions
     {
         this.type = type;
         this.table = table;
+        this.virtualTable = Schema.instance.getVirtualTable(table);
         this.partitionKeyRestrictions = new PartitionKeySingleRestrictionSet(table.partitionKeyAsClusteringComparator());
         this.clusteringColumnsRestrictions = new ClusteringColumnRestrictions(table, allowFiltering);
         this.nonPrimaryKeyRestrictions = new RestrictionSet();
@@ -136,7 +143,8 @@ public final class StatementRestrictions
         ColumnFamilyStore cfs;
         SecondaryIndexManager secondaryIndexManager = null;
 
-        if (type.allowUseOfSecondaryIndices())
+        // virtual tables don't have secondary index managers
+        if (!table.isVirtual() && type.allowUseOfSecondaryIndices())
         {
             cfs = Keyspace.open(table.keyspace).getColumnFamilyStore(table.name);
             secondaryIndexManager = cfs.indexManager;
@@ -248,7 +256,7 @@ public final class StatementRestrictions
             }
             if (hasQueriableIndex)
                 usesSecondaryIndexing = true;
-            else if (!allowFiltering)
+            else if (!allowFiltering && !(table.isVirtual() && virtualTable.allowFiltering()))
                 throw invalidRequest(StatementRestrictions.REQUIRES_ALLOW_FILTERING_MESSAGE);
 
             filterRestrictions.add(nonPrimaryKeyRestrictions);
@@ -426,7 +434,8 @@ public final class StatementRestrictions
             // components must have a EQ. Only the last partition key component can be in IN relation.
             if (partitionKeyRestrictions.needFiltering(table))
             {
-                if (!allowFiltering && !forView && !hasQueriableIndex)
+                if (!allowFiltering && !forView && !hasQueriableIndex
+                        && !(table.isVirtual() && virtualTable.allowFiltering()))
                     throw new InvalidRequestException(REQUIRES_ALLOW_FILTERING_MESSAGE);
 
                 if (partitionKeyRestrictions.hasIN())
@@ -456,7 +465,7 @@ public final class StatementRestrictions
      * Returns the partition key components that are not restricted.
      * @return the partition key components that are not restricted.
      */
-    private Collection<ColumnIdentifier> getPartitionKeyUnrestrictedComponents()
+    public Collection<ColumnIdentifier> getPartitionKeyUnrestrictedComponents()
     {
         List<ColumnMetadata> list = new ArrayList<>(table.partitionKeyColumns());
         list.removeAll(partitionKeyRestrictions.getColumnDefs());
@@ -483,6 +492,16 @@ public final class StatementRestrictions
     public boolean clusteringKeyRestrictionsHasIN()
     {
         return clusteringColumnsRestrictions.hasIN();
+    }
+
+    public PartitionKeyRestrictions getPartitionKeyRestrictions()
+    {
+        return partitionKeyRestrictions;
+    }
+
+    public ClusteringColumnRestrictions getClusteringColumnsRestrictions()
+    {
+        return clusteringColumnsRestrictions;
     }
 
     /**

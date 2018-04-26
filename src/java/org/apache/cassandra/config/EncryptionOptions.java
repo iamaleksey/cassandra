@@ -89,6 +89,11 @@ public class EncryptionOptions
         return result;
     }
 
+    public String toString()
+    {
+        return "{'enabled': '" + enabled + "', 'optional': '" + optional + "'}";
+    }
+
     public static class ServerEncryptionOptions extends EncryptionOptions
     {
         public enum InternodeEncryption
@@ -111,5 +116,11 @@ public class EncryptionOptions
             internode_encryption = options.internode_encryption;
             enable_legacy_ssl_storage_port = options.enable_legacy_ssl_storage_port;
         }
+
+        public String toString()
+        {
+            return "{'internode_encryption': '" + internode_encryption + "'}";
+        }
     }
+
 }

@@ -270,6 +270,9 @@ public class SelectStatement implements CQLStatement
 
         DataLimits limit = getDataLimits(userLimit, perPartitionLimit, pageSize);
 
+        if (table.isVirtual())
+            return Schema.instance.getVirtualTable(table).getQuery(this, options, limit, nowInSec);
+
         if (isPartitionRangeQuery)
             return getRangeCommand(options, columnFilter, limit, nowInSec);
 
@@ -588,7 +591,7 @@ public class SelectStatement implements CQLStatement
         return command;
     }
 
-    private ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter)
+    public ClusteringIndexFilter makeClusteringIndexFilter(QueryOptions options, ColumnFilter columnFilter)
     {
         if (parameters.isDistinct)
         {
@@ -1252,7 +1255,8 @@ public class SelectStatement implements CQLStatement
         private void checkNeedsFiltering(StatementRestrictions restrictions) throws InvalidRequestException
         {
             // non-key-range non-indexed queries cannot involve filtering underneath
-            if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing()))
+            if (!parameters.allowFiltering && (restrictions.isKeyRange() || restrictions.usesSecondaryIndexing())
+                    && !(restrictions.table.isVirtual() && restrictions.virtualTable.allowFiltering()))
             {
                 // We will potentially filter data if either:
                 //  - Have more than one IndexExpression
