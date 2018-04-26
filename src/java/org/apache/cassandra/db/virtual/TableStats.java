@@ -75,15 +75,15 @@ public class TableStats extends SystemView
         definitions.put(FIFTEEN_MIN_RATE, CQL3Type.Native.DOUBLE);
         definitions.put(MEAN_RATE, CQL3Type.Native.DOUBLE);
         definitions.put(ONE_MIN_RATE, CQL3Type.Native.DOUBLE);
-        definitions.put(P75TH, CQL3Type.Native.DOUBLE);
-        definitions.put(P95TH, CQL3Type.Native.DOUBLE);
-        definitions.put(P99TH, CQL3Type.Native.DOUBLE);
-        definitions.put(P999TH, CQL3Type.Native.DOUBLE);
+        definitions.put(P75TH, CQL3Type.Native.BIGINT);
+        definitions.put(P95TH, CQL3Type.Native.BIGINT);
+        definitions.put(P99TH, CQL3Type.Native.BIGINT);
+        definitions.put(P999TH, CQL3Type.Native.BIGINT);
         definitions.put(MIN, CQL3Type.Native.BIGINT);
         definitions.put(MAX, CQL3Type.Native.BIGINT);
-        definitions.put(MEAN, CQL3Type.Native.DOUBLE);
+        definitions.put(MEAN, CQL3Type.Native.BIGINT);
         definitions.put(STD_DEV, CQL3Type.Native.DOUBLE);
-        definitions.put(MEDIAN, CQL3Type.Native.DOUBLE);
+        definitions.put(MEDIAN, CQL3Type.Native.BIGINT);
         definitions.put(COUNT, CQL3Type.Native.BIGINT);
 
         schemaBuilder(definitions)
@@ -123,12 +123,12 @@ public class TableStats extends SystemView
                             EstimatedHistogram eh = new EstimatedHistogram(data);
                             partition.column(MIN, eh.min());
                             partition.column(MAX, eh.max());
-                            partition.column(MEAN, (double) eh.mean());
-                            partition.column(MEDIAN, (double) eh.percentile(0.5));
-                            partition.column(P75TH, (double) eh.percentile(0.75));
-                            partition.column(P95TH, (double) eh.percentile(0.95));
-                            partition.column(P99TH, (double) eh.percentile(0.99));
-                            partition.column(P999TH, (double) eh.percentile(0.999));
+                            partition.column(MEAN, eh.mean());
+                            partition.column(MEDIAN, eh.percentile(0.5));
+                            partition.column(P75TH, eh.percentile(0.75));
+                            partition.column(P95TH,  eh.percentile(0.95));
+                            partition.column(P99TH, eh.percentile(0.99));
+                            partition.column(P999TH, eh.percentile(0.999));
                         }
                     }
                     else if (metric instanceof LatencyMetrics)
@@ -149,15 +149,15 @@ public class TableStats extends SystemView
                     if (metric instanceof Sampling)
                     {
                         Snapshot s = ((Sampling) metric).getSnapshot();
-                        partition.column(MIN, s.getMin());
-                        partition.column(MAX, s.getMax());
-                        partition.column(MEAN, s.getMean());
-                        partition.column(MEDIAN, s.getMedian());
+                        partition.column(MIN, (long) s.getMin());
+                        partition.column(MAX, (long) s.getMax());
+                        partition.column(MEAN, (long) s.getMean());
+                        partition.column(MEDIAN, (long) s.getMedian());
                         partition.column(STD_DEV, s.getStdDev());
-                        partition.column(P75TH, s.get75thPercentile());
-                        partition.column(P95TH, s.get95thPercentile());
-                        partition.column(P99TH, s.get99thPercentile());
-                        partition.column(P999TH, s.get999thPercentile());
+                        partition.column(P75TH, (long) s.get75thPercentile());
+                        partition.column(P95TH, (long) s.get95thPercentile());
+                        partition.column(P99TH, (long) s.get99thPercentile());
+                        partition.column(P999TH, (long) s.get999thPercentile());
                     }
                     partition.endRow();
                 }
