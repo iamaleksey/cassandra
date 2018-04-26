@@ -56,10 +56,9 @@ public class TableStats extends SystemView
     private static final String P99TH = "p99th";
     private static final String P95TH = "p95th";
     private static final String P75TH = "p75th";
-    private static final String ONE_MIN_RATE = "one_min_rate";
-    private static final String MEAN_RATE = "mean_rate";
-    private static final String FIVE_MIN_RATE = "five_min_rate";
-    private static final String FIFTEEN_MIN_RATE = "fifteen_min_rate";
+    private static final String ONE_MIN_RATE = "rate_1m";
+    private static final String MEAN_RATE = "rate_mean";
+    private static final String FIFTEEN_MIN_RATE = "rate_15m";
     private static final String VALUE = "value";
     private static final String METRIC = "metric";
     private static final String TABLE_NAME = "table_name";
@@ -74,7 +73,6 @@ public class TableStats extends SystemView
         definitions.put(METRIC, CQL3Type.Native.TEXT);
         definitions.put(VALUE, CQL3Type.Native.TEXT);
         definitions.put(FIFTEEN_MIN_RATE, CQL3Type.Native.DOUBLE);
-        definitions.put(FIVE_MIN_RATE, CQL3Type.Native.DOUBLE);
         definitions.put(MEAN_RATE, CQL3Type.Native.DOUBLE);
         definitions.put(ONE_MIN_RATE, CQL3Type.Native.DOUBLE);
         definitions.put(P75TH, CQL3Type.Native.DOUBLE);
@@ -145,7 +143,6 @@ public class TableStats extends SystemView
                     {
                         Timer t = (Timer) metric;
                         partition.column(FIFTEEN_MIN_RATE, t.getFifteenMinuteRate());
-                        partition.column(FIVE_MIN_RATE, t.getFiveMinuteRate());
                         partition.column(ONE_MIN_RATE, t.getOneMinuteRate());
                         partition.column(MEAN_RATE, t.getMeanRate());
                     }
