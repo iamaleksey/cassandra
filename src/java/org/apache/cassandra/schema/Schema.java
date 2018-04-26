@@ -21,6 +21,7 @@ import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.MapDifference;
@@ -28,20 +29,20 @@ import com.google.common.collect.Sets;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.functions.*;
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.KeyspaceNotDefinedException;
-import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.SystemKeyspace;
+import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.commitlog.CommitLog;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.db.virtual.SystemViewKeyspace;
+import org.apache.cassandra.db.virtual.VirtualKeyspace;
+import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.LocalStrategy;
+import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
@@ -64,6 +65,8 @@ public final class Schema
     // Keyspace objects, one per keyspace. Only one instance should ever exist for any given keyspace.
     private final Map<String, Keyspace> keyspaceInstances = new NonBlockingHashMap<>();
 
+    private final VirtualKeyspaceRegistry virtualKeyspaces = new VirtualKeyspaceRegistry();
+
     private volatile UUID version;
 
     private final List<SchemaChangeListener> changeListeners = new CopyOnWriteArrayList<>();
@@ -77,6 +80,9 @@ public final class Schema
         {
             load(SchemaKeyspace.metadata());
             load(SystemKeyspace.metadata());
+
+            register(SystemViewKeyspace.instance);
+            register(VirtualSchemaKeyspace.instance);
         }
     }
 
@@ -150,6 +156,11 @@ public final class Schema
         ksm.tables
            .indexTables()
            .forEach((name, metadata) -> indexMetadataRefs.put(Pair.create(ksm.name, name), new TableMetadataRef(metadata)));
+    }
+
+    public void register(VirtualKeyspace keyspace)
+    {
+        virtualKeyspaces.register(keyspace);
     }
 
     private void reload(KeyspaceMetadata previous, KeyspaceMetadata updated)
@@ -312,7 +323,8 @@ public final class Schema
     public KeyspaceMetadata getKeyspaceMetadata(String keyspaceName)
     {
         assert keyspaceName != null;
-        return keyspaces.getNullable(keyspaceName);
+        KeyspaceMetadata keyspace = keyspaces.getNullable(keyspaceName);
+        return null != keyspace ? keyspace : virtualKeyspaces.getKeyspaceMetadataNullable(keyspaceName);
     }
 
     private Set<String> getNonSystemKeyspacesSet()
@@ -347,6 +359,11 @@ public final class Schema
     public List<String> getUserKeyspaces()
     {
         return ImmutableList.copyOf(Sets.difference(getNonSystemKeyspacesSet(), SchemaConstants.REPLICATED_SYSTEM_KEYSPACE_NAMES));
+    }
+
+    public Iterable<KeyspaceMetadata> virtualKeyspacesMetadata()
+    {
+        return virtualKeyspaces.virtualKeyspacesMetadata();
     }
 
     /**
@@ -426,15 +443,17 @@ public final class Schema
         assert keyspace != null;
         assert table != null;
 
-        KeyspaceMetadata ksm = keyspaces.getNullable(keyspace);
+        KeyspaceMetadata ksm = getKeyspaceMetadata(keyspace);
         return ksm == null
              ? null
              : ksm.getTableOrViewNullable(table);
     }
 
+    @Nullable
     public TableMetadata getTableMetadata(TableId id)
     {
-        return keyspaces.getTableOrViewNullable(id);
+        TableMetadata table = keyspaces.getTableOrViewNullable(id);
+        return null != table ? table : virtualKeyspaces.getTableMetadataNullable(id);
     }
 
     public TableMetadata validateTable(String keyspaceName, String tableName)
@@ -442,7 +461,7 @@ public final class Schema
         if (tableName.isEmpty())
             throw new InvalidRequestException("non-empty table is required");
 
-        KeyspaceMetadata keyspace = keyspaces.getNullable(keyspaceName);
+        KeyspaceMetadata keyspace = getKeyspaceMetadata(keyspaceName);
         if (keyspace == null)
             throw new KeyspaceNotDefinedException(format("keyspace %s does not exist", keyspaceName));
 
@@ -451,11 +470,6 @@ public final class Schema
             throw new InvalidRequestException(format("table %s does not exist", tableName));
 
         return metadata;
-    }
-
-    public TableMetadata getTableMetadata(Descriptor descriptor)
-    {
-        return getTableMetadata(descriptor.ksname, descriptor.cfname);
     }
 
     /**
@@ -577,6 +591,24 @@ public final class Schema
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
         merge(before, after);
         updateVersionAndAnnounce();
+    }
+
+    @Nullable
+    public VirtualKeyspace getVirtualKeyspaceNullable(String name)
+    {
+        return virtualKeyspaces.getKeyspaceNullable(name);
+    }
+
+    @Nullable
+    public VirtualTable getVirtualTableNullable(TableMetadata metadata)
+    {
+        return getVirtualTableNullable(metadata.id);
+    }
+
+    @Nullable
+    public VirtualTable getVirtualTableNullable(TableId id)
+    {
+        return virtualKeyspaces.getTableNullable(id);
     }
 
     /**

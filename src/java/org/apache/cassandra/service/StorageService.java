@@ -3456,12 +3456,18 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     }
 
-    private Keyspace getValidKeyspace(String keyspaceName) throws IOException
+    private void verifyKeyspaceIsValid(String keyspaceName)
     {
+        if (null != Schema.instance.getVirtualKeyspaceNullable(keyspaceName))
+            throw new IllegalArgumentException("Cannot perform any operations against virtual keyspace " + keyspaceName);
+
         if (!Schema.instance.getKeyspaces().contains(keyspaceName))
-        {
-            throw new IOException("Keyspace " + keyspaceName + " does not exist");
-        }
+            throw new IllegalArgumentException("Keyspace " + keyspaceName + " does not exist");
+    }
+
+    private Keyspace getValidKeyspace(String keyspaceName)
+    {
+        verifyKeyspaceIsValid(keyspaceName);
         return Keyspace.open(keyspaceName);
     }
 
@@ -4787,6 +4793,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public void truncate(String keyspace, String table) throws TimeoutException, IOException
     {
+        verifyKeyspaceIsValid(keyspace);
+
         try
         {
             StorageProxy.truncateBlocking(keyspace, table);
@@ -5244,6 +5252,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     @Deprecated
     public void loadNewSSTables(String ksName, String cfName)
     {
+        verifyKeyspaceIsValid(ksName);
         ColumnFamilyStore.loadNewSSTables(ksName, cfName, null, true, false, false, false, false, false);
     }
 
