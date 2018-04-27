@@ -692,6 +692,9 @@ class Shell(cmd.Cmd):
         return self.conn.metadata.partitioner
 
     def get_keyspace_meta(self, ksname):
+        # TODO remove after system_schema.virtual_tables added in connection metadata
+        if ksname == 'system_view':
+            return self.get_system_view();
         if ksname not in self.conn.metadata.keyspaces:
             raise KeyspaceNotFound('Keyspace %r not found.' % ksname)
         return self.conn.metadata.keyspaces[ksname]
@@ -707,7 +710,6 @@ class Shell(cmd.Cmd):
         if ksname is None:
             ksname = self.current_keyspace
         ksmeta = self.get_keyspace_meta(ksname)
-
         if tablename not in ksmeta.tables:
             if ksname == 'system_auth' and tablename in ['roles', 'role_permissions']:
                 self.get_fake_auth_table_meta(ksname, tablename)
@@ -715,6 +717,18 @@ class Shell(cmd.Cmd):
                 raise ColumnFamilyNotFound("Column family %r not found" % tablename)
         else:
             return ksmeta.tables[tablename]
+
+    def get_system_view(self):
+        ks_meta = KeyspaceMetadata('system_view', True, None, None)
+        result = self.session.execute('SELECT * FROM system_schema.virtual_tables')
+        for table in result:
+            table_meta = TableMetadata(ks_meta, table['table_name'])
+            for column, type in table['columns'].iteritems():
+                table_meta.columns[column] = ColumnMetadata(table_meta, column, type)
+            table_meta.partition_key = map(lambda c: table_meta.columns[c], table['partition_key'])
+            table_meta.clustering_key = map(lambda c: table_meta.columns[c], table['clustering_columns'])
+            ks_meta.tables[table['table_name']] = table_meta
+        return ks_meta
 
     def get_fake_auth_table_meta(self, ksname, tablename):
         # may be using external auth implementation so internal tables

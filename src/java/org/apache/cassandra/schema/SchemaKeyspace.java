@@ -24,6 +24,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Preconditions;
 import com.google.common.collect.*;
 import com.google.common.collect.Maps;
 import com.google.common.hash.Hasher;
@@ -76,6 +77,7 @@ public final class SchemaKeyspace
     public static final String DROPPED_COLUMNS = "dropped_columns";
     public static final String TRIGGERS = "triggers";
     public static final String VIEWS = "views";
+    public static final String VIRTUAL_TABLES = "virtual_tables";
     public static final String TYPES = "types";
     public static final String FUNCTIONS = "functions";
     public static final String AGGREGATES = "aggregates";
@@ -136,7 +138,6 @@ public final class SchemaKeyspace
               + "read_repair_chance double," // no longer used, left for drivers' sake
               + "speculative_retry text,"
               + "cdc boolean,"
-              + "virtual_class text, "
               + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Columns =
@@ -174,6 +175,19 @@ public final class SchemaKeyspace
               + "trigger_name text,"
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
+
+    private static final TableMetadata VirtualTables =
+            parse(VIRTUAL_TABLES,
+                  "virtual table definitions",
+                  "CREATE TABLE %s ("
+                  + "keyspace_name text,"
+                  + "table_name text,"
+                  + "virtual_class text,"
+                  + "comment text,"
+                  + "columns frozen<map<text, text>>,"
+                  + "partition_key frozen<list<text>>,"
+                  + "clustering_columns frozen<list<text>>,"
+                  + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Views =
         parse(VIEWS,
@@ -254,7 +268,7 @@ public final class SchemaKeyspace
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
     private static final List<TableMetadata> ALL_TABLE_METADATA =
-        ImmutableList.of(Keyspaces, Tables, Columns, Triggers, DroppedColumns, Views, Types, Functions, Aggregates, Indexes);
+        ImmutableList.of(Keyspaces, Tables, Columns, Triggers, VirtualTables, DroppedColumns, Views, Types, Functions, Aggregates, Indexes);
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -446,7 +460,13 @@ public final class SchemaKeyspace
     {
         Mutation.SimpleBuilder builder = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
 
-        keyspace.tables.forEach(table -> addTableToSchemaMutation(table, true, builder));
+        keyspace.tables.forEach(table ->
+        {
+            if (table.isVirtual())
+                addVirtualTableToSchemaMutation(Schema.instance.getVirtualTable(table), builder);
+            else
+                addTableToSchemaMutation(table, true, builder);
+        });
         keyspace.views.forEach(view -> addViewToSchemaMutation(view, true, builder));
         keyspace.types.forEach(type -> addTypeToSchemaMutation(type, builder));
         keyspace.functions.udfs().forEach(udf -> addFunctionToSchemaMutation(udf, builder));
@@ -500,13 +520,12 @@ public final class SchemaKeyspace
 
     static void addTableToSchemaMutation(TableMetadata table, boolean withColumnsAndTriggers, Mutation.SimpleBuilder builder)
     {
+        Preconditions.checkArgument(!table.isVirtual());
+
         Row.SimpleBuilder rowBuilder = builder.update(Tables)
                                               .row(table.name)
                                               .add("id", table.id.asUUID())
                                               .add("flags", TableMetadata.Flag.toStringSet(table.flags));
-
-        if (table.isVirtual())
-            rowBuilder.add("virtual_class", table.virtualClass().getName());
 
         addTableParamsToRowBuilder(table.params, rowBuilder);
 
@@ -696,6 +715,22 @@ public final class SchemaKeyspace
         builder.update(Triggers)
                .row(table.name, trigger.name)
                .add("options", Collections.singletonMap("class", trigger.classOption));
+    }
+
+    private static void addVirtualTableToSchemaMutation(VirtualTable virtual, Mutation.SimpleBuilder builder)
+    {
+        TableMetadata table = virtual.metadata;
+        builder.update(VirtualTables)
+                .row(table.name)
+                .add("virtual_class", virtual.getClass().getCanonicalName())
+                .add("comment", table.params.comment)
+                .add("partition_key", virtual.schema().key)
+                .add("columns", virtual.schema().definitions.entrySet().stream()
+                        .collect(Collectors.toMap(
+                                e -> e.getKey(),
+                                e -> e.getValue().toString())
+                        ))
+                .add("clustering_columns", virtual.schema().clustering);
     }
 
     private static void dropTriggerFromSchemaMutation(TableMetadata table, TriggerMetadata trigger, Mutation.SimpleBuilder builder)
@@ -995,9 +1030,6 @@ public final class SchemaKeyspace
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
                             .indexes(fetchIndexes(keyspaceName, tableName))
                             .triggers(fetchTriggers(keyspaceName, tableName));
-        if (row.has("virtual_class"))
-            tmd = tmd.virtualClass(row.getString("virtual_class"));
-
         return tmd.build();
     }
 

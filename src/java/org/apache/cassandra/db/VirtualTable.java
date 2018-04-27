@@ -43,7 +43,7 @@ import com.google.common.collect.Lists;
 public abstract class VirtualTable
 {
     public final static ConcurrentHashMap<String, VirtualSchema> schemas = new ConcurrentHashMap<>();
-    protected final TableMetadata metadata;
+    public final TableMetadata metadata;
     protected String keyspace;
     protected String name;
 
@@ -74,6 +74,11 @@ public abstract class VirtualTable
     public boolean allowFiltering()
     {
         return true;
+    }
+
+    public VirtualSchema schema()
+    {
+        return getSchema(this.getClass().getCanonicalName());
     }
 
     /**
