@@ -291,6 +291,7 @@ public class ByteOrderedPartitioner implements IPartitioner
         {
             for (TableMetadata cfmd : Schema.instance.getTablesAndViews(ks))
             {
+                if (cfmd.isVirtual()) continue;
                 for (Range<Token> r : sortedRanges)
                 {
                     // Looping over every KS:CF:Range, get the splits size and add it to the count
