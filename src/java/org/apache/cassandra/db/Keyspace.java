@@ -391,12 +391,6 @@ public class Keyspace
     // best invoked on the compaction mananger.
     public void dropCf(TableId tableId)
     {
-        if (virtualColumnFamilyStores.containsKey(tableId))
-        {
-            virtualColumnFamilyStores.remove(tableId);
-            return;
-        }
-
         assert columnFamilyStores.containsKey(tableId);
         ColumnFamilyStore cfs = columnFamilyStores.remove(tableId);
         if (cfs == null)

@@ -71,8 +71,7 @@ public class VirtualTableTest extends CQLTester
     @BeforeClass
     public static void setup()
     {
-        String cql = "CREATE TABLE USING 'org.apache.cassandra.db.VirtualTableTestImpl' system_view.vtable";
-        TableMetadata.Builder b = CreateTableStatement.parse(cql, SchemaConstants.SYSTEM_VIEW_NAME);
+        TableMetadata.Builder b = VirtualTable.createMetadata("system_view", "vtable", VirtualTableTestImpl.class);
         metadata = b.build();
         assertTrue(metadata.isVirtual());
         table = new VirtualTableTestImpl(metadata);

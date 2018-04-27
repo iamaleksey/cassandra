@@ -56,7 +56,6 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
     private boolean isDense;
     private boolean isCompound;
-    private boolean isVirtual;
     private boolean hasCounters;
 
     // use a TreeMap to preserve ordering across JDK versions (see CASSANDRA-9492)
@@ -66,7 +65,6 @@ public class CreateTableStatement extends SchemaAlteringStatement
     private final TableParams params;
     private final boolean ifNotExists;
     private final TableId id;
-    private final String klass;
 
     public CreateTableStatement(CFName name, TableParams params, boolean ifNotExists, Set<ColumnIdentifier> staticColumns, TableId id)
     {
@@ -75,29 +73,11 @@ public class CreateTableStatement extends SchemaAlteringStatement
         this.ifNotExists = ifNotExists;
         this.staticColumns = staticColumns;
         this.id = id;
-        this.isVirtual = false;
-        this.klass = null;
-    }
-
-    public CreateTableStatement(CFName name, TableParams params, boolean ifNotExists, boolean isVirtual, Set<ColumnIdentifier> staticColumns, TableId id, String klass)
-    {
-        super(name);
-        this.params = params;
-        this.ifNotExists = ifNotExists;
-        this.staticColumns = staticColumns;
-        this.id = id;
-        this.isVirtual = isVirtual;
-        this.klass = klass;
-        Preconditions.checkArgument(isVirtual || klass == null);
     }
 
     public void checkAccess(ClientState state) throws UnauthorizedException, InvalidRequestException
     {
         state.hasKeyspaceAccess(keyspace(), Permission.CREATE);
-        if (isVirtual)
-        {
-            throw new InvalidRequestException("Virtual tables are in beta and creating them is currently disabled with this version of Cassandra.");
-        }
     }
 
     public void validate(ClientState state)
@@ -160,9 +140,6 @@ public class CreateTableStatement extends SchemaAlteringStatement
                .isView(false)
                .params(params);
 
-        if (isVirtual)
-            builder.virtualClass(klass);
-
         for (int i = 0; i < keyAliases.size(); i++)
             builder.addPartitionKeyColumn(keyAliases.get(i), keyTypes.get(i));
 
@@ -224,27 +201,11 @@ public class CreateTableStatement extends SchemaAlteringStatement
         private final Multiset<ColumnIdentifier> definedNames = HashMultiset.create(1);
 
         private final boolean ifNotExists;
-        private final boolean isVirtual;
-        private final String klass;
 
         public RawStatement(CFName name, boolean ifNotExists)
         {
             super(name);
             this.ifNotExists = ifNotExists;
-            this.isVirtual = false;
-            this.klass = null;
-
-            Preconditions.checkArgument(isVirtual == (klass != null));
-        }
-
-        public RawStatement(CFName name, boolean ifNotExists, boolean isVirtual, String klass)
-        {
-            super(name);
-            this.ifNotExists = ifNotExists;
-            this.isVirtual = isVirtual;
-            this.klass = klass;
-
-            Preconditions.checkArgument(isVirtual == (klass != null));
         }
 
         /**
@@ -274,28 +235,7 @@ public class CreateTableStatement extends SchemaAlteringStatement
 
             TableParams params = properties.properties.asNewTableParams();
 
-            CreateTableStatement stmt = new CreateTableStatement(cfName, params, ifNotExists, isVirtual, staticColumns, properties.properties.getId(), klass);
-
-            if (isVirtual)
-            {
-                VirtualTable.classFromName(klass); // make sure class has been loaded
-                VirtualTable.VirtualSchema keyDef = VirtualTable.getSchema(klass);
-                if (keyDef == null)
-                    throw new IllegalArgumentException("Virtual table "+ klass + " must register its definitions and keys");
-                for (Map.Entry<String, CQL3Type> e : keyDef.definitions.entrySet())
-                {
-                    definitions.put(ColumnIdentifier.getInterned(e.getKey(), true), CQL3Type.Raw.from(e.getValue()));
-                }
-
-                List<ColumnIdentifier> pkey = keyDef.key.stream()
-                        .map(s -> ColumnIdentifier.getInterned(s, false))
-                        .collect(Collectors.toList());
-                List<ColumnIdentifier> ckey = keyDef.clustering.stream()
-                        .map(s -> ColumnIdentifier.getInterned(s, false))
-                        .collect(Collectors.toList());
-                keyAliases.add(pkey);
-                columnAliases.addAll(ckey);
-            }
+            CreateTableStatement stmt = new CreateTableStatement(cfName, params, ifNotExists, staticColumns, properties.properties.getId());
 
             for (Map.Entry<ColumnIdentifier, CQL3Type.Raw> entry : definitions.entrySet())
             {

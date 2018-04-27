@@ -22,6 +22,7 @@ import static java.lang.String.format;
 import java.util.List;
 
 import org.apache.cassandra.cql3.statements.CreateTableStatement;
+import org.apache.cassandra.db.VirtualTable;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -44,21 +45,17 @@ public class SystemViewKeyspace
     public static final String RING_STATE = "ring_state";
     public static final String COMPACTION = "compaction_stats";
 
-    private static final TableMetadata Settings = parse(SETTINGS,
-            "Current Settings",
-            "CREATE TABLE USING Settings %s");
+    private static final TableMetadata Settings = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, SETTINGS, Settings.class)
+            .comment("Current configration settings").build();
 
-    private static final TableMetadata TableMetrics = parse(TABLE_METRICS,
-            "Table Metrics",
-            "CREATE TABLE USING TableStats %s");
+    private static final TableMetadata TableMetrics = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, TABLE_METRICS, TableStats.class)
+            .comment("Table Metrics").build();
 
-    private static final TableMetadata RingState = parse(RING_STATE,
-            "Ring State",
-            "CREATE TABLE USING RingState %s");
+    private static final TableMetadata RingState = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, RING_STATE, RingState.class)
+            .comment("Current configration settings").build();
 
-    private static final TableMetadata Compactions = parse(COMPACTION,
-            "Compaction State",
-            "CREATE TABLE USING CompactionStats %s");
+    private static final TableMetadata Compactions = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, COMPACTION, CompactionStats.class)
+            .comment("Compaction State").build();
 
     private static final List<TableMetadata> ALL_TABLE_METADATA =
             ImmutableList.of(Settings, TableMetrics, RingState, Compactions);

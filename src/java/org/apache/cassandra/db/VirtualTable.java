@@ -19,11 +19,15 @@ package org.apache.cassandra.db;
 
 import static java.lang.String.format;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 import org.apache.cassandra.cql3.CQL3Type;
+import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.filter.DataLimits;
@@ -31,6 +35,8 @@ import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.ColumnMetadata.Kind;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -73,7 +79,7 @@ public abstract class VirtualTable
      */
     public boolean allowFiltering()
     {
-        return true;
+        return false;
     }
 
     public VirtualSchema schema()
@@ -126,6 +132,38 @@ public abstract class VirtualTable
         }
 
         return strategyClass;
+    }
+
+    public static TableMetadata.Builder createMetadata(String keyspace, String table, Class<? extends VirtualTable> klass)
+    {
+        String className = klass.getCanonicalName();
+        VirtualTable.classFromName(className); // make sure class has been loaded
+        VirtualTable.VirtualSchema keyDef = VirtualTable.getSchema(className);
+        if (keyDef == null)
+            throw new IllegalArgumentException("Virtual table "+ klass + " must register its definitions and keys");
+
+        TableMetadata.Builder builder = TableMetadata.builder(keyspace, table);
+        for (Entry<String, CQL3Type> e : keyDef.definitions.entrySet())
+        {
+            int position = -1;
+            Kind kind;
+            if (keyDef.key.contains(e.getKey()))
+            {
+                kind = Kind.PARTITION_KEY;
+                position = keyDef.key.indexOf(e.getKey());
+            }
+            else if (keyDef.clustering.contains(e.getKey()))
+            {
+                kind = Kind.CLUSTERING;
+                position = keyDef.clustering.indexOf(e.getKey());
+            }
+            else
+                kind = Kind.REGULAR;
+            builder.addColumn(new ColumnMetadata(keyspace, table,ColumnIdentifier.getInterned(e.getKey(), false), e.getValue().getType(), position, kind));
+        }
+        builder.virtualClass(className);
+
+        return builder;
     }
 
     public static VirtualSchema getSchema(String className)
