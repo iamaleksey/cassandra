@@ -291,11 +291,6 @@ public abstract class ModificationStatement implements CQLStatement
         return operations.staticOperations();
     }
 
-    public List<Operation> getVirtualOperations()
-    {
-        return operations.virtualOperations();
-    }
-
     public Iterable<Operation> allOperations()
     {
         return operations;

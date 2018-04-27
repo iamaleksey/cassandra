@@ -112,7 +112,7 @@ public class UpdateStatement extends ModificationStatement
         {
             params.newRow(clustering);
             VirtualTable t = Schema.instance.getVirtualTable(params.metadata);
-            for (Operation op : getVirtualOperations()) {
+            for (Operation op : allOperations()) {
                 if (t.writable())
                 {
                     op.execute(updateBuilder.partitionKey(), params);
@@ -191,7 +191,7 @@ public class UpdateStatement extends ModificationStatement
                 {
                     Operation operation = new Operation.SetValue(value).prepare(metadata, def);
                     operation.collectMarkerSpecification(boundNames);
-                    operations.add(operation, metadata.isVirtual());
+                    operations.add(operation);
                 }
             }
 
@@ -259,7 +259,7 @@ public class UpdateStatement extends ModificationStatement
                 {
                     Operation operation = new Operation.SetValue(raw).prepare(metadata, def);
                     operation.collectMarkerSpecification(boundNames);
-                    operations.add(operation, metadata.isVirtual());
+                    operations.add(operation);
                 }
             }
 
@@ -327,7 +327,7 @@ public class UpdateStatement extends ModificationStatement
 
                 Operation operation = entry.right.prepare(metadata, def);
                 operation.collectMarkerSpecification(boundNames);
-                operations.add(operation, metadata.isVirtual());
+                operations.add(operation);
             }
 
             StatementRestrictions restrictions = newRestrictions(metadata,

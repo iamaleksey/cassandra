@@ -47,11 +47,6 @@ public final class Operations implements Iterable<Operation>
      */
     private final List<Operation> staticOperations = new ArrayList<>();
 
-    /**
-     * The operations on virtual columns
-     */
-    private final List<Operation> virtualOperations = new ArrayList<>();
-
     public Operations(StatementType type)
     {
         this.type = type;
@@ -99,23 +94,12 @@ public final class Operations implements Iterable<Operation>
     }
 
     /**
-     * Returns the operation on virtual columns
-     * @return the operation on virtual columns
-     */
-    public List<Operation> virtualOperations()
-    {
-        return virtualOperations;
-    }
-
-    /**
      * Adds the specified <code>Operation</code> to this set of operations.
      * @param operation the operation to add
      */
-    public void add(Operation operation, boolean isVirtual)
+    public void add(Operation operation)
     {
-        if (isVirtual)
-            virtualOperations.add(operation);
-        else if (operation.column.isStatic())
+        if (operation.column.isStatic())
             staticOperations.add(operation);
         else
             regularOperations.add(operation);

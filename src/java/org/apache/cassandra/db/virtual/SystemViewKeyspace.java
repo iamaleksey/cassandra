@@ -17,16 +17,12 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import static java.lang.String.format;
-
 import java.util.List;
 
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.db.VirtualTable;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.SchemaConstants;
-import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Tables;
 import org.slf4j.Logger;
@@ -45,27 +41,16 @@ public class SystemViewKeyspace
     public static final String RING_STATE = "ring_state";
     public static final String COMPACTION = "compaction_stats";
 
-    private static final TableMetadata Settings = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, SETTINGS, Settings.class)
-            .comment("Current configration settings").build();
+    private static final TableMetadata Settings = create(SETTINGS, Settings.class, "Current configration settings");
+    private static final TableMetadata RingState = create(RING_STATE, RingState.class,"Current configration settings");
+    private static final TableMetadata Compactions = create(COMPACTION, CompactionStats.class, "Compaction State");
 
-    private static final TableMetadata TableMetrics = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, TABLE_METRICS, TableStats.class)
-            .comment("Table Metrics").build();
+    private static final List<TableMetadata> ALL_TABLE_METADATA = ImmutableList.of(Settings, RingState, Compactions);
 
-    private static final TableMetadata RingState = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, RING_STATE, RingState.class)
-            .comment("Current configration settings").build();
-
-    private static final TableMetadata Compactions = VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, COMPACTION, CompactionStats.class)
-            .comment("Compaction State").build();
-
-    private static final List<TableMetadata> ALL_TABLE_METADATA =
-            ImmutableList.of(Settings, TableMetrics, RingState, Compactions);
-
-    private static TableMetadata parse(String table, String description, String cql)
+    private static TableMetadata create(String table, Class<? extends VirtualTable> klass, String comment)
     {
-        return CreateTableStatement.parse(format(cql, table), SchemaConstants.SYSTEM_VIEW_NAME)
-                .id(TableId.forSystemTable(SchemaConstants.SYSTEM_VIEW_NAME, table))
-                .comment(description)
-                .build();
+        return VirtualTable.createMetadata(SchemaConstants.SYSTEM_VIEW_NAME, table, klass)
+                .comment(comment).build();
     }
 
     public static KeyspaceMetadata metadata()
