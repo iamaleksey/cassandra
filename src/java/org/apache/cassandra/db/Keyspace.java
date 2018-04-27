@@ -483,7 +483,7 @@ public class Keyspace
 
         if (virtualColumnFamilyStore == null)
         {
-            VirtualTable vtable = TableMetadata.createVirtualColumnFamilyInstance(metadata);
+            VirtualTable vtable = TableMetadata.createVirtualTableInstance(metadata);
             Schema.instance.putVirtualTable(metadata, vtable);
             VirtualTable oldCfs = virtualColumnFamilyStores.putIfAbsent(metadata.id, vtable);
             if (oldCfs != null)

@@ -258,9 +258,7 @@ public final class TableMetadata
 
     public Class<? extends VirtualTable> virtualClass()
     {
-        String className = virtualKlass.contains(".")
-                ? virtualKlass
-                : "org.apache.cassandra.db.virtual." + virtualKlass;
+        String className = VirtualTable.getFullClassName(virtualKlass);
         Class<VirtualTable> strategyClass = FBUtilities.classForName(className, "virtual table");
 
         if (!VirtualTable.class.isAssignableFrom(strategyClass))
@@ -571,7 +569,7 @@ public final class TableMetadata
         return unbuild().params(builder.build()).build();
     }
 
-    public static VirtualTable createVirtualColumnFamilyInstance(TableMetadata cfm)
+    public static VirtualTable createVirtualTableInstance(TableMetadata cfm)
     {
         try
         {

@@ -97,7 +97,7 @@ public final class SchemaKeyspace
      * See CASSANDRA-12213 for more details.
      */
     public static final ImmutableList<String> ALL =
-        ImmutableList.of(COLUMNS, DROPPED_COLUMNS, TRIGGERS, TYPES, FUNCTIONS, AGGREGATES, INDEXES, TABLES, VIEWS, KEYSPACES);
+        ImmutableList.of(COLUMNS, DROPPED_COLUMNS, TRIGGERS, VIRTUAL_TABLES, TYPES, FUNCTIONS, AGGREGATES, INDEXES, TABLES, VIEWS, KEYSPACES);
 
     /**
      * The tables to which we added the cdc column. This is used in {@link #makeUpdateForSchema} below to make sure we skip that
@@ -463,7 +463,9 @@ public final class SchemaKeyspace
         keyspace.tables.forEach(table ->
         {
             if (table.isVirtual())
-                addVirtualTableToSchemaMutation(Schema.instance.getVirtualTable(table), builder);
+            {
+                addVirtualTableToSchemaMutation(TableMetadata.createVirtualTableInstance(table), builder);
+            }
             else
                 addTableToSchemaMutation(table, true, builder);
         });
