@@ -90,11 +90,11 @@ public abstract class SystemView extends VirtualTable
     public ReadQuery getQuery(SelectStatement selectStatement, QueryOptions options, DataLimits limits, int nowInSec)
     {
         ColumnFilter columnFilter = selectStatement.getSelection().newSelectors(options).getColumnFilter();
-        ClusteringIndexFilter clusteringFilter = selectStatement.makeClusteringIndexFilter(options, columnFilter);
+        // ClusteringIndexFilter clusteringFilter = selectStatement.makeClusteringIndexFilter(options, columnFilter);
         AbstractBounds<PartitionPosition> keyBounds = selectStatement.getRestrictions().getPartitionKeyBounds(options);
         if (keyBounds == null)
-            return ReadQuery.EMPTY;
-        return new SystemViewReadCommand(selectStatement, options, limits, nowInSec, null);
+            return ReadQuery.empty(metadata);
+        return new SystemViewReadCommand(selectStatement, options, limits, columnFilter, nowInSec, null);
     }
 
     public class SystemViewReadCommand implements ReadQuery
@@ -102,17 +102,21 @@ public abstract class SystemView extends VirtualTable
         public final SelectStatement selectStatement;
         public final StatementRestrictions restrictions;
         public final QueryOptions options;
+        public final RowFilter rowFilter;
         public final int nowInSec;
         public final TableMetadata metadata;
         public final DataLimits limits;
+        public final ColumnFilter columnFilter;
         private PagingState state = null;
 
-        public SystemViewReadCommand(SelectStatement selectStatement, QueryOptions options, DataLimits limits, int nowInSec, PagingState state)
+        SystemViewReadCommand(SelectStatement selectStatement, QueryOptions options, DataLimits limits, ColumnFilter columnFilter, int nowInSec, PagingState state)
         {
             this.selectStatement = selectStatement;
             this.metadata = selectStatement.table;
             this.options = options;
+            this.rowFilter = selectStatement.getRowFilter(options);
             this.limits = limits;
+            this.columnFilter = columnFilter;
             this.nowInSec = nowInSec;
             this.restrictions = selectStatement.getRestrictions();
             this.state = state;
@@ -120,14 +124,18 @@ public abstract class SystemView extends VirtualTable
 
         public SystemViewReadCommand withUpdatedLimits(DataLimits newLimits)
         {
-            return new SystemViewReadCommand(selectStatement, options, newLimits, nowInSec, state);
+            return new SystemViewReadCommand(selectStatement, options, newLimits, columnFilter, nowInSec, state);
         }
 
         public SystemViewReadCommand withUpdatedLimitsAndState(DataLimits newLimits, PagingState state)
         {
-            return new SystemViewReadCommand(selectStatement, options, newLimits, nowInSec, state);
+            return new SystemViewReadCommand(selectStatement, options, newLimits, columnFilter, nowInSec, state);
         }
 
+        public TableMetadata metadata()
+        {
+            return metadata;
+        }
 
         public ReadExecutionController executionController()
         {
@@ -157,11 +165,7 @@ public abstract class SystemView extends VirtualTable
         public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
         {
             ResultIterator readState = new ResultIterator(selectStatement, limits, options, fetch(options), state);
-            return limits.filter(selectStatement
-                    .getRestrictions()
-                    .getRowFilter(null, options)
-                    .filter(readState, nowInSec),
-                    nowInSec, false);
+            return limits.filter(rowFilter.filter(readState, nowInSec), nowInSec, false);
         }
 
         public DataLimits limits()
@@ -186,10 +190,25 @@ public abstract class SystemView extends VirtualTable
             return false;
         }
 
+        public int nowInSec()
+        {
+            return nowInSec;
+        }
+
         /* used for views */
         public boolean selectsFullPartition()
         {
             return false;
+        }
+
+        public RowFilter rowFilter()
+        {
+            return rowFilter;
+        }
+
+        public ColumnFilter columnFilter()
+        {
+            return columnFilter;
         }
     }
 

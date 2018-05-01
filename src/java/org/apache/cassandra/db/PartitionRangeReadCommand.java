@@ -53,7 +53,7 @@ import org.apache.cassandra.utils.FBUtilities;
 /**
  * A read command that selects a (part of a) range of partitions.
  */
-public class PartitionRangeReadCommand extends ReadCommand
+public class PartitionRangeReadCommand extends ReadCommand implements PartitionRangeReadQuery
 {
     protected static final SelectionDeserializer selectionDeserializer = new Deserializer();
 
@@ -187,7 +187,8 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              indexMetadata());
     }
 
-    public ReadCommand withUpdatedLimit(DataLimits newLimits)
+    @Override
+    public PartitionRangeReadCommand withUpdatedLimit(DataLimits newLimits)
     {
         return new PartitionRangeReadCommand(isDigestQuery(),
                                              digestVersion(),
@@ -200,6 +201,7 @@ public class PartitionRangeReadCommand extends ReadCommand
                                              indexMetadata());
     }
 
+    @Override
     public PartitionRangeReadCommand withUpdatedLimitsAndDataRange(DataLimits newLimits, DataRange newDataRange)
     {
         return new PartitionRangeReadCommand(isDigestQuery(),
@@ -218,32 +220,9 @@ public class PartitionRangeReadCommand extends ReadCommand
         return DatabaseDescriptor.getRangeRpcTimeout();
     }
 
-    public boolean selectsKey(DecoratedKey key)
-    {
-        if (!dataRange().contains(key))
-            return false;
-
-        return rowFilter().partitionKeyRestrictionsAreSatisfiedBy(key, metadata().partitionKeyType);
-    }
-
-    public boolean selectsClustering(DecoratedKey key, Clustering clustering)
-    {
-        if (clustering == Clustering.STATIC_CLUSTERING)
-            return !columnFilter().fetchedColumns().statics.isEmpty();
-
-        if (!dataRange().clusteringIndexFilter(key).selects(clustering))
-            return false;
-        return rowFilter().clusteringKeyRestrictionsAreSatisfiedBy(clustering);
-    }
-
     public PartitionIterator execute(ConsistencyLevel consistency, ClientState clientState, long queryStartNanoTime) throws RequestExecutionException
     {
         return StorageProxy.getRangeSlice(this, consistency, queryStartNanoTime);
-    }
-
-    public QueryPager getPager(PagingState pagingState, ProtocolVersion protocolVersion)
-    {
-            return new PartitionRangeQueryPager(this, pagingState, protocolVersion);
     }
 
     protected void recordLatency(TableMetrics metric, long latencyNanos)
@@ -386,13 +365,6 @@ public class PartitionRangeReadCommand extends ReadCommand
         ColumnFamilyStore cfs = Keyspace.open(metadata().keyspace).getColumnFamilyStore(metadata().name);
         Index index = getIndex(cfs);
         return index == null ? result : index.postProcessorFor(this).apply(result, this);
-    }
-
-    @Override
-    public boolean selectsFullPartition()
-    {
-        return metadata().isStaticCompactTable() ||
-               (dataRange.selectsAllPartition() && !rowFilter().hasExpressionOnClusteringOrRegularColumns());
     }
 
     @Override

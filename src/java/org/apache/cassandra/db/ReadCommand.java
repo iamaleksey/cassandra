@@ -19,7 +19,6 @@ package org.apache.cassandra.db;
 
 import java.io.IOException;
 import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 
 import javax.annotation.Nullable;
 
@@ -170,28 +169,13 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
      */
     public abstract long getTimeout();
 
-    /**
-     * A filter on which (non-PK) columns must be returned by the query.
-     *
-     * @return which columns must be fetched by this query.
-     */
+    @Override
     public ColumnFilter columnFilter()
     {
         return columnFilter;
     }
 
-    /**
-     * Filters/Resrictions on CQL rows.
-     * <p>
-     * This contains the restrictions that are not directly handled by the
-     * {@code ClusteringIndexFilter}. More specifically, this includes any non-PK column
-     * restrictions and can include some PK columns restrictions when those can't be
-     * satisfied entirely by the clustering index filter (because not all clustering columns
-     * have been restricted for instance). If there is 2ndary indexes on the table,
-     * one of this restriction might be handled by a 2ndary index.
-     *
-     * @return the filter holding the expression that rows must satisfy.
-     */
+    @Override
     public RowFilter rowFilter()
     {
         return rowFilter;
@@ -327,9 +311,10 @@ public abstract class ReadCommand extends MonitorableImpl implements ReadQuery
      */
     public void maybeValidateIndex()
     {
-        Index index = getIndex(Keyspace.openAndGetStore(metadata));
         if (null != index)
-            index.validate(this);
+            Keyspace.openAndGetIndexRegistry(metadata)
+                    .getIndex(index)
+                    .validate(this);
     }
 
     /**
