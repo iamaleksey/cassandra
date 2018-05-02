@@ -31,7 +31,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.SystemView;
+import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.db.rows.Row;
@@ -46,7 +46,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableMap;
 
-final class SettingsTable extends SystemView
+final class SettingsTable extends SystemView2
 {
     private static final Logger logger = LoggerFactory.getLogger(SettingsTable.class);
 

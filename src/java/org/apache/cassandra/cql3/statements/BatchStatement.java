@@ -70,6 +70,8 @@ public class BatchStatement implements CQLStatement
     private final boolean updatesStaticRow;
     private final Attributes attrs;
     private final boolean hasConditions;
+    private final boolean updateSystemViews;
+
     private static final Logger logger = LoggerFactory.getLogger(BatchStatement.class);
 
     private static final String UNLOGGED_BATCH_WARNING = "Unlogged batch covering {} partitions detected " +
@@ -103,11 +105,13 @@ public class BatchStatement implements CQLStatement
         RegularAndStaticColumns.Builder conditionBuilder = RegularAndStaticColumns.builder();
         boolean updateRegular = false;
         boolean updateStatic = false;
+        boolean updateSystemViews = false;
 
         for (ModificationStatement stmt : statements)
         {
             regularBuilder.addAll(stmt.metadata(), stmt.updatedColumns());
             updateRegular |= stmt.updatesRegularRows();
+            updateSystemViews |= stmt.isVirtual();
             if (stmt.hasConditions())
             {
                 hasConditions = true;
@@ -121,6 +125,7 @@ public class BatchStatement implements CQLStatement
         this.updatesRegularRows = updateRegular;
         this.updatesStaticRow = updateStatic;
         this.hasConditions = hasConditions;
+        this.updateSystemViews = updateSystemViews;
     }
 
     public Iterable<org.apache.cassandra.cql3.functions.Function> getFunctions()
@@ -161,6 +166,9 @@ public class BatchStatement implements CQLStatement
         boolean hasCounters = false;
         boolean hasNonCounters = false;
 
+        boolean hasSystemViews = false;
+        boolean hasNonsystemViews = false;
+
         for (ModificationStatement statement : statements)
         {
             if (timestampSet && statement.isCounter())
@@ -175,14 +183,25 @@ public class BatchStatement implements CQLStatement
             if (isLogged() && statement.isCounter())
                 throw new InvalidRequestException("Cannot include a counter statement in a logged batch");
 
+            if (isLogged() && statement.isVirtual())
+                throw new InvalidRequestException("Cannot include a system view statement in a logged batch");
+
             if (statement.isCounter())
                 hasCounters = true;
             else
                 hasNonCounters = true;
+
+            if (statement.isVirtual())
+                hasSystemViews = true;
+            else
+                hasNonsystemViews = true;
         }
 
         if (hasCounters && hasNonCounters)
             throw new InvalidRequestException("Counter and non-counter mutations cannot exist in the same batch");
+
+        if (hasSystemViews && hasNonsystemViews)
+            throw new InvalidRequestException("System view and non system view mutations cannot exist in the same batch");
 
         if (hasConditions)
         {
@@ -351,9 +370,18 @@ public class BatchStatement implements CQLStatement
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
         if (hasConditions)
-            return executeWithConditions(options, queryState, queryStartNanoTime);
+        {
+            if (updateSystemViews)
+                return executeInternalWithConditions(options, queryState);
 
-        executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
+            return executeWithConditions(options, queryState, queryStartNanoTime);
+        }
+
+        if (updateSystemViews)
+            executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
+        else    
+            executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
+
         return new ResultMessage.Void();
     }
 
@@ -482,16 +510,21 @@ public class BatchStatement implements CQLStatement
 
     public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        if (hasConditions)
-            return executeInternalWithConditions(BatchQueryOptions.withoutPerStatementVariables(options), queryState);
+        BatchQueryOptions batchOptions = BatchQueryOptions.withoutPerStatementVariables(options);
 
-        executeInternalWithoutCondition(queryState, options, System.nanoTime());
+        if (hasConditions)
+        {
+
+            return executeInternalWithConditions(batchOptions, queryState);
+        }
+
+        executeInternalWithoutCondition(queryState, batchOptions, System.nanoTime());
         return new ResultMessage.Void();
     }
 
-    private ResultMessage executeInternalWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
+    private ResultMessage executeInternalWithoutCondition(QueryState queryState, BatchQueryOptions batchOptions, long queryStartNanoTime) throws RequestValidationException, RequestExecutionException
     {
-        for (IMutation mutation : getMutations(BatchQueryOptions.withoutPerStatementVariables(options), true, queryState.getTimestamp(), queryStartNanoTime))
+        for (IMutation mutation : getMutations(batchOptions, true, queryState.getTimestamp(), queryStartNanoTime))
             mutation.apply();
         return null;
     }

@@ -29,7 +29,7 @@ import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 
-public class VirtualTableTestImpl extends SystemView
+public class VirtualTableTestImpl extends SystemView2
 {
     public List<Pair<DecoratedKey, Row>> inserts = new ArrayList<>();
 

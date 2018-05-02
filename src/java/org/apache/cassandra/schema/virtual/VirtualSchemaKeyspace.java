@@ -21,7 +21,7 @@ import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView;
+import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -44,7 +44,7 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
         super(NAME, ImmutableList.of(new VirtualKeyspaces(NAME), new VirtualTables(NAME), new VirtualColumns(NAME)));
     }
 
-    private static final class VirtualKeyspaces extends SystemView
+    private static final class VirtualKeyspaces extends SystemView2
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
 
@@ -64,7 +64,7 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
         }
     }
 
-    private static final class VirtualTables extends SystemView
+    private static final class VirtualTables extends SystemView2
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
         private static final String TABLE_NAME = "table_name";
@@ -94,7 +94,7 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
         }
     }
 
-    private static final class VirtualColumns extends SystemView
+    private static final class VirtualColumns extends SystemView2
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
         private static final String TABLE_NAME = "table_name";

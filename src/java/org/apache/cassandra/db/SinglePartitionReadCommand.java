@@ -1016,6 +1016,29 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
      */
     public static class Group extends SinglePartitionReadQuery.Group<SinglePartitionReadCommand>
     {
+        public static Group create(TableMetadata metadata,
+                                   int nowInSec,
+                                   ColumnFilter columnFilter,
+                                   RowFilter rowFilter,
+                                   DataLimits limits,
+                                   List<DecoratedKey> partitionKeys,
+                                   ClusteringIndexFilter clusteringIndexFilter)
+        {
+            List<SinglePartitionReadCommand> commands = new ArrayList<>(partitionKeys.size());
+            for (DecoratedKey partitionKey : partitionKeys)
+            {
+                commands.add(SinglePartitionReadCommand.create(metadata,
+                                                               nowInSec,
+                                                               columnFilter,
+                                                               rowFilter,
+                                                               limits,
+                                                               partitionKey,
+                                                               clusteringIndexFilter));
+            }
+
+            return new Group(commands, limits);
+        }
+
         public Group(List<SinglePartitionReadCommand> commands, DataLimits limits)
         {
             super(commands, limits);

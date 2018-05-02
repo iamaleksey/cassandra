@@ -45,9 +45,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.StorageProxy;
-import org.apache.cassandra.service.pager.*;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.utils.FBUtilities;
 
 /**

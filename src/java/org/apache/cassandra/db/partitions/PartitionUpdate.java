@@ -427,9 +427,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     public void validateIndexedColumns()
     {
-        // FIXME: doesn't belong here
-        if (!metadata().isVirtual())
-            Keyspace.openAndGetStore(metadata()).indexManager.validate(this);
+        Keyspace.openAndGetIndexRegistry(metadata()).validate(this);
     }
 
     /**

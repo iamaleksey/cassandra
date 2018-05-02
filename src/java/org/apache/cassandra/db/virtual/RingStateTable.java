@@ -22,7 +22,7 @@ import java.util.Set;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView;
+import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -36,7 +36,7 @@ import static org.apache.cassandra.gms.ApplicationState.NATIVE_ADDRESS_AND_PORT;
 import static org.apache.cassandra.gms.ApplicationState.SCHEMA;
 import static org.apache.cassandra.gms.ApplicationState.STATUS_WITH_PORT;
 
-final class RingStateTable extends SystemView
+final class RingStateTable extends SystemView2
 {
     private static final String RPC_READY = "rpc_ready";
     private static final String HOST_ID = "host_id";

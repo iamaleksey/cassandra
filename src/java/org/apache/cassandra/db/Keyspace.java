@@ -216,11 +216,13 @@ public class Keyspace
         return Collections.unmodifiableCollection(columnFamilyStores.values());
     }
 
-    public ColumnFamilyStore getColumnFamilyStore(String cfName)
+    public ColumnFamilyStore getColumnFamilyStore(String tableName)
     {
-        TableMetadata table = Schema.instance.getTableMetadata(getName(), cfName);
+        TableMetadata table = Schema.instance.getTableMetadata(getName(), tableName);
         if (table == null)
-            throw new IllegalArgumentException(String.format("Unknown keyspace/cf pair (%s.%s)", getName(), cfName));
+            throw new IllegalArgumentException(String.format("Unknown keyspace/cf pair (%s.%s)", getName(), tableName));
+        if (table.isVirtual())
+            throw new IllegalArgumentException(String.format("The operation is not supported on system view (%s.%s)", getName(), tableName));
         return getColumnFamilyStore(table.id);
     }
 
@@ -347,6 +349,9 @@ public class Keyspace
         this.viewManager = new ViewManager(this);
         for (TableMetadata cfm : metadata.tablesAndViews())
         {
+            if (cfm.isVirtual())
+                continue;
+
             logger.trace("Initializing {}.{}", getName(), cfm.name);
             initCf(Schema.instance.getTableMetadataRef(cfm.id), loadSSTables);
         }
@@ -629,10 +634,17 @@ public class Keyspace
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
-                ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
+                TableMetadata table = upd.metadata();
+                if (table.isVirtual())
+                {
+                    SystemViewManager.get(table).apply(upd);
+                    continue;
+                }
+
+                ColumnFamilyStore cfs = columnFamilyStores.get(table.id);
                 if (cfs == null)
                 {
-                    logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
+                    logger.error("Attempting to mutate non-existant table {} ({}.{})", table.id, table.keyspace, table.name);
                     continue;
                 }
                 AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
@@ -642,13 +654,13 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
+                        viewManager.forTable(table.id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
                     }
                     catch (Throwable t)
                     {
                         JVMStabilityInspector.inspectThrowable(t);
                         logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s",
-                                                   upd.metadata().toString()), t);
+                                                   table.toString()), t);
                         throw t;
                     }
                 }

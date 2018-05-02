@@ -56,6 +56,7 @@ public class PaxosState
     public static PrepareResponse prepare(Commit toPrepare)
     {
         long start = System.nanoTime();
+        TableMetadata metadata = toPrepare.update.metadata();
         try
         {
             Lock lock = LOCKS.get(toPrepare.update.partitionKey());
@@ -68,7 +69,7 @@ public class PaxosState
                 // amount of re-submit will fix this (because the node on which the commit has expired will have a
                 // tombstone that hides any re-submit). See CASSANDRA-12043 for details.
                 int nowInSec = UUIDGen.unixTimestampInSec(toPrepare.ballot);
-                PaxosState state = SystemKeyspace.loadPaxosState(toPrepare.update.partitionKey(), toPrepare.update.metadata(), nowInSec);
+                PaxosState state = SystemKeyspace.loadPaxosState(toPrepare.update.partitionKey(), metadata, nowInSec);
                 if (toPrepare.isAfter(state.promised))
                 {
                     Tracing.trace("Promising ballot {}", toPrepare.ballot);
@@ -89,7 +90,8 @@ public class PaxosState
         }
         finally
         {
-            Keyspace.open(toPrepare.update.metadata().keyspace).getColumnFamilyStore(toPrepare.update.metadata().id).metric.casPrepare.addNano(System.nanoTime() - start);
+            if (!metadata.isVirtual())
+                Keyspace.open(metadata.keyspace).getColumnFamilyStore(metadata.id).metric.casPrepare.addNano(System.nanoTime() - start);
         }
 
     }

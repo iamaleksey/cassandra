@@ -22,7 +22,7 @@ import java.util.UUID;
 
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView;
+import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -30,7 +30,7 @@ import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 
-final class CompactionStatsTable extends SystemView
+final class CompactionStatsTable extends SystemView2
 {
     private final static String HOST_ID = "host_id";
     private final static String COMPACTION_ID = "compaction_id";
@@ -55,7 +55,7 @@ final class CompactionStatsTable extends SystemView
                            .build());
     }
 
-    public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+    public void read(StatementRestrictions restrictions, QueryOptions options, SystemView2.ResultBuilder result)
     {
         UUID hostId = StorageService.instance.getLocalHostUUID();
         for (Map<String, String> c : CompactionManager.instance.getCompactions())

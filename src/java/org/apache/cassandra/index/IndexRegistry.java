@@ -25,6 +25,8 @@ import java.util.Collections;
 import java.util.Optional;
 
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.IndexMetadata;
 
 /**
@@ -69,6 +71,11 @@ public interface IndexRegistry
         {
             return Optional.empty();
         }
+
+        @Override
+        public void validate(PartitionUpdate update)
+        {
+        }
     };
 
     void registerIndex(Index index);
@@ -78,4 +85,15 @@ public interface IndexRegistry
     Collection<Index> listIndexes();
 
     Optional<Index> getBestIndexFor(RowFilter.Expression expression);
+
+    /**
+     * Called at write time to ensure that values present in the update
+     * are valid according to the rules of all registered indexes which
+     * will process it. The partition key as well as the clustering and
+     * cell values for each row in the update may be checked by index
+     * implementations
+     *
+     * @param update PartitionUpdate containing the values to be validated by registered Index implementations
+     */
+    void validate(PartitionUpdate update);
 }

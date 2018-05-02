@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +36,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -174,6 +176,44 @@ public final class TableMetadata
                            : null;
 
         resource = DataResource.table(keyspace, name);
+    }
+
+    /**
+     * Creates the {@code TableMetadata} of a system view.
+     *
+     * @param table the view name
+     * @param comment view definition
+     * @param columns the view columns
+     * @return the {@code TableMetadata} of a system view.
+     */
+    public static TableMetadata ofSystemView(String table,
+                                             String comment,
+                                             ColumnMetadata... columns)
+    {
+        List<AbstractType<?>> types = Arrays.stream(columns)
+                                            .filter(ColumnMetadata::isPartitionKey)
+                                            .map(c -> c.type)
+                                            .collect(Collectors.toList());
+
+        AbstractType<?> partitionKeyType = types.size() == 1 ? types.get(0)
+                                                             : CompositeType.getInstance(types);
+
+        IPartitioner partitioner = new LocalPartitioner(partitionKeyType);
+
+        return TableMetadata.builder(SchemaConstants.SYSTEM_KEYSPACE_NAME, table)
+                            .id(TableId.forSystemTable(SchemaConstants.SYSTEM_KEYSPACE_NAME, table))
+                            .kind(Kind.VIRTUAL)
+                            .comment(comment)
+                            .addColumns(Arrays.asList(columns))
+                            .bloomFilterFpChance(1.0)
+                            .caching(CachingParams.CACHE_NOTHING)
+                            .gcGraceSeconds(0)
+                            .minIndexInterval(0)
+                            .maxIndexInterval(Integer.MAX_VALUE)
+                            .compression(CompressionParams.noCompression())
+                            .compaction(CompactionParams.NO_COMPACTION)
+                            .partitioner(partitioner)
+                            .build();
     }
 
     public static Builder builder(String keyspace, String table)

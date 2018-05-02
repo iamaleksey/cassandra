@@ -19,7 +19,7 @@ package org.apache.cassandra.service.pager;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.SystemView.SystemViewReadCommand;
+import org.apache.cassandra.db.SystemView2.SystemViewReadCommand;
 import org.apache.cassandra.db.filter.DataLimits;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.RequestExecutionException;

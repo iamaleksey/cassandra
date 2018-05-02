@@ -17,7 +17,10 @@
  */
 package org.apache.cassandra.db;
 
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.DataLimits;
+import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.pager.PagingState;
 import org.apache.cassandra.service.pager.PartitionRangeQueryPager;
 import org.apache.cassandra.service.pager.QueryPager;
@@ -28,6 +31,19 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public interface PartitionRangeReadQuery extends ReadQuery
 {
+    static ReadQuery create(TableMetadata table,
+                            int nowInSec,
+                            ColumnFilter columnFilter,
+                            RowFilter rowFilter,
+                            DataLimits limits,
+                            DataRange dataRange)
+    {
+        if (table.isVirtual())
+            return SystemViewPartitionRangeReadQuery.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
+
+        return PartitionRangeReadCommand.create(table, nowInSec, columnFilter, rowFilter, limits, dataRange);
+    }
+
     DataRange dataRange();
 
     /**
