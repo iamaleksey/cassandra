@@ -427,7 +427,7 @@ public class PartitionUpdate extends AbstractBTreePartition
 
     public void validateIndexedColumns()
     {
-        Keyspace.openAndGetStore(metadata()).indexManager.validate(this);
+        Keyspace.openAndGetIndexRegistry(metadata()).validate(this);
     }
 
     /**

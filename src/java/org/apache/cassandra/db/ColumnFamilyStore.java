@@ -64,11 +64,9 @@ import org.apache.cassandra.exceptions.StartupException;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.internal.CassandraIndex;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
-import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.io.FSReadError;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.sstable.CorruptSSTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.*;
@@ -616,6 +614,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public static void  scrubDataDirectories(TableMetadata metadata) throws StartupException
     {
+        if (metadata.isSystemView())
+            return;
+
         Directories directories = new Directories(metadata);
         Set<File> cleanedDirectories = new HashSet<>();
 
@@ -2769,7 +2770,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             return null;
 
         TableMetadata table = Schema.instance.getTableMetadata(ksName, cfName);
-        if (table == null)
+        if (table == null || table.isSystemView())
             return null;
 
         return keyspace.getColumnFamilyStore(table.id);
@@ -2777,7 +2778,8 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public static TableMetrics metricsFor(TableId tableId)
     {
-        return getIfExists(tableId).metric;
+        ColumnFamilyStore store = getIfExists(tableId);
+        return store == null ? null : store.metric;
     }
 
     public DiskBoundaries getDiskBoundaries()

@@ -45,6 +45,92 @@ import org.apache.cassandra.transport.ProtocolVersion;
  */
 public interface SinglePartitionReadQuery extends ReadQuery
 {
+    public static Group<? extends SinglePartitionReadQuery> createGroup(TableMetadata metadata,
+                                                                        int nowInSec,
+                                                                        ColumnFilter columnFilter,
+                                                                        RowFilter rowFilter,
+                                                                        DataLimits limits,
+                                                                        List<DecoratedKey> partitionKeys,
+                                                                        ClusteringIndexFilter clusteringIndexFilter)
+    {
+        if (metadata.isSystemView())
+            return SystemViewSinglePartitionReadQuery.Group.create(metadata,
+                                                                   nowInSec,
+                                                                   columnFilter,
+                                                                   rowFilter,
+                                                                   limits,
+                                                                   partitionKeys,
+                                                                   clusteringIndexFilter);
+
+        return SinglePartitionReadCommand.Group.create(metadata,
+                                                       nowInSec,
+                                                       columnFilter,
+                                                       rowFilter,
+                                                       limits,
+                                                       partitionKeys,
+                                                       clusteringIndexFilter);
+    }
+
+
+    /**
+     * Creates a new read query on a single partition.
+     *
+     * @param metadata the table to query.
+     * @param nowInSec the time in seconds to use are "now" for this query.
+     * @param key the partition key for the partition to query.
+     * @param columnFilter the column filter to use for the query.
+     * @param filter the clustering index filter to use for the query.
+     *
+     * @return a newly created read query. The returned query will use no row filter and have no limits.
+     */
+    public static SinglePartitionReadQuery create(TableMetadata metadata,
+                                                  int nowInSec,
+                                                  DecoratedKey key,
+                                                  ColumnFilter columnFilter,
+                                                  ClusteringIndexFilter filter)
+    {
+        return create(metadata, nowInSec, columnFilter, RowFilter.NONE, DataLimits.NONE, key, filter);
+    }
+
+    /**
+     * Creates a new read query on a single partition.
+     *
+     * @param metadata the table to query.
+     * @param nowInSec the time in seconds to use are "now" for this query.
+     * @param columnFilter the column filter to use for the query.
+     * @param rowFilter the row filter to use for the query.
+     * @param limits the limits to use for the query.
+     * @param partitionKey the partition key for the partition to query.
+     * @param clusteringIndexFilter the clustering index filter to use for the query.
+     *
+     * @return a newly created read query.
+     */
+    public static SinglePartitionReadQuery create(TableMetadata metadata,
+                                                  int nowInSec,
+                                                  ColumnFilter columnFilter,
+                                                  RowFilter rowFilter,
+                                                  DataLimits limits,
+                                                  DecoratedKey partitionKey,
+                                                  ClusteringIndexFilter clusteringIndexFilter)
+    {
+        if (metadata.isSystemView())
+            return SystemViewSinglePartitionReadQuery.create(metadata,
+                                                             nowInSec,
+                                                             columnFilter,
+                                                             rowFilter,
+                                                             limits,
+                                                             partitionKey,
+                                                             clusteringIndexFilter);
+
+        return SinglePartitionReadCommand.create(metadata,
+                                                 nowInSec,
+                                                 columnFilter,
+                                                 rowFilter,
+                                                 limits,
+                                                 partitionKey,
+                                                 clusteringIndexFilter);
+    }
+
     /**
      * Returns the key of the partition queried by this {@code ReadQuery}
      * @return the key of the partition queried

@@ -203,6 +203,11 @@ public abstract class ModificationStatement implements CQLStatement
         return metadata().isView();
     }
 
+    public boolean isSystemView()
+    {
+        return metadata().isSystemView();
+    }
+
     public long getTimestamp(long now, QueryOptions options) throws InvalidRequestException
     {
         return attrs.getTimestamp(now, options);
@@ -248,6 +253,7 @@ public abstract class ModificationStatement implements CQLStatement
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");
         checkFalse(isCounter() && attrs.isTimeToLiveSet(), "Cannot provide custom TTL for counter updates");
         checkFalse(isView(), "Cannot directly modify a materialized view");
+        checkFalse(metadata.isSystemView() && attrs.isTimeToLiveSet(), "TTLs are not supported on System Views");
     }
 
     public RegularAndStaticColumns updatedColumns()
@@ -440,6 +446,9 @@ public abstract class ModificationStatement implements CQLStatement
     private ResultMessage executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
+        if (metadata.isSystemView())
+            return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
+
         ConsistencyLevel cl = options.getConsistency();
         if (isCounter())
             cl.validateCounterForWrite(metadata());
@@ -456,6 +465,9 @@ public abstract class ModificationStatement implements CQLStatement
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
+        if (metadata.isSystemView())
+            return executeInternalWithCondition(queryState, options);
+
         CQL3CasRequest request = makeCasRequest(queryState, options);
 
         try (RowIterator result = StorageProxy.cas(keyspace(),
@@ -613,7 +625,7 @@ public abstract class ModificationStatement implements CQLStatement
     {
         UUID ballot = UUIDGen.getTimeUUIDFromMicros(state.getTimestamp());
 
-        SinglePartitionReadCommand readCommand = request.readCommand(FBUtilities.nowInSeconds());
+        SinglePartitionReadQuery readCommand = request.readCommand(FBUtilities.nowInSeconds());
         FilteredPartition current;
         try (ReadExecutionController executionController = readCommand.executionController();
              PartitionIterator iter = readCommand.executeInternal(executionController))

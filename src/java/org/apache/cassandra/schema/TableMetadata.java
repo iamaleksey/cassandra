@@ -20,6 +20,7 @@ package org.apache.cassandra.schema;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.*;
@@ -33,6 +34,7 @@ import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.marshal.*;
 import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -64,7 +66,7 @@ public final class TableMetadata
 
     public enum Flag
     {
-        SUPER, COUNTER, DENSE, COMPOUND;
+        SUPER, COUNTER, DENSE, COMPOUND, SYSTEM_VIEW;
 
         public static boolean isCQLCompatible(Set<Flag> flags)
         {
@@ -170,6 +172,44 @@ public final class TableMetadata
         resource = DataResource.table(keyspace, name);
     }
 
+    /**
+     * Creates the {@code TableMetadata} of a system view.
+     *
+     * @param table the view name
+     * @param comment view definition
+     * @param columns the view columns
+     * @return the {@code TableMetadata} of a system view.
+     */
+    public static TableMetadata ofSystemView(String table,
+                                             String comment,
+                                             ColumnMetadata... columns)
+    {
+        List<AbstractType<?>> types = Arrays.stream(columns)
+                                            .filter(ColumnMetadata::isPartitionKey)
+                                            .map(c -> c.type)
+                                            .collect(Collectors.toList());
+
+        AbstractType<?> partitionKeyType = types.size() == 1 ? types.get(0)
+                                                             : CompositeType.getInstance(types);
+
+        IPartitioner partitioner = new LocalPartitioner(partitionKeyType);
+
+        return TableMetadata.builder(SchemaConstants.SYSTEM_KEYSPACE_NAME, table)
+                            .id(TableId.forSystemTable(SchemaConstants.SYSTEM_KEYSPACE_NAME, table))
+                            .comment(comment)
+                            .addColumns(Arrays.asList(columns))
+                            .bloomFilterFpChance(1.0)
+                            .caching(CachingParams.CACHE_NOTHING)
+                            .gcGraceSeconds(0)
+                            .minIndexInterval(0)
+                            .maxIndexInterval(Integer.MAX_VALUE)
+                            .compression(CompressionParams.noCompression())
+                            .compaction(CompactionParams.NO_COMPACTION)
+                            .partitioner(partitioner)
+                            .isSystemView(true)
+                            .build();
+    }
+
     public static Builder builder(String keyspace, String table)
     {
         return new Builder(keyspace, table);
@@ -231,6 +271,11 @@ public final class TableMetadata
     public boolean isCounter()
     {
         return flags.contains(Flag.COUNTER);
+    }
+
+    public boolean isSystemView()
+    {
+        return flags.contains(Flag.SYSTEM_VIEW);
     }
 
     public boolean isCQLTable()
@@ -765,6 +810,11 @@ public final class TableMetadata
             return flag(Flag.COMPOUND, val);
         }
 
+        private Builder isSystemView(boolean val)
+        {
+            return flag(Flag.SYSTEM_VIEW, val);
+        }
+        
         private Builder flag(Flag flag, boolean set)
         {
             if (set) flags.add(flag); else flags.remove(flag);

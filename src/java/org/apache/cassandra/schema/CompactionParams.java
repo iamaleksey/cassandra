@@ -18,6 +18,7 @@
 package org.apache.cassandra.schema;
 
 import java.lang.reflect.InvocationTargetException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.compaction.AbstractCompactionStrategy;
 import org.apache.cassandra.db.compaction.LeveledCompactionStrategy;
+import org.apache.cassandra.db.compaction.NoopCompactionStrategy;
 import org.apache.cassandra.db.compaction.SizeTieredCompactionStrategy;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.utils.FBUtilities;
@@ -39,6 +41,11 @@ import static java.lang.String.format;
 public final class CompactionParams
 {
     private static final Logger logger = LoggerFactory.getLogger(CompactionParams.class);
+
+    /**
+     * Compaction parameters used by system views.
+     */
+    public static final CompactionParams NO_COMPACTION = new CompactionParams(NoopCompactionStrategy.class, Collections.emptyMap(), false, TombstoneOption.NONE);
 
     public enum Option
     {

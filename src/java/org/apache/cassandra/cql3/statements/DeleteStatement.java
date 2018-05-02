@@ -143,6 +143,8 @@ public class DeleteStatement extends ModificationStatement
                                                         Conditions conditions,
                                                         Attributes attrs)
         {
+            checkFalse(metadata.isSystemView(), "DELETE are not supported on system views");
+
             Operations operations = new Operations(type);
 
             for (Operation.RawDeletion deletion : deletions)

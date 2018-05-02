@@ -73,6 +73,8 @@ public class DropTableStatement extends SchemaAlteringStatement
             {
                 if (metadata.isView())
                     throw new InvalidRequestException("Cannot use DROP TABLE on Materialized View");
+                if (metadata.isSystemView())
+                    throw new InvalidRequestException("Cannot use DROP TABLE on system views");
 
                 boolean rejectDrop = false;
                 StringBuilder messageBuilder = new StringBuilder();

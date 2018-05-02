@@ -84,6 +84,9 @@ public class CreateIndexStatement extends SchemaAlteringStatement
         if (table.isCounter())
             throw new InvalidRequestException("Secondary indexes are not supported on counter tables");
 
+        if (table.isSystemView())
+            throw new InvalidRequestException("Secondary indexes are not supported on system views");
+
         if (table.isView())
             throw new InvalidRequestException("Secondary indexes are not supported on materialized views");
 

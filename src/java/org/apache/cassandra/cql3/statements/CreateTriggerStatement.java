@@ -63,6 +63,8 @@ public class CreateTriggerStatement extends SchemaAlteringStatement
         TableMetadata metadata = Schema.instance.validateTable(keyspace(), columnFamily());
         if (metadata.isView())
             throw new InvalidRequestException("Cannot CREATE TRIGGER against a materialized view");
+        if (metadata.isSystemView())
+            throw new InvalidRequestException("Cannot CREATE TRIGGER against a system view");
 
         try
         {

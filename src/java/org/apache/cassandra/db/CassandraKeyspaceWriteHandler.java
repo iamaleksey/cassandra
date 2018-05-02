@@ -43,7 +43,7 @@ public class CassandraKeyspaceWriteHandler implements KeyspaceWriteHandler
 
             // write the mutation to the commitlog and memtables
             CommitLogPosition position = null;
-            if (makeDurable)
+            if (makeDurable && !mutation.isSystemViewMutation())
             {
                 Tracing.trace("Appending to commitlog");
                 position = CommitLog.instance.add(mutation);

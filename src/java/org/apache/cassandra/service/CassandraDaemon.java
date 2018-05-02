@@ -193,6 +193,8 @@ public class CassandraDaemon
 
         logSystemInfo();
 
+        SystemKeyspace.loadVirtualTables();
+
         NativeLibrary.tryMlockall();
 
         try

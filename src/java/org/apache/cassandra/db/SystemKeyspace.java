@@ -382,25 +382,28 @@ public final class SystemKeyspace
 
     private static Tables tables()
     {
-        return Tables.of(BuiltIndexes,
-                         Batches,
-                         Paxos,
-                         Local,
-                         PeersV2,
-                         LegacyPeers,
-                         PeerEventsV2,
-                         LegacyPeerEvents,
-                         RangeXfers,
-                         CompactionHistory,
-                         SSTableActivity,
-                         SizeEstimates,
-                         AvailableRanges,
-                         TransferredRangesV2,
-                         LegacyTransferredRanges,
-                         ViewBuildsInProgress,
-                         BuiltViews,
-                         PreparedStatements,
-                         Repairs);
+        return Tables.builder()
+                     .add(BuiltIndexes,
+                          Batches,
+                          Paxos,
+                          Local,
+                          PeersV2,
+                          LegacyPeers,
+                          PeerEventsV2,
+                          LegacyPeerEvents,
+                          RangeXfers,
+                          CompactionHistory,
+                          SSTableActivity,
+                          SizeEstimates,
+                          AvailableRanges,
+                          TransferredRangesV2,
+                          LegacyTransferredRanges,
+                          ViewBuildsInProgress,
+                          BuiltViews,
+                          PreparedStatements,
+                          Repairs)
+                     .add(SystemViewManager.getViewsMetadata())
+                     .build();
     }
 
     private static Functions functions()
@@ -837,6 +840,13 @@ public final class SystemKeyspace
             }
         }
         return hostIdMap;
+    }
+
+    /**
+     * Load the system views tables which are part of the system keyspace
+     */
+    public static void loadVirtualTables()
+    {
     }
 
     /**

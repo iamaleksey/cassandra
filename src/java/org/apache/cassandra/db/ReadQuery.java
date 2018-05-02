@@ -245,4 +245,13 @@ public interface ReadQuery
         return false;
     }
 
+    /**
+     * If the index manager for the table determines that there's an applicable
+     * 2i that can be used to execute this query, call its (optional)
+     * validation method to check that nothing in this query's parameters
+     * violates the implementation specific validation rules.
+     */
+    default void maybeValidateIndex()
+    {
+    }
 }

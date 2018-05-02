@@ -86,6 +86,8 @@ public class AlterTableStatement extends SchemaAlteringStatement
         TableMetadata current = Schema.instance.validateTable(keyspace(), columnFamily());
         if (current.isView())
             throw new InvalidRequestException("Cannot use ALTER TABLE on Materialized View");
+        if (current.isSystemView())
+            throw new InvalidRequestException("Cannot use ALTER TABLE on system views");
 
         TableMetadata.Builder builder = current.unbuild();
 
