@@ -17,14 +17,13 @@
  */
 package org.apache.cassandra.schema;
 
-import java.lang.reflect.InvocationTargetException;
 import java.nio.ByteBuffer;
 import java.util.*;
 import java.util.Objects;
 
+import javax.annotation.Nullable;
+
 import com.google.common.base.MoreObjects;
-import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
 import com.google.common.collect.*;
 
 import org.slf4j.Logger;
@@ -39,7 +38,6 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.service.reads.SpeculativeRetryPolicy;
 import org.apache.cassandra.utils.AbstractIterator;
-import org.apache.cassandra.utils.FBUtilities;
 import org.github.jamm.Unmetered;
 
 import static java.lang.String.format;
@@ -68,7 +66,7 @@ public final class TableMetadata
 
     public enum Flag
     {
-        SUPER, COUNTER, DENSE, COMPOUND, VIRTUAL;
+        SUPER, COUNTER, DENSE, COMPOUND;
 
         public static boolean isCQLCompatible(Set<Flag> flags)
         {
@@ -86,19 +84,22 @@ public final class TableMetadata
         }
     }
 
+    public enum Kind
+    {
+        REGULAR, INDEX, VIEW, VIRTUAL
+    }
+
     public final String keyspace;
     public final String name;
     public final TableId id;
 
     public final IPartitioner partitioner;
+    public final Kind kind;
     public final TableParams params;
     public final ImmutableSet<Flag> flags;
 
-    private final boolean isView;
+    @Nullable
     private final String indexName; // derived from table name
-
-    private final boolean isVirtual;
-    private final String virtualKlass;
 
     /*
      * All CQL3 columns definition are stored in the columns map.
@@ -146,22 +147,10 @@ public final class TableMetadata
         id = builder.id;
 
         partitioner = builder.partitioner;
+        kind = builder.kind;
         params = builder.params.build();
-        isView = builder.isView;
 
-        isVirtual = builder.isVirtual;
-        if (isVirtual)
-            virtualKlass = builder.virtualKlass;
-        else
-            virtualKlass = null;
-
-        Preconditions.checkArgument(isVirtual == flags.contains(Flag.VIRTUAL) ||
-                !Strings.isNullOrEmpty(virtualKlass) && !flags.contains(Flag.VIRTUAL),
-                "virtual class = " + virtualKlass + ", isVirtual = " + isVirtual + " but flags = " + flags);
-
-        indexName = name.contains(".")
-                  ? name.substring(name.indexOf('.') + 1)
-                  : null;
+        indexName = kind == Kind.INDEX ? name.substring(name.indexOf('.') + 1) : null;
 
         droppedColumns = ImmutableMap.copyOf(builder.droppedColumns);
         Collections.sort(builder.partitionKeyColumns);
@@ -201,24 +190,28 @@ public final class TableMetadata
     {
         return builder(keyspace, name, id)
                .partitioner(partitioner)
+               .kind(kind)
                .params(params)
                .flags(flags)
-               .isView(isView)
                .addColumns(columns())
                .droppedColumns(droppedColumns)
                .indexes(indexes)
-                .triggers(triggers)
-                .virtualClass(virtualKlass);
-    }
-
-    public boolean isView()
-    {
-        return isView;
+               .triggers(triggers);
     }
 
     public boolean isIndex()
     {
-        return indexName != null;
+        return kind == Kind.INDEX;
+    }
+
+    public boolean isView()
+    {
+        return kind == Kind.VIEW;
+    }
+
+    public boolean isVirtual()
+    {
+        return kind == Kind.VIRTUAL;
     }
 
     public Optional<String> indexName()
@@ -249,25 +242,6 @@ public final class TableMetadata
     public boolean isCounter()
     {
         return flags.contains(Flag.COUNTER);
-    }
-
-    public boolean isVirtual()
-    {
-        return flags.contains(Flag.VIRTUAL);
-    }
-
-    public Class<? extends VirtualTable> virtualClass()
-    {
-        String className = VirtualTable.getFullClassName(virtualKlass);
-        Class<VirtualTable> strategyClass = FBUtilities.classForName(className, "virtual table");
-
-        if (!VirtualTable.class.isAssignableFrom(strategyClass))
-        {
-            throw new ConfigurationException(format("Compaction strategy class %s is not derived from AbstractVirtualColumnFamilyStore",
-                    className));
-        }
-
-        return strategyClass;
     }
 
     public boolean isCQLTable()
@@ -569,21 +543,9 @@ public final class TableMetadata
         return unbuild().params(builder.build()).build();
     }
 
-    public static VirtualTable createVirtualTableInstance(TableMetadata cfm)
-    {
-        try
-        {
-            return cfm.virtualClass().getConstructor(TableMetadata.class).newInstance(cfm);
-        }
-        catch (NoSuchMethodException | IllegalAccessException | InvocationTargetException | InstantiationException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
-
     private void except(String format, Object... args)
     {
-        throw new ConfigurationException(keyspace + "." + name + ": " +format(format, args));
+        throw new ConfigurationException(keyspace + "." + name + ": " + format(format, args));
     }
 
     @Override
@@ -598,25 +560,22 @@ public final class TableMetadata
         TableMetadata tm = (TableMetadata) o;
 
         return keyspace.equals(tm.keyspace)
-                && name.equals(tm.name)
-                && id.equals(tm.id)
-                && partitioner.equals(tm.partitioner)
-                && params.equals(tm.params)
-                && flags.equals(tm.flags)
-                && isView == tm.isView
-                && columns.equals(tm.columns)
-                && droppedColumns.equals(tm.droppedColumns)
-                && indexes.equals(tm.indexes)
-                && triggers.equals(tm.triggers)
-                && isVirtual == tm.isVirtual
-                && (virtualKlass == null || virtualKlass.equals(tm.virtualKlass));
+            && name.equals(tm.name)
+            && id.equals(tm.id)
+            && partitioner.equals(tm.partitioner)
+            && kind == tm.kind
+            && params.equals(tm.params)
+            && flags.equals(tm.flags)
+            && columns.equals(tm.columns)
+            && droppedColumns.equals(tm.droppedColumns)
+            && indexes.equals(tm.indexes)
+            && triggers.equals(tm.triggers);
     }
 
     @Override
     public int hashCode()
     {
-        return Objects.hash(keyspace, name, id, partitioner, params, flags, isView, columns, droppedColumns,
-                indexes, triggers, isVirtual, virtualKlass);
+        return Objects.hash(keyspace, name, id, partitioner, kind, params, flags, columns, droppedColumns, indexes, triggers);
     }
 
     @Override
@@ -632,13 +591,12 @@ public final class TableMetadata
                           .add("table", name)
                           .add("id", id)
                           .add("partitioner", partitioner)
+                          .add("kind", kind)
                           .add("params", params)
                           .add("flags", flags)
-                          .add("isView", isView)
                           .add("columns", columns())
                           .add("droppedColumns", droppedColumns.values())
                           .add("indexes", indexes)
-                          .add("virtualClass", virtualKlass)
                           .add("triggers", triggers)
                           .toString();
     }
@@ -651,6 +609,7 @@ public final class TableMetadata
         private TableId id;
 
         private IPartitioner partitioner;
+        private Kind kind = Kind.REGULAR;
         private TableParams.Builder params = TableParams.builder();
 
         // Setting compound as default as "normal" CQL tables are compound and that's what we want by default
@@ -663,10 +622,6 @@ public final class TableMetadata
         private final List<ColumnMetadata> partitionKeyColumns = new ArrayList<>();
         private final List<ColumnMetadata> clusteringColumns = new ArrayList<>();
         private final List<ColumnMetadata> regularAndStaticColumns = new ArrayList<>();
-
-        private boolean isView;
-        private boolean isVirtual = false;
-        private String virtualKlass;
 
         private Builder(String keyspace, String name, TableId id)
         {
@@ -701,6 +656,12 @@ public final class TableMetadata
         public Builder partitioner(IPartitioner val)
         {
             partitioner = val;
+            return this;
+        }
+
+        public Builder kind(Kind val)
+        {
+            kind = val;
             return this;
         }
 
@@ -786,20 +747,6 @@ public final class TableMetadata
         {
             params.extensions(val);
             return this;
-        }
-
-        public Builder isView(boolean val)
-        {
-            isView = val;
-            return this;
-        }
-
-        public Builder virtualClass(String virtualKlass)
-        {
-            isVirtual = (virtualKlass != null);
-            this.virtualKlass = virtualKlass;
-
-            return flag(Flag.VIRTUAL, isVirtual);
         }
 
         public Builder flags(Set<Flag> val)
@@ -1042,6 +989,6 @@ public final class TableMetadata
      */
     public boolean enforceStrictLiveness()
     {
-        return isView && Keyspace.open(keyspace).viewManager.getByName(name).enforceStrictLiveness();
+        return isView() && Keyspace.open(keyspace).viewManager.getByName(name).enforceStrictLiveness();
     }
 }

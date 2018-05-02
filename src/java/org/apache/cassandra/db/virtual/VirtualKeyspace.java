@@ -17,16 +17,42 @@
  */
 package org.apache.cassandra.db.virtual;
 
+import java.util.Collection;
+
+import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 
-public final class SystemViewKeyspace extends VirtualKeyspace
+import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.Tables;
+
+public class VirtualKeyspace
 {
-    private static final String NAME = "system_view";
+    private final String name;
+    private final KeyspaceMetadata metadata;
 
-    public static SystemViewKeyspace instance = new SystemViewKeyspace();
+    private final ImmutableCollection<VirtualTable> tables;
 
-    private SystemViewKeyspace()
+    public VirtualKeyspace(String name, Collection<VirtualTable> tables)
     {
-        super(NAME, ImmutableList.of(new SettingsTable(NAME), new RingStateTable(NAME), new CompactionStatsTable(NAME)));
+        this.name = name;
+        this.tables = ImmutableList.copyOf(tables);
+
+        metadata = KeyspaceMetadata.virtual(name, Tables.of(Iterables.transform(tables, t -> t.metadata)));
+    }
+
+    public String name()
+    {
+        return name;
+    }
+
+    public KeyspaceMetadata metadata()
+    {
+        return metadata;
+    }
+
+    public ImmutableCollection<VirtualTable> tables()
+    {
+        return tables;
     }
 }

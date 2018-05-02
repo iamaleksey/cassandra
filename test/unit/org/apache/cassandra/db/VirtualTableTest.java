@@ -35,17 +35,14 @@ import org.apache.cassandra.cql3.ColumnSpecification;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.QueryProcessor;
 import org.apache.cassandra.cql3.UntypedResultSet;
-import org.apache.cassandra.cql3.statements.CreateTableStatement;
 import org.apache.cassandra.cql3.statements.SelectStatement;
 import org.apache.cassandra.db.rows.Row;
+import org.apache.cassandra.db.virtual.VirtualKeyspace;
 import org.apache.cassandra.exceptions.RequestValidationException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
-import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.Schema;
-import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.schema.Tables;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.pager.PagingState;
@@ -71,14 +68,13 @@ public class VirtualTableTest extends CQLTester
     @BeforeClass
     public static void setup()
     {
-        TableMetadata.Builder b = VirtualTable.createMetadata("system_view", "vtable", VirtualTableTestImpl.class);
-        metadata = b.build();
-        assertTrue(metadata.isVirtual());
-        table = new VirtualTableTestImpl(metadata);
-        keyspace = KeyspaceMetadata.create("test" + System.currentTimeMillis(), KeyspaceParams.local(),
-                Tables.of(metadata));
-        Schema.instance.load(keyspace);
-        Schema.instance.putVirtualTable(metadata, table);
+        table = new VirtualTableTestImpl();
+        metadata = table.metadata();
+
+        VirtualKeyspace vkeyspace = new VirtualKeyspace("test" + System.currentTimeMillis(), Collections.singleton(table));
+        keyspace = vkeyspace.metadata();
+
+        Schema.instance.register(vkeyspace);
     }
 
     private void createReplTable() throws Throwable

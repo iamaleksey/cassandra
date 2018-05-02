@@ -29,6 +29,7 @@ import org.apache.cassandra.cql3.statements.StatementType;
 import org.apache.cassandra.db.*;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.marshal.AbstractType;
+import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.dht.*;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.index.Index;

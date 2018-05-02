@@ -48,6 +48,7 @@ import org.apache.cassandra.db.rows.Row.SimpleBuilder;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.Unfiltered;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.exceptions.RequestValidationException;
@@ -137,7 +138,7 @@ public abstract class SystemView extends VirtualTable
                 throws RequestExecutionException, RequestValidationException
         {
             ResultBuilder result = new ResultBuilder(selectStatement, options);
-            Tracing.trace("Building virtual table results from {}", metadata.virtualClass().getName());
+            Tracing.trace("Building virtual table results from {}", metadata);
             read(restrictions, options, result);
             return result;
         }

@@ -19,13 +19,11 @@ package org.apache.cassandra.db;
 
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
-import org.apache.cassandra.cql3.CQL3Type;
 import org.apache.cassandra.cql3.QueryOptions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.exceptions.CassandraException;
 import org.apache.cassandra.schema.TableMetadata;
@@ -33,29 +31,19 @@ import org.apache.cassandra.utils.Pair;
 
 public class VirtualTableTestImpl extends SystemView
 {
-    static
+    public List<Pair<DecoratedKey, Row>> inserts = new ArrayList<>();
+
+    VirtualTableTestImpl()
     {
-        Map<String, CQL3Type> definitions = new HashMap<>();
-        definitions.put("p1", CQL3Type.Native.INT);
-        definitions.put("p2", CQL3Type.Native.INT);
-        definitions.put("c1", CQL3Type.Native.INT);
-        definitions.put("c2", CQL3Type.Native.INT);
-        definitions.put("v1", CQL3Type.Native.INT);
-        definitions.put("v2", CQL3Type.Native.INT);
-
-        schemaBuilder(definitions)
-                .addKey("p1")
-                .addKey("p2")
-                .addClustering("c1")
-                .addClustering("c2")
-                .register();
-    }
-
-    public List<Pair<DecoratedKey, Row>> inserts = new ArrayList();
-
-    public VirtualTableTestImpl(TableMetadata metadata)
-    {
-        super(metadata);
+        super(TableMetadata.builder("system_view", "vtable")
+                           .kind(TableMetadata.Kind.VIRTUAL)
+                           .addPartitionKeyColumn("p1", Int32Type.instance)
+                           .addPartitionKeyColumn("p2", Int32Type.instance)
+                           .addClusteringColumn("c1", Int32Type.instance)
+                           .addClusteringColumn("c2", Int32Type.instance)
+                           .addRegularColumn("v1", Int32Type.instance)
+                           .addRegularColumn("v2", Int32Type.instance)
+                           .build());
     }
 
     public boolean writable()
@@ -82,8 +70,6 @@ public class VirtualTableTestImpl extends SystemView
      *
      * @param partitionKey
      *            partition key for the update.
-     * @param params
-     *            parameters of the update.
      */
     public void mutate(DecoratedKey partitionKey, Row row) throws CassandraException
     {

@@ -319,7 +319,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
 
         TableMetadata.Builder builder =
             TableMetadata.builder(keyspace(), columnFamily(), properties.properties.getId())
-                         .isView(true)
+                         .kind(TableMetadata.Kind.VIEW)
                          .params(params);
 
         add(metadata, targetPartitionKeys, builder::addPartitionKeyColumn);

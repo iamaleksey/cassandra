@@ -137,7 +137,6 @@ public class CreateTableStatement extends SchemaAlteringStatement
                .isCompound(isCompound)
                .isCounter(hasCounters)
                .isSuper(false)
-               .isView(false)
                .params(params);
 
         for (int i = 0; i < keyAliases.size(); i++)

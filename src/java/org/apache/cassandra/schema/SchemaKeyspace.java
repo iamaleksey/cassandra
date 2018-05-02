@@ -24,7 +24,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.*;
 import com.google.common.collect.Maps;
 import com.google.common.hash.Hasher;
@@ -77,7 +76,6 @@ public final class SchemaKeyspace
     public static final String DROPPED_COLUMNS = "dropped_columns";
     public static final String TRIGGERS = "triggers";
     public static final String VIEWS = "views";
-    public static final String VIRTUAL_TABLES = "virtual_tables";
     public static final String TYPES = "types";
     public static final String FUNCTIONS = "functions";
     public static final String AGGREGATES = "aggregates";
@@ -97,7 +95,7 @@ public final class SchemaKeyspace
      * See CASSANDRA-12213 for more details.
      */
     public static final ImmutableList<String> ALL =
-        ImmutableList.of(COLUMNS, DROPPED_COLUMNS, TRIGGERS, VIRTUAL_TABLES, TYPES, FUNCTIONS, AGGREGATES, INDEXES, TABLES, VIEWS, KEYSPACES);
+        ImmutableList.of(COLUMNS, DROPPED_COLUMNS, TRIGGERS, TYPES, FUNCTIONS, AGGREGATES, INDEXES, TABLES, VIEWS, KEYSPACES);
 
     /**
      * The tables to which we added the cdc column. This is used in {@link #makeUpdateForSchema} below to make sure we skip that
@@ -129,7 +127,7 @@ public final class SchemaKeyspace
               + "dclocal_read_repair_chance double," // no longer used, left for drivers' sake
               + "default_time_to_live int,"
               + "extensions frozen<map<text, blob>>,"
-              + "flags frozen<set<text>>," // SUPER, COUNTER, DENSE, COMPOUND, VIRTUAL
+              + "flags frozen<set<text>>," // SUPER, COUNTER, DENSE, COMPOUND
               + "gc_grace_seconds int,"
               + "id uuid,"
               + "max_index_interval int,"
@@ -175,19 +173,6 @@ public final class SchemaKeyspace
               + "trigger_name text,"
               + "options frozen<map<text, text>>,"
               + "PRIMARY KEY ((keyspace_name), table_name, trigger_name))");
-
-    private static final TableMetadata VirtualTables =
-            parse(VIRTUAL_TABLES,
-                  "virtual table definitions",
-                  "CREATE TABLE %s ("
-                  + "keyspace_name text,"
-                  + "table_name text,"
-                  + "virtual_class text,"
-                  + "comment text,"
-                  + "columns frozen<map<text, text>>,"
-                  + "partition_key frozen<list<text>>,"
-                  + "clustering_columns frozen<list<text>>,"
-                  + "PRIMARY KEY ((keyspace_name), table_name))");
 
     private static final TableMetadata Views =
         parse(VIEWS,
@@ -268,7 +253,7 @@ public final class SchemaKeyspace
               + "PRIMARY KEY ((keyspace_name), aggregate_name, argument_types))");
 
     private static final List<TableMetadata> ALL_TABLE_METADATA =
-        ImmutableList.of(Keyspaces, Tables, Columns, Triggers, VirtualTables, DroppedColumns, Views, Types, Functions, Aggregates, Indexes);
+        ImmutableList.of(Keyspaces, Tables, Columns, Triggers, DroppedColumns, Views, Types, Functions, Aggregates, Indexes);
 
     private static TableMetadata parse(String name, String description, String cql)
     {
@@ -292,7 +277,6 @@ public final class SchemaKeyspace
     {
         KeyspaceMetadata system = Schema.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_KEYSPACE_NAME);
         KeyspaceMetadata schema = Schema.instance.getKeyspaceMetadata(SchemaConstants.SCHEMA_KEYSPACE_NAME);
-        KeyspaceMetadata info = Schema.instance.getKeyspaceMetadata(SchemaConstants.SYSTEM_VIEW_NAME);
 
         long timestamp = FBUtilities.timestampMicros();
 
@@ -307,7 +291,6 @@ public final class SchemaKeyspace
         // (+1 to timestamp to make sure we don't get shadowed by the tombstones we just added)
         makeCreateKeyspaceMutation(system, timestamp + 1).build().apply();
         makeCreateKeyspaceMutation(schema, timestamp + 1).build().apply();
-        makeCreateKeyspaceMutation(info, timestamp + 1).build().apply();
     }
 
     public static void truncate()
@@ -460,15 +443,7 @@ public final class SchemaKeyspace
     {
         Mutation.SimpleBuilder builder = makeCreateKeyspaceMutation(keyspace.name, keyspace.params, timestamp);
 
-        keyspace.tables.forEach(table ->
-        {
-            if (table.isVirtual())
-            {
-                addVirtualTableToSchemaMutation(TableMetadata.createVirtualTableInstance(table), builder);
-            }
-            else
-                addTableToSchemaMutation(table, true, builder);
-        });
+        keyspace.tables.forEach(table -> addTableToSchemaMutation(table, true, builder));
         keyspace.views.forEach(view -> addViewToSchemaMutation(view, true, builder));
         keyspace.types.forEach(type -> addTypeToSchemaMutation(type, builder));
         keyspace.functions.udfs().forEach(udf -> addFunctionToSchemaMutation(udf, builder));
@@ -522,8 +497,6 @@ public final class SchemaKeyspace
 
     static void addTableToSchemaMutation(TableMetadata table, boolean withColumnsAndTriggers, Mutation.SimpleBuilder builder)
     {
-        Preconditions.checkArgument(!table.isVirtual());
-
         Row.SimpleBuilder rowBuilder = builder.update(Tables)
                                               .row(table.name)
                                               .add("id", table.id.asUUID())
@@ -717,22 +690,6 @@ public final class SchemaKeyspace
         builder.update(Triggers)
                .row(table.name, trigger.name)
                .add("options", Collections.singletonMap("class", trigger.classOption));
-    }
-
-    private static void addVirtualTableToSchemaMutation(VirtualTable virtual, Mutation.SimpleBuilder builder)
-    {
-        TableMetadata table = virtual.metadata;
-        builder.update(VirtualTables)
-                .row(table.name)
-                .add("virtual_class", virtual.getClass().getCanonicalName())
-                .add("comment", table.params.comment)
-                .add("partition_key", virtual.schema().key)
-                .add("columns", virtual.schema().definitions.entrySet().stream()
-                        .collect(Collectors.toMap(
-                                e -> e.getKey(),
-                                e -> e.getValue().toString())
-                        ))
-                .add("clustering_columns", virtual.schema().clustering);
     }
 
     private static void dropTriggerFromSchemaMutation(TableMetadata table, TriggerMetadata trigger, Mutation.SimpleBuilder builder)
@@ -1025,14 +982,14 @@ public final class SchemaKeyspace
             throw new IllegalArgumentException(TableMetadata.COMPACT_STORAGE_HALT_MESSAGE);
         }
 
-        TableMetadata.Builder tmd = TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
+        return TableMetadata.builder(keyspaceName, tableName, TableId.fromUUID(row.getUUID("id")))
                             .flags(flags)
                             .params(createTableParamsFromRow(row))
                             .addColumns(fetchColumns(keyspaceName, tableName, types))
                             .droppedColumns(fetchDroppedColumns(keyspaceName, tableName))
                             .indexes(fetchIndexes(keyspaceName, tableName))
-                            .triggers(fetchTriggers(keyspaceName, tableName));
-        return tmd.build();
+                            .triggers(fetchTriggers(keyspaceName, tableName))
+                            .build();
     }
 
     static TableParams createTableParamsFromRow(UntypedResultSet.Row row)
@@ -1184,7 +1141,7 @@ public final class SchemaKeyspace
 
         TableMetadata metadata =
             TableMetadata.builder(keyspaceName, viewName, TableId.fromUUID(row.getUUID("id")))
-                         .isView(true)
+                         .kind(TableMetadata.Kind.VIEW)
                          .addColumns(columns)
                          .droppedColumns(fetchDroppedColumns(keyspaceName, viewName))
                          .params(createTableParamsFromRow(row))
