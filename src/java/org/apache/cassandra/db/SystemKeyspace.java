@@ -843,13 +843,6 @@ public final class SystemKeyspace
     }
 
     /**
-     * Load the system views tables which are part of the system keyspace
-     */
-    public static void loadVirtualTables()
-    {
-    }
-
-    /**
      * Get preferred IP for given endpoint if it is known. Otherwise this returns given endpoint itself.
      *
      * @param ep endpoint address to check
