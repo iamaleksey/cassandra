@@ -211,6 +211,7 @@ public abstract class CQLTester
         ThreadAwareSecurityManager.install();
 
         Keyspace.setInitialized();
+        SystemKeyspace.loadSystemViews();
         SystemKeyspace.persistLocalMetadata();
         isServerPrepared = true;
     }
@@ -828,6 +829,11 @@ public abstract class CQLTester
     protected com.datastax.driver.core.ResultSet executeNet(ProtocolVersion protocolVersion, String query, Object... values) throws Throwable
     {
         return sessionNet(protocolVersion).execute(formatQuery(query), values);
+    }
+
+    protected com.datastax.driver.core.ResultSet executeNet(String query, Object... values) throws Throwable
+    {
+        return sessionNet().execute(formatQuery(query), values);
     }
 
     protected com.datastax.driver.core.ResultSet executeNetWithPaging(ProtocolVersion version, String query, int pageSize) throws Throwable

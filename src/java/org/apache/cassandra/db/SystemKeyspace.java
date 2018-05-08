@@ -843,10 +843,11 @@ public final class SystemKeyspace
     }
 
     /**
-     * Load the system views tables which are part of the system keyspace
+     * Load the system views which are part of the system keyspace
      */
-    public static void loadVirtualTables()
+    public static void loadSystemViews()
     {
+        
     }
 
     /**
