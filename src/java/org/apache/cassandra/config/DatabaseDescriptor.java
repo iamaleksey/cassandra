@@ -19,13 +19,17 @@ package org.apache.cassandra.config;
 
 import java.io.File;
 import java.io.IOException;
+import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.net.*;
+import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
@@ -46,6 +50,10 @@ import org.apache.cassandra.auth.IRoleManager;
 import org.apache.cassandra.config.Config.CommitLogSync;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions.InternodeEncryption;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.MapBasedSystemView;
+import org.apache.cassandra.db.MapBasedSystemView.DataWrapper;
+import org.apache.cassandra.db.marshal.BooleanType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.FSWriteError;
@@ -60,14 +68,22 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.SeedProvider;
 import org.apache.cassandra.net.BackPressureStrategy;
 import org.apache.cassandra.net.RateBasedBackPressure;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.security.EncryptionContext;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.serializers.BooleanSerializer;
 import org.apache.cassandra.service.CacheService.CacheType;
+import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 
 import org.apache.commons.lang3.StringUtils;
 
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
+import static org.apache.cassandra.schema.ColumnMetadata.partitionKeyColumn;
+import static org.apache.cassandra.schema.ColumnMetadata.regularColumn;
+import static org.apache.cassandra.schema.SchemaConstants.SYSTEM_KEYSPACE_NAME;
 
 public class DatabaseDescriptor
 {
@@ -85,6 +101,35 @@ public class DatabaseDescriptor
      * Request timeouts can not be less than below defined value (see CASSANDRA-9375)
      */
     static final long LOWEST_ACCEPTED_TIMEOUT = 10L;
+
+    /**
+     * The name of the system view used to access the settings.
+     */
+    private static final String VIEW_NAME = "sv_settings";
+
+    /**
+     * The partition key column.
+     */
+    private static final ColumnMetadata NAME_COLUMN = partitionKeyColumn(SYSTEM_KEYSPACE_NAME, VIEW_NAME, "name", UTF8Type.instance, 0);
+
+    /**
+     * The column exposing the setting value.
+     */
+    private static final ColumnMetadata SETTING_COLUMN = regularColumn(SYSTEM_KEYSPACE_NAME, VIEW_NAME, "setting", UTF8Type.instance);
+
+    /**
+     * The column exposing the number of tasks waiting to be executed.
+     */
+    private static final ColumnMetadata WRITEABLE_COLUMN = regularColumn(SYSTEM_KEYSPACE_NAME, VIEW_NAME, "writeable", BooleanType.instance);
+
+    /**
+     * The system view used to expose the configuration.
+     */
+    public static final MapBasedSystemView VIEW = new MapBasedSystemView(VIEW_NAME,
+                                                                         "Exposes configuration settings",
+                                                                         NAME_COLUMN,
+                                                                         SETTING_COLUMN,
+                                                                         WRITEABLE_COLUMN);
 
     private static IEndpointSnitch snitch;
     private static InetAddress listenAddress; // leave null so we can fall through to getLocalHost
@@ -269,9 +314,250 @@ public class DatabaseDescriptor
         {
             hasLoggedConfig = true;
             Config.log(config);
+            updateSystemView(config);
         }
 
         return config;
+    }
+
+    private static DataWrapper newSettingColumn(Supplier<ByteBuffer> supplier)
+    {
+        return DataWrapper.wrap(SETTING_COLUMN, supplier);
+    }
+
+    private static DataWrapper newSettingColumn(Supplier<ByteBuffer> supplier, Consumer<ByteBuffer> consumer)
+    {
+        return DataWrapper.wrap(SETTING_COLUMN, supplier, consumer);
+    }
+
+    private static ByteBuffer toBytes(Object obj)
+    {
+        if (obj == null)
+            return ByteBufferUtil.EMPTY_BYTE_BUFFER;
+
+        if (obj.getClass().isArray())
+        {
+            int length = Array.getLength(obj);
+            StringBuilder b = new StringBuilder();
+            b.append('[');
+            for (int i = 0; i < length; i++)
+            {
+                if (i > 0)
+                    b.append(", ");
+                b.append(Array.get(obj, i));
+            }
+            b.append(']');
+            return UTF8Type.instance.decompose(b.toString());
+        }
+        return UTF8Type.instance.decompose(obj.toString());
+    }
+
+    private static int toInt(ByteBuffer b)
+    {
+        return Integer.parseInt(toString(b));
+    }
+
+    private static long toLong(ByteBuffer b)
+    {
+        return Long.parseLong(toString(b));
+    }
+
+    private static String toString(ByteBuffer b)
+    {
+        return UTF8Type.instance.compose(b);
+    }
+
+    private static double toDouble(ByteBuffer b)
+    {
+        return Double.parseDouble(toString(b));
+    }
+
+    private static boolean toBoolean(ByteBuffer b)
+    {
+        return Boolean.parseBoolean(toString(b));
+    }
+
+    /**
+     * Adds the data to the system view
+     * @param config the config
+     */
+    private static void updateSystemView(Config config)
+    {
+        final DataWrapper writeable = DataWrapper.wrap(WRITEABLE_COLUMN, () -> BooleanSerializer.TRUE);
+        final DataWrapper notWriteable = DataWrapper.wrap(WRITEABLE_COLUMN, () -> BooleanSerializer.FALSE);
+
+        VIEW.addRow("cluster_name", newSettingColumn(() -> toBytes(config.cluster_name)), notWriteable);
+        VIEW.addRow("authenticator", newSettingColumn(() -> toBytes(config.authenticator)), notWriteable);
+        VIEW.addRow("authorizer", newSettingColumn(() -> toBytes(config.authorizer)), notWriteable);
+        VIEW.addRow("role_manager", newSettingColumn(() -> toBytes(config.role_manager)), notWriteable);
+        VIEW.addRow("network_authorizer", newSettingColumn(() -> toBytes(config.network_authorizer)), notWriteable);
+        VIEW.addRow("permissions_validity_in_ms", newSettingColumn(() -> toBytes(config.permissions_validity_in_ms)), notWriteable);
+        VIEW.addRow("permissions_cache_max_entries", newSettingColumn(() -> toBytes(config.permissions_cache_max_entries)), notWriteable);
+        VIEW.addRow("permissions_update_interval_in_ms", newSettingColumn(() -> toBytes(config.permissions_update_interval_in_ms)), notWriteable);
+        VIEW.addRow("roles_validity_in_ms", newSettingColumn(() -> toBytes(config.roles_validity_in_ms)), notWriteable);
+        VIEW.addRow("roles_cache_max_entries", newSettingColumn(() -> toBytes(config.roles_cache_max_entries)), notWriteable);
+        VIEW.addRow("roles_update_interval_in_ms", newSettingColumn(() -> toBytes(config.roles_update_interval_in_ms)), notWriteable);
+        VIEW.addRow("credentials_validity_in_ms", newSettingColumn(() -> toBytes(config.credentials_validity_in_ms)), notWriteable);
+        VIEW.addRow("credentials_cache_max_entries", newSettingColumn(() -> toBytes(config.credentials_cache_max_entries)), notWriteable);
+        VIEW.addRow("credentials_update_interval_in_ms", newSettingColumn(() -> toBytes(config.credentials_update_interval_in_ms)), notWriteable);
+        VIEW.addRow("partitioner", newSettingColumn(() -> toBytes(config.partitioner)), notWriteable);
+        VIEW.addRow("auto_bootstrap", newSettingColumn(() -> toBytes(config.auto_bootstrap)), notWriteable);
+        VIEW.addRow("hinted_handoff_enabled", newSettingColumn(() -> toBytes(config.hinted_handoff_enabled), (b) -> StorageProxy.instance.setHintedHandoffEnabled(toBoolean(b))), writeable);
+        VIEW.addRow("hinted_handoff_disabled_datacenters", newSettingColumn(() -> toBytes(config.hinted_handoff_disabled_datacenters)), notWriteable);
+        VIEW.addRow("max_hint_window_in_ms", newSettingColumn(() -> toBytes(config.max_hint_window_in_ms)), notWriteable);
+        VIEW.addRow("hints_directory", newSettingColumn(() -> toBytes(config.hints_directory)), notWriteable);
+        VIEW.addRow("seed_provider", newSettingColumn(() -> toBytes(config.seed_provider)), notWriteable);
+        VIEW.addRow("disk_access_mode", newSettingColumn(() -> toBytes(config.disk_access_mode)), notWriteable);
+        VIEW.addRow("disk_failure_policy", newSettingColumn(() -> toBytes(config.disk_failure_policy)), notWriteable);
+        VIEW.addRow("commit_failure_policy", newSettingColumn(() -> toBytes(config.commit_failure_policy)), notWriteable);
+        VIEW.addRow("initial_token", newSettingColumn(() -> toBytes(config.initial_token)), notWriteable);
+        VIEW.addRow("num_tokens", newSettingColumn(() -> toBytes(config.num_tokens)), notWriteable);
+        VIEW.addRow("allocate_tokens_for_keyspace", newSettingColumn(() -> toBytes(config.allocate_tokens_for_keyspace)), notWriteable);
+        VIEW.addRow("request_timeout_in_ms", newSettingColumn(() -> toBytes(config.request_timeout_in_ms), (b) -> StorageService.instance.setRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("read_request_timeout_in_ms", newSettingColumn(() -> toBytes(config.read_request_timeout_in_ms), (b) -> StorageService.instance.setReadRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("range_request_timeout_in_ms", newSettingColumn(() -> toBytes(config.range_request_timeout_in_ms), (b) -> StorageService.instance.setRangeRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("write_request_timeout_in_ms", newSettingColumn(() -> toBytes(config.write_request_timeout_in_ms), (b) -> StorageService.instance.setWriteRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("counter_write_request_timeout_in_ms", newSettingColumn(() -> toBytes(config.counter_write_request_timeout_in_ms), (b) -> StorageService.instance.setCounterWriteRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("cas_contention_timeout_in_ms", newSettingColumn(() -> toBytes(config.cas_contention_timeout_in_ms), (b) -> StorageService.instance.setCasContentionTimeout(toLong(b))), notWriteable);
+        VIEW.addRow("truncate_request_timeout_in_ms", newSettingColumn(() -> toBytes(config.truncate_request_timeout_in_ms), (b) -> StorageService.instance.setTruncateRpcTimeout(toLong(b))), writeable);
+        VIEW.addRow("streaming_connections_per_host", newSettingColumn(() -> toBytes(config.streaming_connections_per_host)), notWriteable);
+        VIEW.addRow("streaming_keep_alive_period_in_secs", newSettingColumn(() -> toBytes(config.streaming_keep_alive_period_in_secs)), notWriteable);
+        VIEW.addRow("cross_node_timeout", newSettingColumn(() -> toBytes(config.cross_node_timeout)), notWriteable);
+        VIEW.addRow("slow_query_log_timeout_in_ms", newSettingColumn(() -> toBytes(config.slow_query_log_timeout_in_ms)), notWriteable);
+        VIEW.addRow("phi_convict_threshold", newSettingColumn(() -> toBytes(config.phi_convict_threshold), (b) -> config.phi_convict_threshold = toDouble(b)), writeable);
+        VIEW.addRow("concurrent_reads", newSettingColumn(() -> toBytes(config.concurrent_reads)), notWriteable);
+        VIEW.addRow("concurrent_writes", newSettingColumn(() -> toBytes(config.concurrent_writes)), notWriteable);
+        VIEW.addRow("concurrent_counter_writes", newSettingColumn(() -> toBytes(config.concurrent_counter_writes)), notWriteable);
+        VIEW.addRow("concurrent_materialized_view_writes", newSettingColumn(() -> toBytes(config.concurrent_materialized_view_writes)), notWriteable);
+        VIEW.addRow("concurrent_replicates", newSettingColumn(() -> toBytes(config.concurrent_replicates)), notWriteable);
+        VIEW.addRow("memtable_flush_writers", newSettingColumn(() -> toBytes(config.memtable_flush_writers)), notWriteable);
+        VIEW.addRow("memtable_heap_space_in_mb", newSettingColumn(() -> toBytes(config.memtable_heap_space_in_mb)), notWriteable);
+        VIEW.addRow("memtable_offheap_space_in_mb", newSettingColumn(() -> toBytes(config.memtable_offheap_space_in_mb)), notWriteable);
+        VIEW.addRow("memtable_cleanup_threshold", newSettingColumn(() -> toBytes(config.memtable_cleanup_threshold)), notWriteable);
+        VIEW.addRow("storage_port", newSettingColumn(() -> toBytes(config.storage_port)), notWriteable);
+        VIEW.addRow("ssl_storage_port", newSettingColumn(() -> toBytes(config.ssl_storage_port)), notWriteable);
+        VIEW.addRow("listen_address", newSettingColumn(() -> toBytes(config.listen_address)), notWriteable);
+        VIEW.addRow("listen_interface", newSettingColumn(() -> toBytes(config.listen_interface)), notWriteable);
+        VIEW.addRow("listen_interface_prefer_ipv6", newSettingColumn(() -> toBytes(config.listen_interface_prefer_ipv6)), notWriteable);
+        VIEW.addRow("broadcast_address", newSettingColumn(() -> toBytes(config.broadcast_address)), notWriteable);
+        VIEW.addRow("listen_on_broadcast_address", newSettingColumn(() -> toBytes(config.listen_on_broadcast_address)), notWriteable);
+        VIEW.addRow("internode_authenticator", newSettingColumn(() -> toBytes(config.internode_authenticator)), notWriteable);
+        VIEW.addRow("rpc_address", newSettingColumn(() -> toBytes(config.rpc_address)), notWriteable);
+        VIEW.addRow("rpc_interface", newSettingColumn(() -> toBytes(config.rpc_interface)), notWriteable);
+        VIEW.addRow("rpc_interface_prefer_ipv6", newSettingColumn(() -> toBytes(config.rpc_interface_prefer_ipv6)), notWriteable);
+        VIEW.addRow("broadcast_rpc_address", newSettingColumn(() -> toBytes(config.broadcast_rpc_address)), notWriteable);
+        VIEW.addRow("rpc_keepalive", newSettingColumn(() -> toBytes(config.rpc_keepalive)), notWriteable);
+        VIEW.addRow("internode_send_buff_size_in_bytes", newSettingColumn(() -> toBytes(config.internode_send_buff_size_in_bytes)), notWriteable);
+        VIEW.addRow("internode_recv_buff_size_in_bytes", newSettingColumn(() -> toBytes(config.internode_recv_buff_size_in_bytes)), notWriteable);
+        VIEW.addRow("start_native_transport", newSettingColumn(() -> toBytes(config.start_native_transport)), notWriteable);
+        VIEW.addRow("native_transport_port", newSettingColumn(() -> toBytes(config.native_transport_port)), notWriteable);
+        VIEW.addRow("native_transport_port_ssl", newSettingColumn(() -> toBytes(config.native_transport_port_ssl)), notWriteable);
+        VIEW.addRow("native_transport_max_threads", newSettingColumn(() -> toBytes(config.native_transport_max_threads)), notWriteable);
+        VIEW.addRow("native_transport_max_frame_size_in_mb", newSettingColumn(() -> toBytes(config.native_transport_max_frame_size_in_mb)), notWriteable);
+        VIEW.addRow("native_transport_max_concurrent_connections", newSettingColumn(() -> toBytes(config.native_transport_max_concurrent_connections)), notWriteable);
+        VIEW.addRow("native_transport_max_concurrent_connections_per_ip", newSettingColumn(() -> toBytes(config.native_transport_max_concurrent_connections_per_ip)), notWriteable);
+        VIEW.addRow("max_value_size_in_mb", newSettingColumn(() -> toBytes(config.max_value_size_in_mb)), notWriteable);
+        VIEW.addRow("snapshot_before_compaction", newSettingColumn(() -> toBytes(config.snapshot_before_compaction)), notWriteable);
+        VIEW.addRow("auto_snapshot", newSettingColumn(() -> toBytes(config.auto_snapshot)), notWriteable);
+        VIEW.addRow("column_index_size_in_kb", newSettingColumn(() -> toBytes(config.column_index_size_in_kb)), notWriteable);
+        VIEW.addRow("column_index_cache_size_in_kb", newSettingColumn(() -> toBytes(config.column_index_cache_size_in_kb)), notWriteable);
+        VIEW.addRow("batch_size_warn_threshold_in_kb", newSettingColumn(() -> toBytes(config.batch_size_warn_threshold_in_kb), (b) -> config.batch_size_warn_threshold_in_kb = toInt(b)), writeable);
+        VIEW.addRow("batch_size_fail_threshold_in_kb", newSettingColumn(() -> toBytes(config.batch_size_fail_threshold_in_kb), (b) -> config.batch_size_fail_threshold_in_kb = toInt(b)), writeable);
+        VIEW.addRow("unlogged_batch_across_partitions_warn_threshold", newSettingColumn(() -> toBytes(config.unlogged_batch_across_partitions_warn_threshold)), notWriteable);
+        VIEW.addRow("concurrent_compactors", newSettingColumn(() -> toBytes(config.concurrent_compactors), (b) -> StorageService.instance.setConcurrentCompactors(toInt(b))), writeable);
+        VIEW.addRow("compaction_throughput_mb_per_sec", newSettingColumn(() -> toBytes(config.compaction_throughput_mb_per_sec), (b) -> StorageService.instance.setCompactionThroughputMbPerSec(toInt(b))), writeable);
+        VIEW.addRow("compaction_large_partition_warning_threshold_mb", newSettingColumn(() -> toBytes(config.compaction_large_partition_warning_threshold_mb)), notWriteable);
+        VIEW.addRow("min_free_space_per_drive_in_mb", newSettingColumn(() -> toBytes(config.min_free_space_per_drive_in_mb)), notWriteable);
+        VIEW.addRow("concurrent_validations", newSettingColumn(() -> toBytes(config.concurrent_validations)), notWriteable);
+        VIEW.addRow("concurrent_materialized_view_builders", newSettingColumn(() -> toBytes(config.concurrent_materialized_view_builders)), notWriteable);
+        VIEW.addRow("max_streaming_retries", newSettingColumn(() -> toBytes(config.max_streaming_retries)), notWriteable);
+        VIEW.addRow("stream_throughput_outbound_megabits_per_sec", newSettingColumn(() -> toBytes(config.stream_throughput_outbound_megabits_per_sec), (b) -> StorageService.instance.setStreamThroughputMbPerSec(toInt(b))), writeable);
+        VIEW.addRow("inter_dc_stream_throughput_outbound_megabits_per_sec", newSettingColumn(() -> toBytes(config.inter_dc_stream_throughput_outbound_megabits_per_sec), (b) -> StorageService.instance.setInterDCStreamThroughputMbPerSec(toInt(b))), writeable);
+        VIEW.addRow("data_file_directories", newSettingColumn(() -> toBytes(config.data_file_directories)), notWriteable);
+        VIEW.addRow("saved_caches_directory", newSettingColumn(() -> toBytes(config.saved_caches_directory)), notWriteable);
+        VIEW.addRow("commitlog_directory", newSettingColumn(() -> toBytes(config.commitlog_directory)), notWriteable);
+        VIEW.addRow("commitlog_total_space_in_mb", newSettingColumn(() -> toBytes(config.commitlog_total_space_in_mb)), notWriteable);
+        VIEW.addRow("commitlog_sync", newSettingColumn(() -> toBytes(config.commitlog_sync)), notWriteable);
+        VIEW.addRow("commitlog_sync_batch_window_in_ms", newSettingColumn(() -> toBytes(config.commitlog_sync_batch_window_in_ms)), notWriteable);
+        VIEW.addRow("commitlog_sync_group_window_in_ms", newSettingColumn(() -> toBytes(config.commitlog_sync_group_window_in_ms)), notWriteable);
+        VIEW.addRow("commitlog_sync_period_in_ms", newSettingColumn(() -> toBytes(config.commitlog_sync_period_in_ms)), notWriteable);
+        VIEW.addRow("commitlog_segment_size_in_mb", newSettingColumn(() -> toBytes(config.commitlog_segment_size_in_mb)), notWriteable);
+        VIEW.addRow("commitlog_compression", newSettingColumn(() -> toBytes(config.commitlog_compression)), notWriteable);
+        VIEW.addRow("commitlog_max_compression_buffers_in_pool", newSettingColumn(() -> toBytes(config.commitlog_max_compression_buffers_in_pool)), notWriteable);
+        VIEW.addRow("transparent_data_encryption_options", newSettingColumn(() -> toBytes("<REDACTED>")), notWriteable);
+        VIEW.addRow("max_mutation_size_in_kb", newSettingColumn(() -> toBytes(config.max_mutation_size_in_kb)), notWriteable);
+        VIEW.addRow("cdc_enabled", newSettingColumn(() -> toBytes(config.cdc_enabled)), notWriteable);
+        VIEW.addRow("cdc_raw_directory", newSettingColumn(() -> toBytes(config.cdc_raw_directory)), notWriteable);
+        VIEW.addRow("cdc_total_space_in_mb", newSettingColumn(() -> toBytes(config.cdc_total_space_in_mb)), notWriteable);
+        VIEW.addRow("cdc_free_space_check_interval_ms", newSettingColumn(() -> toBytes(config.cdc_free_space_check_interval_ms)), notWriteable);
+        VIEW.addRow("commitlog_periodic_queue_size", newSettingColumn(() -> toBytes(config.commitlog_periodic_queue_size)), notWriteable);
+        VIEW.addRow("endpoint_snitch", newSettingColumn(() -> toBytes(config.endpoint_snitch)), notWriteable);
+        VIEW.addRow("dynamic_snitch", newSettingColumn(() -> toBytes(config.dynamic_snitch)), notWriteable);
+        VIEW.addRow("dynamic_snitch_update_interval_in_ms", newSettingColumn(() -> toBytes(config.dynamic_snitch_update_interval_in_ms)), notWriteable);
+        VIEW.addRow("dynamic_snitch_reset_interval_in_ms", newSettingColumn(() -> toBytes(config.dynamic_snitch_reset_interval_in_ms)), notWriteable);
+        VIEW.addRow("dynamic_snitch_badness_threshold", newSettingColumn(() -> toBytes(config.dynamic_snitch_badness_threshold)), notWriteable);
+        VIEW.addRow("server_encryption_options", newSettingColumn(() -> toBytes("<REDACTED>")), notWriteable);
+        VIEW.addRow("client_encryption_options", newSettingColumn(() -> toBytes("<REDACTED>")), notWriteable);
+        VIEW.addRow("internode_compression", newSettingColumn(() -> toBytes(config.internode_compression)), notWriteable);
+        VIEW.addRow("hinted_handoff_throttle_in_kb", newSettingColumn(() -> toBytes(config.hinted_handoff_throttle_in_kb), (b) -> StorageService.instance.setHintedHandoffThrottleInKB(toInt(b))), writeable);
+        VIEW.addRow("batchlog_replay_throttle_in_kb", newSettingColumn(() -> toBytes(config.batchlog_replay_throttle_in_kb)), notWriteable);
+        VIEW.addRow("max_hints_delivery_threads", newSettingColumn(() -> toBytes(config.max_hints_delivery_threads)), notWriteable);
+        VIEW.addRow("hints_flush_period_in_ms", newSettingColumn(() -> toBytes(config.hints_flush_period_in_ms)), notWriteable);
+        VIEW.addRow("max_hints_file_size_in_mb", newSettingColumn(() -> toBytes(config.max_hints_file_size_in_mb)), notWriteable);
+        VIEW.addRow("hints_compression", newSettingColumn(() -> toBytes(config.hints_compression)), notWriteable);
+        VIEW.addRow("sstable_preemptive_open_interval_in_mb", newSettingColumn(() -> toBytes(config.sstable_preemptive_open_interval_in_mb)), notWriteable);
+        VIEW.addRow("incremental_backups", newSettingColumn(() -> toBytes(config.incremental_backups), (b) -> conf.incremental_backups = toBoolean(b)), writeable);
+        VIEW.addRow("trickle_fsync", newSettingColumn(() -> toBytes(config.trickle_fsync)), notWriteable);
+        VIEW.addRow("trickle_fsync_interval_in_kb", newSettingColumn(() -> toBytes(config.trickle_fsync_interval_in_kb)), notWriteable);
+        VIEW.addRow("key_cache_size_in_mb", newSettingColumn(() -> toBytes(config.key_cache_size_in_mb)), notWriteable);
+        VIEW.addRow("key_cache_save_period", newSettingColumn(() -> toBytes(config.key_cache_save_period)), notWriteable);
+        VIEW.addRow("key_cache_keys_to_save", newSettingColumn(() -> toBytes(config.key_cache_keys_to_save)), notWriteable);
+        VIEW.addRow("row_cache_class_name", newSettingColumn(() -> toBytes(config.row_cache_class_name)), notWriteable);
+        VIEW.addRow("row_cache_size_in_mb", newSettingColumn(() -> toBytes(config.row_cache_size_in_mb)), notWriteable);
+        VIEW.addRow("row_cache_save_period", newSettingColumn(() -> toBytes(config.row_cache_save_period)), notWriteable);
+        VIEW.addRow("row_cache_keys_to_save", newSettingColumn(() -> toBytes(config.row_cache_keys_to_save)), notWriteable);
+        VIEW.addRow("counter_cache_size_in_mb", newSettingColumn(() -> toBytes(config.counter_cache_size_in_mb)), notWriteable);
+        VIEW.addRow("counter_cache_save_period", newSettingColumn(() -> toBytes(config.counter_cache_save_period)), notWriteable);
+        VIEW.addRow("counter_cache_keys_to_save", newSettingColumn(() -> toBytes(config.counter_cache_keys_to_save)), notWriteable);
+        VIEW.addRow("file_cache_size_in_mb", newSettingColumn(() -> toBytes(config.file_cache_size_in_mb)), notWriteable);
+        VIEW.addRow("file_cache_round_up", newSettingColumn(() -> toBytes(config.file_cache_round_up)), notWriteable);
+        VIEW.addRow("buffer_pool_use_heap_if_exhausted", newSettingColumn(() -> toBytes(config.buffer_pool_use_heap_if_exhausted)), notWriteable);
+        VIEW.addRow("disk_optimization_strategy", newSettingColumn(() -> toBytes(config.disk_optimization_strategy)), notWriteable);
+        VIEW.addRow("disk_optimization_estimate_percentile", newSettingColumn(() -> toBytes(config.disk_optimization_estimate_percentile)), notWriteable);
+        VIEW.addRow("disk_optimization_page_cross_chance", newSettingColumn(() -> toBytes(config.disk_optimization_page_cross_chance)), notWriteable);
+        VIEW.addRow("inter_dc_tcp_nodelay", newSettingColumn(() -> toBytes(config.inter_dc_tcp_nodelay)), notWriteable);
+        VIEW.addRow("memtable_allocation_type", newSettingColumn(() -> toBytes(config.memtable_allocation_type)), notWriteable);
+       VIEW.addRow("tombstone_warn_threshold", newSettingColumn(() -> toBytes(config.tombstone_warn_threshold), (b) -> conf.tombstone_warn_threshold = toInt(b)), writeable);
+        VIEW.addRow("tombstone_failure_threshold", newSettingColumn(() -> toBytes(config.tombstone_failure_threshold), (b) -> conf.tombstone_failure_threshold = toInt(b)), writeable);
+        VIEW.addRow("index_summary_capacity_in_mb", newSettingColumn(() -> toBytes(config.index_summary_capacity_in_mb)), notWriteable);
+        VIEW.addRow("index_summary_resize_interval_in_minutes", newSettingColumn(() -> toBytes(config.index_summary_resize_interval_in_minutes)), notWriteable);
+        VIEW.addRow("gc_log_threshold_in_ms", newSettingColumn(() -> toBytes(config.gc_log_threshold_in_ms)), notWriteable);
+        VIEW.addRow("gc_warn_threshold_in_ms", newSettingColumn(() -> toBytes(config.gc_warn_threshold_in_ms)), notWriteable);
+        VIEW.addRow("tracetype_query_ttl", newSettingColumn(() -> toBytes(config.tracetype_query_ttl)), notWriteable);
+        VIEW.addRow("tracetype_repair_ttl", newSettingColumn(() -> toBytes(config.tracetype_repair_ttl)), notWriteable);
+        VIEW.addRow("ideal_consistency_level", newSettingColumn(() -> toBytes(config.ideal_consistency_level)), notWriteable);
+        VIEW.addRow("otc_coalescing_strategy", newSettingColumn(() -> toBytes(config.otc_coalescing_strategy)), notWriteable);
+        VIEW.addRow("otc_coalescing_window_us_default", newSettingColumn(() -> toBytes(config.otc_coalescing_window_us_default)), notWriteable);
+        VIEW.addRow("otc_coalescing_window_us", newSettingColumn(() -> toBytes(config.otc_coalescing_window_us)), notWriteable);
+        VIEW.addRow("otc_coalescing_enough_coalesced_messages", newSettingColumn(() -> toBytes(config.otc_coalescing_enough_coalesced_messages)), notWriteable);
+        VIEW.addRow("otc_backlog_expiration_interval_ms_default", newSettingColumn(() -> toBytes(config.otc_backlog_expiration_interval_ms_default)), notWriteable);
+        VIEW.addRow("otc_backlog_expiration_interval_ms", newSettingColumn(() -> toBytes(config.otc_backlog_expiration_interval_ms)), notWriteable);
+        VIEW.addRow("windows_timer_interval", newSettingColumn(() -> toBytes(config.windows_timer_interval)), notWriteable);
+        VIEW.addRow("prepared_statements_cache_size_mb", newSettingColumn(() -> toBytes(config.prepared_statements_cache_size_mb)), notWriteable);
+        VIEW.addRow("enable_user_defined_functions", newSettingColumn(() -> toBytes(config.enable_user_defined_functions)), notWriteable);
+        VIEW.addRow("enable_scripted_user_defined_functions", newSettingColumn(() -> toBytes(config.enable_scripted_user_defined_functions)), notWriteable);
+        VIEW.addRow("enable_materialized_views", newSettingColumn(() -> toBytes(config.enable_materialized_views)), notWriteable);
+        VIEW.addRow("enable_user_defined_functions_threads", newSettingColumn(() -> toBytes(config.enable_user_defined_functions_threads)), notWriteable);
+        VIEW.addRow("user_defined_function_warn_timeout", newSettingColumn(() -> toBytes(config.user_defined_function_warn_timeout)), notWriteable);
+        VIEW.addRow("user_defined_function_fail_timeout", newSettingColumn(() -> toBytes(config.user_defined_function_fail_timeout)), notWriteable);
+        VIEW.addRow("user_function_timeout_policy", newSettingColumn(() -> toBytes(config.user_function_timeout_policy)), notWriteable);
+        VIEW.addRow("back_pressure_enabled", newSettingColumn(() -> toBytes(config.back_pressure_enabled)), notWriteable);
+        VIEW.addRow("back_pressure_strategy", newSettingColumn(() -> toBytes(config.back_pressure_strategy)), notWriteable);
+        VIEW.addRow("repair_command_pool_full_strategy", newSettingColumn(() -> toBytes(config.repair_command_pool_full_strategy)), notWriteable);
+        VIEW.addRow("repair_command_pool_size", newSettingColumn(() -> toBytes(config.repair_command_pool_size)), notWriteable);
+        VIEW.addRow("full_query_log_dir", newSettingColumn(() -> toBytes(config.full_query_log_dir)), notWriteable);
+        VIEW.addRow("block_for_peers_percentage", newSettingColumn(() -> toBytes(config.block_for_peers_percentage)), notWriteable);
+        VIEW.addRow("block_for_peers_timeout_in_secs", newSettingColumn(() -> toBytes(config.block_for_peers_timeout_in_secs)), notWriteable);
     }
 
     private static InetAddress getNetworkInterfaceAddress(String intf, String configName, boolean preferIPv6) throws ConfigurationException

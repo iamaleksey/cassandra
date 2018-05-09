@@ -847,7 +847,7 @@ public final class SystemKeyspace
      */
     public static void loadSystemViews()
     {
-        
+        SystemViewManager.register(DatabaseDescriptor.VIEW);
     }
 
     /**
