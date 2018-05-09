@@ -26,18 +26,56 @@ import com.codahale.metrics.Meter;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.MapBasedSystemView;
+import org.apache.cassandra.db.MapBasedSystemView.DataWrapper;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
+import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.db.marshal.UUIDType;
+import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
+import static org.apache.cassandra.schema.ColumnMetadata.clusteringColumn;
+import static org.apache.cassandra.schema.ColumnMetadata.partitionKeyColumn;
+import static org.apache.cassandra.schema.ColumnMetadata.regularColumn;
+import static org.apache.cassandra.schema.SchemaConstants.SYSTEM_KEYSPACE_NAME;
 
 /**
  * Metrics for compaction.
  */
 public class CompactionMetrics implements CompactionManager.CompactionExecutorStatsCollector
 {
+    /**
+     * The name of the system view used to expose information on the currenty running compactions.
+     */
+    private static final String COMPACTIONS_VIEW_NAME = "sv_compactions";
+
+    //~ Compactions system view columns //////////////////////////////////////
+
+    private static final ColumnMetadata COMPACTION_ID_COLUMN = partitionKeyColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "compaction_id", UUIDType.instance, 0);
+    private static final ColumnMetadata TASK_TYPE_COLUMN = clusteringColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "task_type", UTF8Type.instance, 0);
+    private static final ColumnMetadata KEYSPACE_COLUMN = clusteringColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "keyspace", UTF8Type.instance, 1);
+    private static final ColumnMetadata TABLE_COLUMN = clusteringColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "table", UTF8Type.instance, 2);
+    private static final ColumnMetadata BYTES_COMPACTED_COLUMN = regularColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "bytes_compacted", LongType.instance);
+    private static final ColumnMetadata BYTES_TOTAL_COLUMN = regularColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "bytes_total", LongType.instance);
+    private static final ColumnMetadata UNIT_COLUMN = regularColumn(SYSTEM_KEYSPACE_NAME, COMPACTIONS_VIEW_NAME, "unit", UTF8Type.instance);
+
+    /**
+     * The the system view used to expose information on the currenty running compactions.
+     */
+    public static final MapBasedSystemView COMPACTIONS_VIEW = new MapBasedSystemView(COMPACTIONS_VIEW_NAME,
+                                                                                     "Exposes information on the currenty running compactions",
+                                                                                     COMPACTION_ID_COLUMN,
+                                                                                     TASK_TYPE_COLUMN,
+                                                                                     KEYSPACE_COLUMN,
+                                                                                     TABLE_COLUMN,
+                                                                                     BYTES_COMPACTED_COLUMN,
+                                                                                     BYTES_TOTAL_COLUMN,
+                                                                                     UNIT_COLUMN);
+
     public static final MetricNameFactory factory = new DefaultNameFactory("Compaction");
 
     // a synchronized identity set of running tasks to their compaction info
@@ -157,6 +195,13 @@ public class CompactionMetrics implements CompactionManager.CompactionExecutorSt
     public void beginCompaction(CompactionInfo.Holder ci)
     {
         compactions.add(ci);
+        COMPACTIONS_VIEW.addRow(ci.getCompactionInfo().compactionId(),
+                                ci.getCompactionInfo().getTaskType().toString(),
+                                ci.getCompactionInfo().getKeyspace(),
+                                ci.getCompactionInfo().getColumnFamily(),
+                                DataWrapper.wrap(BYTES_COMPACTED_COLUMN, () -> LongType.instance.decompose(ci.getCompactionInfo().getCompleted())),
+                                DataWrapper.wrap(BYTES_TOTAL_COLUMN, () -> LongType.instance.decompose(ci.getCompactionInfo().getTotal())),
+                                DataWrapper.wrap(UNIT_COLUMN, () -> UTF8Type.instance.decompose(ci.getCompactionInfo().getUnit())));
     }
 
     public void finishCompaction(CompactionInfo.Holder ci)
@@ -164,6 +209,10 @@ public class CompactionMetrics implements CompactionManager.CompactionExecutorSt
         compactions.remove(ci);
         bytesCompacted.inc(ci.getCompactionInfo().getTotal());
         totalCompactionsCompleted.mark();
+        COMPACTIONS_VIEW.removeRow(ci.getCompactionInfo().compactionId(),
+                                   ci.getCompactionInfo().getTaskType().toString(),
+                                   ci.getCompactionInfo().getKeyspace(),
+                                   ci.getCompactionInfo().getColumnFamily());
     }
 
     public static List<CompactionInfo.Holder> getCompactions()

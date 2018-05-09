@@ -91,6 +91,11 @@ public final class CompactionInfo implements Serializable
         return total;
     }
 
+    public String getUnit()
+    {
+        return unit;
+    }
+
     public OperationType getTaskType()
     {
         return tasktype;

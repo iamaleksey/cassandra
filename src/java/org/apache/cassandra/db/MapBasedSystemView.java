@@ -178,6 +178,40 @@ public final class MapBasedSystemView implements SystemView
         addRow(toDecoratedKey(partitionKey), toClustering(clustering), columns);
     }
 
+    /**
+     * Adds to the specified row to the given partition overriding any existing one.
+     *
+     * @param partitionKey the partition key value
+     * @param firstClustering the first clustering column value
+     * @param secondClustering the second clustering column value
+     * @param columns the row columns
+     */
+    public final void addRow(Object partitionKey,
+                             Object firstClustering,
+                             Object secondClustering,
+                             DataWrapper... columns)
+    {
+        addRow(toDecoratedKey(partitionKey), toClustering(firstClustering, secondClustering), columns);
+    }
+
+    /**
+     * Adds to the specified row to the given partition overriding any existing one.
+     *
+     * @param partitionKey the partition key value
+     * @param firstClustering the first clustering column value
+     * @param secondClustering the second clustering column value
+     * @param thirdClustering the third clustering column value
+     * @param columns the row columns
+     */
+    public final void addRow(Object partitionKey,
+                             Object firstClustering,
+                             Object secondClustering,
+                             Object thirdClustering,
+                             DataWrapper... columns)
+    {
+        addRow(toDecoratedKey(partitionKey), toClustering(firstClustering, secondClustering, thirdClustering), columns);
+    }
+
     private Clustering toClustering(Object... clusteringComponents)
     {
         ImmutableList<ColumnMetadata> clusteringColumns = metadata.clusteringColumns();
@@ -253,7 +287,7 @@ public final class MapBasedSystemView implements SystemView
      * @param partitionKey the row partition
      * @param clustering the row clustering key
      */
-    public void removeRow(Object partitionKey, Object clustering)
+    public void removeRow(Object partitionKey, Object... clustering)
     {
         removeRow(toDecoratedKey(partitionKey), toClustering(clustering));
     }

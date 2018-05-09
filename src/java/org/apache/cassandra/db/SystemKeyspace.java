@@ -54,6 +54,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.metrics.CompactionMetrics;
 import org.apache.cassandra.metrics.RestorableMeter;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.*;
@@ -847,7 +848,7 @@ public final class SystemKeyspace
      */
     public static void loadSystemViews()
     {
-        SystemViewManager.register(DatabaseDescriptor.VIEW);
+        SystemViewManager.register(DatabaseDescriptor.VIEW, CompactionMetrics.COMPACTIONS_VIEW);
     }
 
     /**
