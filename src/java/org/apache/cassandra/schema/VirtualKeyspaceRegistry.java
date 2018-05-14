@@ -38,6 +38,18 @@ final class VirtualKeyspaceRegistry
     }
 
     @Nullable
+    VirtualKeyspace getKeyspaceNullable(String name)
+    {
+        return virtualKeyspaces.get(name);
+    }
+
+    @Nullable
+    VirtualTable getTableNullable(TableId id)
+    {
+        return virtualTables.get(id);
+    }
+
+    @Nullable
     KeyspaceMetadata getKeyspaceMetadataNullable(String name)
     {
         VirtualKeyspace keyspace = virtualKeyspaces.get(name);
@@ -49,12 +61,6 @@ final class VirtualKeyspaceRegistry
     {
         VirtualTable table = virtualTables.get(id);
         return null != table ? table.metadata() : null;
-    }
-
-    @Nullable
-    VirtualTable getVirtualTableNullable(TableMetadata table)
-    {
-        return virtualTables.get(table.id);
     }
 
     Iterable<KeyspaceMetadata> virtualKeyspacesMetadata()

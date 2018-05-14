@@ -614,9 +614,6 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public static void  scrubDataDirectories(TableMetadata metadata) throws StartupException
     {
-        if (metadata.isVirtual())
-            return;
-
         Directories directories = new Directories(metadata);
         Set<File> cleanedDirectories = new HashSet<>();
 
@@ -2770,7 +2767,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             return null;
 
         TableMetadata table = Schema.instance.getTableMetadata(ksName, cfName);
-        if (table == null || table.isVirtual())
+        if (table == null)
             return null;
 
         return keyspace.getColumnFamilyStore(table.id);
@@ -2778,8 +2775,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
     public static TableMetrics metricsFor(TableId tableId)
     {
-        ColumnFamilyStore store = getIfExists(tableId);
-        return store == null ? null : store.metric;
+        return getIfExists(tableId).metric;
     }
 
     public DiskBoundaries getDiskBoundaries()

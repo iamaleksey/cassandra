@@ -382,28 +382,25 @@ public final class SystemKeyspace
 
     private static Tables tables()
     {
-        return Tables.builder()
-                     .add(BuiltIndexes,
-                          Batches,
-                          Paxos,
-                          Local,
-                          PeersV2,
-                          LegacyPeers,
-                          PeerEventsV2,
-                          LegacyPeerEvents,
-                          RangeXfers,
-                          CompactionHistory,
-                          SSTableActivity,
-                          SizeEstimates,
-                          AvailableRanges,
-                          TransferredRangesV2,
-                          LegacyTransferredRanges,
-                          ViewBuildsInProgress,
-                          BuiltViews,
-                          PreparedStatements,
-                          Repairs)
-                     .add(SystemViewManager.getViewsMetadata())
-                     .build();
+        return Tables.of(BuiltIndexes,
+                         Batches,
+                         Paxos,
+                         Local,
+                         PeersV2,
+                         LegacyPeers,
+                         PeerEventsV2,
+                         LegacyPeerEvents,
+                         RangeXfers,
+                         CompactionHistory,
+                         SSTableActivity,
+                         SizeEstimates,
+                         AvailableRanges,
+                         TransferredRangesV2,
+                         LegacyTransferredRanges,
+                         ViewBuildsInProgress,
+                         BuiltViews,
+                         PreparedStatements,
+                         Repairs);
     }
 
     private static Functions functions()

@@ -156,7 +156,7 @@ public class CreateViewStatement extends SchemaAlteringStatement
         if (metadata.isCounter())
             throw new InvalidRequestException("Materialized views are not supported on counter tables");
         if (metadata.isView())
-            throw new InvalidRequestException("Materialized views cannot be created against other materialized views");
+            throw new InvalidRequestException("Materialized views are not supported on virtual tables");
 
         if (metadata.params.gcGraceSeconds == 0)
         {

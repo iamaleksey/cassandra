@@ -38,7 +38,7 @@ public class VirtualKeyspace
         this.name = name;
         this.tables = ImmutableList.copyOf(tables);
 
-        metadata = KeyspaceMetadata.virtual(name, Tables.of(Iterables.transform(tables, t -> t.metadata)));
+        metadata = KeyspaceMetadata.virtual(name, Tables.of(Iterables.transform(tables, VirtualTable::metadata)));
     }
 
     public String name()

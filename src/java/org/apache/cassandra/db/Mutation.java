@@ -58,11 +58,6 @@ public class Mutation implements IMutation
 
     private final boolean cdcEnabled;
 
-    /**
-     * {@code true} if the mutation affect only system views.
-     */
-    private final boolean isSystemView;
-
     public Mutation(PartitionUpdate update)
     {
         this(update.metadata().keyspace, update.partitionKey(), ImmutableMap.of(update.metadata().id, update), System.currentTimeMillis());
@@ -75,14 +70,9 @@ public class Mutation implements IMutation
         this.modifications = modifications;
 
         boolean cdc = false;
-        boolean isSystemView = false;
         for (PartitionUpdate pu : modifications.values())
-        {
             cdc |= pu.metadata().params.cdc;
-            isSystemView |= pu.metadata().isVirtual();
-        }
         this.cdcEnabled = cdc;
-        this.isSystemView = isSystemView;
         this.createdAt = createdAt;
     }
 
@@ -136,12 +126,6 @@ public class Mutation implements IMutation
     public boolean isEmpty()
     {
         return modifications.isEmpty();
-    }
-
-    @Override
-    public boolean isSystemViewMutation()
-    {
-        return isSystemView;
     }
 
     /**

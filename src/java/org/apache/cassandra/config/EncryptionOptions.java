@@ -122,5 +122,4 @@ public class EncryptionOptions
             return "{'internode_encryption': '" + internode_encryption + "'}";
         }
     }
-
 }

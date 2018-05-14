@@ -35,6 +35,7 @@ import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.UnknownIndexException;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -255,9 +256,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     public void maybeValidateIndex()
     {
         if (null != index)
-            Keyspace.openAndGetIndexRegistry(metadata())
-                    .getIndex(index)
-                    .validate(this);
+            IndexRegistry.obtain(metadata()).getIndex(index).validate(this);
     }
 
     /**

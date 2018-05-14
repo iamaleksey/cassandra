@@ -17,71 +17,58 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.statements.SelectStatement;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.ReadQuery;
-import org.apache.cassandra.db.filter.DataLimits;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.exceptions.CassandraException;
-import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.db.filter.ClusteringIndexFilter;
+import org.apache.cassandra.db.filter.ColumnFilter;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.schema.TableMetadata;
 
 /**
- * Base requirements for a VirtualTable. This is required to provide metadata about the virtual table, such as the
- * partition and clustering keys, and provide a ReadQuery for a SelectStatement.
+ * A system view used to expose system information.
  */
-public abstract class VirtualTable
+public interface VirtualTable
 {
-    protected final TableMetadata metadata;
-
-    public VirtualTable(TableMetadata metadata)
-    {
-        if (!metadata.isVirtual())
-            throw new IllegalArgumentException("Cannot initialize a virtual table with non-virtual table metadata " + metadata);
-        this.metadata = metadata;
-    }
-
     /**
-     * Is this table writable?
+     * Returns the view name.
      *
-     * @return True if UPDATE is supported
+     * @return the view name.
      */
-    public boolean writable()
+    default String name()
     {
-        return false;
-    }
-
-    public TableMetadata metadata()
-    {
-        return metadata;
+        return metadata().name;
     }
 
     /**
-     * If the table allows unrestricted queries (ie filter on clustering key with no partition). Since These tables are
-     * not backed by the C* data model, this restriction isnt always necessary.
-     */
-    public boolean allowFiltering()
-    {
-        return false;
-    }
-
-    /**
-     * Return some implementation of a ReadQuery for a given select statement and query options.
-     * 
-     * @return ReadQuery
-     */
-    public abstract ReadQuery getQuery(SelectStatement selectStatement, QueryOptions options, DataLimits limits, int nowInSec);
-
-    /**
-     * Execute an update operation.
+     * Returns the view metadata.
      *
-     * @param partitionKey
-     *            partition key for the update.
+     * @return the view metadata.
      */
-    public void mutate(DecoratedKey partitionKey, Row row) throws CassandraException
-    {
-        // this should not be called unless writable is overridden
-        throw new InvalidRequestException("Not Implemented");
-    }
+    TableMetadata metadata();
+
+    /**
+     * Applies the specified update.
+     * @param update the update to apply
+     */
+    void apply(PartitionUpdate update);
+
+    /**
+     * Selects the rows from a single partition.
+     *
+     * @param partitionKey the partition key
+     * @param clusteringIndexFilter the clustering columns to selected
+     * @param columnFilter the selected columns
+     * @return the rows corresponding to the requested data.
+     */
+    UnfilteredPartitionIterator select(DecoratedKey partitionKey, ClusteringIndexFilter clusteringIndexFilter, ColumnFilter columnFilter);
+
+    /**
+     * Selects the rows from a range of partitions.
+     *
+     * @param dataRange the range of data to retrieve
+     * @param columnFilter the selected columns
+     * @return the rows corresponding to the requested data.
+     */
+    UnfilteredPartitionIterator select(DataRange dataRange, ColumnFilter columnFilter);
 }

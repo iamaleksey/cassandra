@@ -79,5 +79,4 @@ public class TransparentDataEncryptionOptions
     {
         return "{'enabled': '" + enabled + "'}";
     }
-
 }

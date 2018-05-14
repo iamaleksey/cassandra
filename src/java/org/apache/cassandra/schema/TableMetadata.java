@@ -791,7 +791,7 @@ public final class TableMetadata
 
         public Builder flags(Set<Flag> val)
         {
-            flags = Sets.newHashSet(val);
+            flags = val;
             return this;
         }
 

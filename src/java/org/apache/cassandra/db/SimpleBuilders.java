@@ -44,7 +44,7 @@ public abstract class SimpleBuilders
     {
     }
 
-    public static DecoratedKey makePartitonKey(TableMetadata metadata, Object... partitionKey)
+    private static DecoratedKey makePartitonKey(TableMetadata metadata, Object... partitionKey)
     {
         if (partitionKey.length == 1 && partitionKey[0] instanceof DecoratedKey)
             return (DecoratedKey)partitionKey[0];
@@ -53,7 +53,7 @@ public abstract class SimpleBuilders
         return metadata.partitioner.decorateKey(key);
     }
 
-    public static Clustering makeClustering(TableMetadata metadata, Object... clusteringColumns)
+    private static Clustering makeClustering(TableMetadata metadata, Object... clusteringColumns)
     {
         if (clusteringColumns.length == 1 && clusteringColumns[0] instanceof Clustering)
             return (Clustering)clusteringColumns[0];

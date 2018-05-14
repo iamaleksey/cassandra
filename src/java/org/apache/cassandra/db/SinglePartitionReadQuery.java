@@ -54,7 +54,7 @@ public interface SinglePartitionReadQuery extends ReadQuery
                                                                         ClusteringIndexFilter clusteringIndexFilter)
     {
         return metadata.isVirtual()
-             ? SystemViewSinglePartitionReadQuery.Group.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKeys, clusteringIndexFilter)
+             ? VirtualTableSinglePartitionReadQuery.Group.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKeys, clusteringIndexFilter)
              : SinglePartitionReadCommand.Group.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKeys, clusteringIndexFilter);
     }
 
@@ -101,8 +101,8 @@ public interface SinglePartitionReadQuery extends ReadQuery
                                                   ClusteringIndexFilter clusteringIndexFilter)
     {
         return metadata.isVirtual()
-             ? SystemViewSinglePartitionReadQuery.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter)
-             :         SinglePartitionReadCommand.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
+             ? VirtualTableSinglePartitionReadQuery.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter)
+             : SinglePartitionReadCommand.create(metadata, nowInSec, columnFilter, rowFilter, limits, partitionKey, clusteringIndexFilter);
     }
 
     /**

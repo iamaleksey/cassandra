@@ -29,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.auth.*;
+import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableMetadataRef;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -64,6 +65,9 @@ public class ClientState
         // (nodetool, cqlsh, bulkloader, etc.)
         for (String cf : Arrays.asList(SystemKeyspace.LOCAL, SystemKeyspace.LEGACY_PEERS, SystemKeyspace.PEERS_V2))
             READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SYSTEM_KEYSPACE_NAME, cf));
+
+        for (String table : Arrays.asList(VirtualSchemaKeyspace.KEYSPACES, VirtualSchemaKeyspace.TABLES, VirtualSchemaKeyspace.COLUMNS))
+            READABLE_SYSTEM_RESOURCES.add(DataResource.table(VirtualSchemaKeyspace.NAME, table));
 
         SchemaKeyspace.ALL.forEach(table -> READABLE_SYSTEM_RESOURCES.add(DataResource.table(SchemaConstants.SCHEMA_KEYSPACE_NAME, table)));
 

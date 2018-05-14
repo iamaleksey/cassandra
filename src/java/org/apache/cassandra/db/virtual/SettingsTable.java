@@ -28,14 +28,11 @@ import java.util.function.Consumer;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.cql3.ColumnIdentifier;
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
+import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.BooleanType;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.rows.Row;
-import org.apache.cassandra.exceptions.CassandraException;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.TableMetadata;
@@ -46,7 +43,7 @@ import org.slf4j.LoggerFactory;
 
 import com.google.common.collect.ImmutableMap;
 
-final class SettingsTable extends SystemView2
+final class SettingsTable extends AbstractVirtualTable
 {
     private static final Logger logger = LoggerFactory.getLogger(SettingsTable.class);
 
@@ -102,65 +99,62 @@ final class SettingsTable extends SystemView2
                            .addRegularColumn(VALUE, UTF8Type.instance)
                            .addRegularColumn(WRITABLE, BooleanType.instance)
                            .build());
-        valueColumn = metadata.getColumn(ColumnIdentifier.getInterned(VALUE, false));
+        valueColumn = metadata().getColumn(ColumnIdentifier.getInterned(VALUE, false));
     }
 
-    public boolean writable()
-    {
-        return true;
-    }
-
-    /**
-     * Execute an update operation.
-     *
-     * @param partitionKey partition key for the update.
-     */
     @Override
-    public void mutate(DecoratedKey partitionKey, Row row) throws CassandraException
+    public void apply(PartitionUpdate update)
     {
-        String setting = metadata.partitionKeyType.getString(partitionKey.getKey());
+        DecoratedKey partitionKey = update.partitionKey();
+
+        String setting = metadata().partitionKeyType.getString(partitionKey.getKey());
         if (WRITABLES.get(setting) == null)
             throw new InvalidRequestException(setting + " is not a writable setting.");
-        if (row.getCell(valueColumn) == null)
+
+        org.apache.cassandra.db.rows.Row row = update.getRow(Clustering.EMPTY);
+
+        if (update.getRow(Clustering.EMPTY).getCell(valueColumn) == null)
             throw new InvalidRequestException("Only 'value' is updatable.");
 
         String value = valueColumn.type.getString(row.getCell(valueColumn).value());
         WRITABLES.get(setting).accept(value);
     }
 
-    public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+    public DataSet data()
     {
-        Config config = DatabaseDescriptor.getRawConfig();
+        SimpleDataSet result = new SimpleDataSet(metadata());
+
         for (Field f : FIELDS)
         {
-            if (!Modifier.isStatic(f.getModifiers()))
+            if (Modifier.isStatic(f.getModifiers()))
+                continue;
+
+            try
             {
-                try
+                Object value = f.get(DatabaseDescriptor.getRawConfig());
+                if (value != null && value.getClass().isArray())
                 {
-                    Object value = f.get(config);
-                    if (value != null && value.getClass().isArray())
+                    StringBuilder s = new StringBuilder("[");
+                    for (int i = 0; i < Array.getLength(value); i++)
                     {
-                        StringBuilder s = new StringBuilder("[");
-                        for (int i = 0; i < Array.getLength(value); i++)
-                        {
-                            s.append("'");
-                            s.append(Array.get(value, i));
-                            s.append("'");
-                            if (i < Array.getLength(value) - 1)
-                                s.append(", ");
-                        }
-                        value = s.append("]").toString();
+                        s.append('\'');
+                        s.append(Array.get(value, i));
+                        s.append('\'');
+                        if (i < Array.getLength(value) - 1)
+                            s.append(", ");
                     }
-                    result.row(f.getName())
-                            .column(VALUE, value == null ? "--" : value.toString())
-                            .column(WRITABLE, WRITABLES.get(f.getName()) != null)
-                            .endRow();
+                    value = s.append(']').toString();
                 }
-                catch (IllegalAccessException | IllegalArgumentException e)
-                {
-                    logger.error("", e);
-                }
+                result.row(f.getName())
+                      .column(VALUE, value == null ? "--" : value.toString())
+                      .column(WRITABLE, WRITABLES.get(f.getName()) != null);
+            }
+            catch (IllegalAccessException | IllegalArgumentException e)
+            {
+                logger.error("", e);
             }
         }
+
+        return result;
     }
 }

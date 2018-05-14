@@ -253,7 +253,8 @@ public abstract class ModificationStatement implements CQLStatement
         checkFalse(isCounter() && attrs.isTimestampSet(), "Cannot provide custom timestamp for counter updates");
         checkFalse(isCounter() && attrs.isTimeToLiveSet(), "Cannot provide custom TTL for counter updates");
         checkFalse(isView(), "Cannot directly modify a materialized view");
-        checkFalse(metadata.isVirtual() && attrs.isTimeToLiveSet(), "TTLs are not supported on System Views");
+        checkFalse(isVirtual() && attrs.isTimeToLiveSet(), "Expiring columns are not supported by virtual tables");
+        checkFalse(isVirtual() && hasConditions(), "Conditional updates are not supported by virtual tables");
     }
 
     public RegularAndStaticColumns updatedColumns()
@@ -273,18 +274,12 @@ public abstract class ModificationStatement implements CQLStatement
         // columns is if we set some static columns, and in that case no clustering
         // columns should be given. So in practice, it's enough to check if we have
         // either the table has no clustering or if it has at least one of them set.
-        return !metadata().isVirtual() &&
-                (metadata().clusteringColumns().isEmpty() || restrictions.hasClusteringColumnsRestrictions());
+        return metadata().clusteringColumns().isEmpty() || restrictions.hasClusteringColumnsRestrictions();
     }
 
     public boolean updatesStaticRow()
     {
-        return !metadata().isVirtual() && operations.appliesToStaticColumns();
-    }
-
-    public boolean updatesVirtualRows()
-    {
-        return metadata().isVirtual();
+        return operations.appliesToStaticColumns();
     }
 
     public List<Operation> getRegularOperations()
@@ -441,13 +436,6 @@ public abstract class ModificationStatement implements CQLStatement
     public ResultMessage execute(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        if (metadata.isVirtual())
-        {
-            UpdatesCollector collector = new SingleTableUpdatesCollector(metadata, updatedColumns, 1);
-            addUpdates(collector, options, false, options.getTimestamp(queryState), queryStartNanoTime);
-            return null;
-        }
-
         if (options.getConsistency() == null)
             throw new InvalidRequestException("Invalid empty consistency level");
 
@@ -459,7 +447,7 @@ public abstract class ModificationStatement implements CQLStatement
     private ResultMessage executeWithoutCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        if (metadata.isVirtual())
+        if (isVirtual())
             return executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
 
         ConsistencyLevel cl = options.getConsistency();
@@ -478,9 +466,6 @@ public abstract class ModificationStatement implements CQLStatement
     public ResultMessage executeWithCondition(QueryState queryState, QueryOptions options, long queryStartNanoTime)
     throws RequestExecutionException, RequestValidationException
     {
-        if (metadata.isVirtual())
-            return executeInternalWithCondition(queryState, options);
-
         CQL3CasRequest request = makeCasRequest(queryState, options);
 
         try (RowIterator result = StorageProxy.cas(keyspace(),
@@ -613,13 +598,6 @@ public abstract class ModificationStatement implements CQLStatement
 
     public ResultMessage executeInternal(QueryState queryState, QueryOptions options) throws RequestValidationException, RequestExecutionException
     {
-        if (metadata.isVirtual())
-        {
-            UpdatesCollector collector = new SingleTableUpdatesCollector(metadata, updatedColumns, 1);
-            addUpdates(collector, options, true, options.getTimestamp(queryState), System.nanoTime());
-            return null;
-        }
-
         return hasConditions()
                ? executeInternalWithCondition(queryState, options)
                : executeInternalWithoutCondition(queryState, options, System.nanoTime());

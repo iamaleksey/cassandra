@@ -1053,7 +1053,6 @@ public class StorageProxy implements StorageProxyMBean
             //However, Trade off between write metric per CF accuracy vs performance hit due to callbacks. Similar issue exists with CoordinatorReadLatency metric.
             mutations.forEach(mutation -> {
                 mutation.getTableIds().forEach(tableId -> {
-                    if (!SystemViewManager.isRegistered(tableId))
                         Keyspace.open(mutation.getKeyspaceName()).getColumnFamilyStore(tableId).metric.coordinatorWriteLatency.update(latency, TimeUnit.NANOSECONDS);
                 });
             });
@@ -2465,8 +2464,6 @@ public class StorageProxy implements StorageProxyMBean
         TableMetadata metadata = Schema.instance.getTableMetadata(keyspace, cfname);
         if (metadata == null)
             throw new IllegalArgumentException(String.format("Unknown keyspace/cf pair (%s.%s)", keyspace, cfname));
-        if (metadata.isVirtual())
-            throw new IllegalArgumentException(String.format("The operation is not supported on system view (%s.%s)", keyspace, cfname));
 
         logger.debug("Starting a blocking truncate operation on keyspace {}, CF {}", keyspace, cfname);
         if (isAnyStorageHostDown())

@@ -24,10 +24,11 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Optional;
 
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
-import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.IndexMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * The collection of all Index instances for a base table.
@@ -96,4 +97,15 @@ public interface IndexRegistry
      * @param update PartitionUpdate containing the values to be validated by registered Index implementations
      */
     void validate(PartitionUpdate update);
+
+    /**
+     * Returns the {@code IndexRegistry} associated to the specified table.
+     *
+     * @param table the table metadata
+     * @return the {@code IndexRegistry} associated to the specified table
+     */
+    public static IndexRegistry obtain(TableMetadata table)
+    {
+        return table.isVirtual() ? EMPTY : Keyspace.openAndGetStore(table).indexManager;
+    }
 }

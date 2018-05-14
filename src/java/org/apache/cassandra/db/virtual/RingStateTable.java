@@ -18,11 +18,7 @@
 package org.apache.cassandra.db.virtual;
 
 import java.util.Map.Entry;
-import java.util.Set;
 
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -36,7 +32,7 @@ import static org.apache.cassandra.gms.ApplicationState.NATIVE_ADDRESS_AND_PORT;
 import static org.apache.cassandra.gms.ApplicationState.SCHEMA;
 import static org.apache.cassandra.gms.ApplicationState.STATUS_WITH_PORT;
 
-final class RingStateTable extends SystemView2
+final class RingStateTable extends AbstractVirtualTable
 {
     private static final String RPC_READY = "rpc_ready";
     private static final String HOST_ID = "host_id";
@@ -73,13 +69,14 @@ final class RingStateTable extends SystemView2
                            .build());
     }
 
-    public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+    public DataSet data()
     {
-        Set<Entry<InetAddressAndPort, EndpointState>> currentRingState = Gossiper.instance.getEndpointStates();
-        // We should pull the columns from the query state/options
-        for(Entry<InetAddressAndPort, EndpointState> entry : currentRingState)
+        SimpleDataSet result = new SimpleDataSet(metadata());
+
+        for (Entry<InetAddressAndPort, EndpointState> entry : Gossiper.instance.getEndpointStates())
         {
             EndpointState endpoint = entry.getValue();
+
             result.row(entry.getKey().address, entry.getKey().port)
                   .column(NAME, entry.getKey().address.getHostName())
                   .column(STATUS, endpoint.getApplicationState(STATUS_WITH_PORT).value)
@@ -91,8 +88,9 @@ final class RingStateTable extends SystemView2
                   .column(NATIVE_ADDRESS, endpoint.getApplicationState(NATIVE_ADDRESS_AND_PORT).value)
                   .column(NET_VERSION, endpoint.getApplicationState(ApplicationState.NET_VERSION).value)
                   .column(HOST_ID, endpoint.getApplicationState(ApplicationState.HOST_ID).value)
-                  .column(RPC_READY, endpoint.getApplicationState(ApplicationState.RPC_READY).value)
-                  .endRow();
+                  .column(RPC_READY, endpoint.getApplicationState(ApplicationState.RPC_READY).value);
         }
+
+        return result;
     }
 }

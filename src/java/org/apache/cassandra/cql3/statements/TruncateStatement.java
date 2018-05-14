@@ -68,8 +68,9 @@ public class TruncateStatement extends CFStatement implements CQLStatement
             TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
             if (metaData.isView())
                 throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
+
             if (metaData.isVirtual())
-                throw new InvalidRequestException("Cannot use TRUNCATE TABLE on virtual tables");
+                throw new InvalidRequestException("Cannot truncate virtual tables");
 
             StorageProxy.truncateBlocking(keyspace(), columnFamily());
         }
@@ -87,8 +88,9 @@ public class TruncateStatement extends CFStatement implements CQLStatement
             TableMetadata metaData = Schema.instance.getTableMetadata(keyspace(), columnFamily());
             if (metaData.isView())
                 throw new InvalidRequestException("Cannot TRUNCATE materialized view directly; must truncate base table instead");
+
             if (metaData.isVirtual())
-                throw new InvalidRequestException("Cannot use TRUNCATE TABLE on virtual tables");
+                throw new InvalidRequestException("Cannot truncate virtual tables");
 
             ColumnFamilyStore cfs = Keyspace.open(keyspace()).getColumnFamilyStore(columnFamily());
             cfs.truncateBlocking();

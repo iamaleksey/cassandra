@@ -32,12 +32,6 @@ public interface IMutation
     public String toString(boolean shallow);
     public Collection<PartitionUpdate> getPartitionUpdates();
 
-    /**
-     * Checks if this mutation is only affecting system views
-     * @return {@code true} if this mutation is only affecting system views, {@code false} otherwise.
-     */
-    public boolean isSystemViewMutation();
-
     public default void validateIndexedColumns()
     {
         for (PartitionUpdate pu : getPartitionUpdates())

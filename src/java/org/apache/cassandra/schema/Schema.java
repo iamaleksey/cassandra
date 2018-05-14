@@ -42,7 +42,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.sstable.Descriptor;
 import org.apache.cassandra.locator.LocalStrategy;
-import org.apache.cassandra.schema.virtual.VirtualSchemaKeyspace;
+import org.apache.cassandra.db.virtual.VirtualSchemaKeyspace;
 import org.apache.cassandra.utils.Pair;
 import org.cliffc.high_scale_lib.NonBlockingHashMap;
 
@@ -594,9 +594,21 @@ public final class Schema
     }
 
     @Nullable
-    public VirtualTable getVirtualTable(TableMetadata metadata)
+    public VirtualKeyspace getVirtualKeyspaceNullable(String name)
     {
-        return virtualKeyspaces.getVirtualTableNullable(metadata);
+        return virtualKeyspaces.getKeyspaceNullable(name);
+    }
+
+    @Nullable
+    public VirtualTable getVirtualTableNullable(TableMetadata metadata)
+    {
+        return getVirtualTableNullable(metadata.id);
+    }
+
+    @Nullable
+    public VirtualTable getVirtualTableNullable(TableId id)
+    {
+        return virtualKeyspaces.getTableNullable(id);
     }
 
     /**

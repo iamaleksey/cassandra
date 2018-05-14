@@ -15,17 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.schema.virtual;
+package org.apache.cassandra.db.virtual;
 
 import com.google.common.collect.ImmutableList;
 
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.marshal.BytesType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.UTF8Type;
-import org.apache.cassandra.db.virtual.VirtualKeyspace;
 import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Schema;
@@ -35,7 +31,10 @@ import static org.apache.cassandra.schema.TableMetadata.builder;
 
 public final class VirtualSchemaKeyspace extends VirtualKeyspace
 {
-    private static final String NAME = "system_virtual_schema";
+    public static final String NAME = "system_virtual_schema";
+    public static final String KEYSPACES = "keyspaces";
+    public static final String TABLES = "tables";
+    public static final String COLUMNS = "columns";
 
     public static final VirtualSchemaKeyspace instance = new VirtualSchemaKeyspace();
 
@@ -44,27 +43,29 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
         super(NAME, ImmutableList.of(new VirtualKeyspaces(NAME), new VirtualTables(NAME), new VirtualColumns(NAME)));
     }
 
-    private static final class VirtualKeyspaces extends SystemView2
+    private static final class VirtualKeyspaces extends AbstractVirtualTable
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
 
         private VirtualKeyspaces(String keyspace)
         {
-            super(builder(keyspace, "keyspaces")
+            super(builder(keyspace, KEYSPACES)
                  .comment("virtual keyspace definitions")
                  .kind(TableMetadata.Kind.VIRTUAL)
                  .addPartitionKeyColumn(KEYSPACE_NAME, UTF8Type.instance)
                  .build());
         }
 
-        public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+        public DataSet data()
         {
+            SimpleDataSet result = new SimpleDataSet(metadata());
             for (KeyspaceMetadata keyspace : Schema.instance.virtualKeyspacesMetadata())
                 result.row(keyspace.name);
+            return result;
         }
     }
 
-    private static final class VirtualTables extends SystemView2
+    private static final class VirtualTables extends AbstractVirtualTable
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
         private static final String TABLE_NAME = "table_name";
@@ -72,7 +73,7 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
 
         private VirtualTables(String keyspace)
         {
-            super(builder(keyspace, "tables")
+            super(builder(keyspace, TABLES)
                  .comment("virtual table definitions")
                  .kind(TableMetadata.Kind.VIRTUAL)
                  .addPartitionKeyColumn(KEYSPACE_NAME, UTF8Type.instance)
@@ -81,20 +82,24 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
                  .build());
         }
 
-        public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+        public DataSet data()
         {
+            SimpleDataSet result = new SimpleDataSet(metadata());
+
             for (KeyspaceMetadata keyspace : Schema.instance.virtualKeyspacesMetadata())
             {
                 for (TableMetadata table : keyspace.tables)
                 {
                     result.row(table.keyspace, table.name)
-                          .column(COMMENT, table.params.comment);
+                           .column(COMMENT, table.params.comment);
                 }
             }
+
+            return result;
         }
     }
 
-    private static final class VirtualColumns extends SystemView2
+    private static final class VirtualColumns extends AbstractVirtualTable
     {
         private static final String KEYSPACE_NAME = "keyspace_name";
         private static final String TABLE_NAME = "table_name";
@@ -107,7 +112,7 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
 
         private VirtualColumns(String keyspace)
         {
-            super(builder(keyspace, "columns")
+            super(builder(keyspace, COLUMNS)
                  .comment("virtual column definitions")
                  .kind(TableMetadata.Kind.VIRTUAL)
                  .addPartitionKeyColumn(KEYSPACE_NAME, UTF8Type.instance)
@@ -121,8 +126,10 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
                  .build());
         }
 
-        public void read(StatementRestrictions restrictions, QueryOptions options, ResultBuilder result)
+        public DataSet data()
         {
+            SimpleDataSet result = new SimpleDataSet(metadata());
+
             for (KeyspaceMetadata keyspace : Schema.instance.virtualKeyspacesMetadata())
             {
                 for (TableMetadata table : keyspace.tables)
@@ -138,6 +145,8 @@ public final class VirtualSchemaKeyspace extends VirtualKeyspace
                     }
                 }
             }
+
+            return result;
         }
     }
 }

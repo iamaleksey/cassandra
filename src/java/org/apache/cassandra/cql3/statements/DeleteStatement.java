@@ -26,11 +26,9 @@ import org.apache.cassandra.cql3.conditions.Conditions;
 import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.Slice;
-import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.schema.ColumnMetadata;
-import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Pair;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -108,20 +106,6 @@ public class DeleteStatement extends ModificationStatement
                 updateBuilder.add(params.buildRow());
             }
         }
-        if (updatesVirtualRows())
-        {
-            params.newRow(clustering);
-            VirtualTable t = Schema.instance.getVirtualTable(params.metadata);
-            for (Operation op : allOperations()) {
-                if (t.writable())
-                {
-                    op.execute(updateBuilder.partitionKey(), params);
-                }
-                else
-                    throw new org.apache.cassandra.exceptions.InvalidRequestException(String.format("Virtual table %s.%s is not writable", params.metadata.keyspace, params.metadata.name));
-            }
-            t.mutate(updateBuilder.partitionKey(), params.buildRow());
-        }
     }
 
     @Override
@@ -160,7 +144,7 @@ public class DeleteStatement extends ModificationStatement
                                                         Conditions conditions,
                                                         Attributes attrs)
         {
-            checkFalse(metadata.isVirtual(), "DELETE are not supported on virtual tables");
+            checkFalse(metadata.isVirtual(), "virtual tables don't support DELETE statements");
 
             Operations operations = new Operations(type);
 

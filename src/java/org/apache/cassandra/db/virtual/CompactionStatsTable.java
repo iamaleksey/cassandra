@@ -20,9 +20,6 @@ package org.apache.cassandra.db.virtual;
 import java.util.Map;
 import java.util.UUID;
 
-import org.apache.cassandra.cql3.QueryOptions;
-import org.apache.cassandra.cql3.restrictions.StatementRestrictions;
-import org.apache.cassandra.db.SystemView2;
 import org.apache.cassandra.db.compaction.CompactionInfo;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -30,7 +27,7 @@ import org.apache.cassandra.db.marshal.UUIDType;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 
-final class CompactionStatsTable extends SystemView2
+final class CompactionStatsTable extends AbstractVirtualTable
 {
     private final static String HOST_ID = "host_id";
     private final static String COMPACTION_ID = "compaction_id";
@@ -55,8 +52,9 @@ final class CompactionStatsTable extends SystemView2
                            .build());
     }
 
-    public void read(StatementRestrictions restrictions, QueryOptions options, SystemView2.ResultBuilder result)
+    public DataSet data()
     {
+        SimpleDataSet result = new SimpleDataSet(metadata());
         UUID hostId = StorageService.instance.getLocalHostUUID();
         for (Map<String, String> c : CompactionManager.instance.getCompactions())
         {
@@ -65,8 +63,8 @@ final class CompactionStatsTable extends SystemView2
                   .column(KEYSPACE_NAME, c.get(CompactionInfo.KEYSPACE))
                   .column(TABLE_NAME, c.get(CompactionInfo.COLUMNFAMILY))
                   .column(BYTES_COMPACTED, c.get(CompactionInfo.COMPLETED))
-                  .column(BYTES_TOTAL, c.get(CompactionInfo.TOTAL))
-                  .endRow();
+                  .column(BYTES_TOTAL, c.get(CompactionInfo.TOTAL));
         }
+        return result;
     }
 }

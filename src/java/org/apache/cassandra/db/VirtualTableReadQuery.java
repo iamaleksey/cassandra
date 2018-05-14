@@ -29,13 +29,13 @@ import org.apache.cassandra.service.ClientState;
 /**
  * Base class for the {@code ReadQuery} implementations use to query system views.
  */
-public abstract class SystemViewReadQuery extends AbstractReadQuery
+public abstract class VirtualTableReadQuery extends AbstractReadQuery
 {
-    protected SystemViewReadQuery(TableMetadata metadata,
-                                  int nowInSec,
-                                  ColumnFilter columnFilter,
-                                  RowFilter rowFilter,
-                                  DataLimits limits)
+    protected VirtualTableReadQuery(TableMetadata metadata,
+                                    int nowInSec,
+                                    ColumnFilter columnFilter,
+                                    RowFilter rowFilter,
+                                    DataLimits limits)
     {
         super(metadata, nowInSec, columnFilter, rowFilter, limits);
     }
@@ -57,9 +57,9 @@ public abstract class SystemViewReadQuery extends AbstractReadQuery
     @Override
     public UnfilteredPartitionIterator executeLocally(ReadExecutionController executionController)
     {
-        UnfilteredPartitionIterator resultIterator = querySystemView();
+        UnfilteredPartitionIterator resultIterator = queryVirtualTable();
         return limits().filter(rowFilter().filter(resultIterator, nowInSec()), nowInSec(), selectsFullPartition());
     }
 
-    protected abstract UnfilteredPartitionIterator querySystemView();
+    protected abstract UnfilteredPartitionIterator queryVirtualTable();
 }

@@ -77,12 +77,6 @@ public class CounterMutation implements IMutation
         return mutation.getPartitionUpdates();
     }
 
-    @Override
-    public boolean isSystemViewMutation()
-    {
-        return false;
-    }
-
     public Mutation getMutation()
     {
         return mutation;

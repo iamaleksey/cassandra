@@ -39,7 +39,6 @@ import org.apache.cassandra.db.repair.CassandraKeyspaceRepairManager;
 import org.apache.cassandra.db.view.ViewManager;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.IndexRegistry;
 import org.apache.cassandra.index.SecondaryIndexManager;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -174,17 +173,6 @@ public class Keyspace
     }
 
     /**
-     * Returns the {@code IndexRegistry} associated to the specified table.
-     *
-     * @param table the table metadata
-     * @return the {@code IndexRegistry} associated to the specified table
-     */
-    public static IndexRegistry openAndGetIndexRegistry(TableMetadata table)
-    {
-        return table.isVirtual() ? IndexRegistry.EMPTY : openAndGetStore(table).indexManager;
-    }
-
-    /**
      * Removes every SSTable in the directory from the appropriate Tracker's view.
      * @param directory the unreadable directory, possibly with SSTables in it, but not necessarily.
      */
@@ -221,8 +209,6 @@ public class Keyspace
         TableMetadata table = Schema.instance.getTableMetadata(getName(), tableName);
         if (table == null)
             throw new IllegalArgumentException(String.format("Unknown keyspace/cf pair (%s.%s)", getName(), tableName));
-        if (table.isVirtual())
-            throw new IllegalArgumentException(String.format("The operation is not supported on system view (%s.%s)", getName(), tableName));
         return getColumnFamilyStore(table.id);
     }
 
@@ -349,9 +335,6 @@ public class Keyspace
         this.viewManager = new ViewManager(this);
         for (TableMetadata cfm : metadata.tablesAndViews())
         {
-            if (cfm.isVirtual())
-                continue;
-
             logger.trace("Initializing {}.{}", getName(), cfm.name);
             initCf(Schema.instance.getTableMetadataRef(cfm.id), loadSSTables);
         }
@@ -634,17 +617,10 @@ public class Keyspace
         {
             for (PartitionUpdate upd : mutation.getPartitionUpdates())
             {
-                TableMetadata table = upd.metadata();
-                if (table.isVirtual())
-                {
-                    SystemViewManager.get(table).apply(upd);
-                    continue;
-                }
-
-                ColumnFamilyStore cfs = columnFamilyStores.get(table.id);
+                ColumnFamilyStore cfs = columnFamilyStores.get(upd.metadata().id);
                 if (cfs == null)
                 {
-                    logger.error("Attempting to mutate non-existant table {} ({}.{})", table.id, table.keyspace, table.name);
+                    logger.error("Attempting to mutate non-existant table {} ({}.{})", upd.metadata().id, upd.metadata().keyspace, upd.metadata().name);
                     continue;
                 }
                 AtomicLong baseComplete = new AtomicLong(Long.MAX_VALUE);
@@ -654,13 +630,13 @@ public class Keyspace
                     try
                     {
                         Tracing.trace("Creating materialized view mutations from base table replica");
-                        viewManager.forTable(table.id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
+                        viewManager.forTable(upd.metadata().id).pushViewReplicaUpdates(upd, makeDurable, baseComplete);
                     }
                     catch (Throwable t)
                     {
                         JVMStabilityInspector.inspectThrowable(t);
                         logger.error(String.format("Unknown exception caught while attempting to update MaterializedView! %s",
-                                                   table.toString()), t);
+                                                   upd.metadata().toString()), t);
                         throw t;
                     }
                 }

@@ -61,6 +61,9 @@ public class DropKeyspaceStatement extends SchemaAlteringStatement
 
     public Event.SchemaChange announceMigration(QueryState queryState, boolean isLocalOnly) throws ConfigurationException
     {
+        if (null != Schema.instance.getVirtualKeyspaceNullable(keyspace))
+            throw new InvalidRequestException("Cannot drop virtual keyspaces");
+
         try
         {
             MigrationManager.announceKeyspaceDrop(keyspace, isLocalOnly);

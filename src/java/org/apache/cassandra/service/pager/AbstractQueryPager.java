@@ -26,7 +26,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.transport.ProtocolVersion;
 
-public abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
+abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPager
 {
     protected final T query;
     protected final DataLimits limits;
@@ -104,10 +104,10 @@ public abstract class AbstractQueryPager<T extends ReadQuery> implements QueryPa
         }
     }
 
-    public class RowPager extends Pager<Row>
+    private class RowPager extends Pager<Row>
     {
 
-        public RowPager(DataLimits pageLimits, int nowInSec)
+        private RowPager(DataLimits pageLimits, int nowInSec)
         {
             super(pageLimits, nowInSec);
         }

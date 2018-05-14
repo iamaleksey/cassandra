@@ -29,43 +29,45 @@ import org.apache.cassandra.db.filter.RowFilter;
 import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.virtual.VirtualTable;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.schema.ColumnMetadata;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
 
 /**
  * A read query that selects a (part of a) single partition of a system view.
  */
-public class SystemViewSinglePartitionReadQuery extends SystemViewReadQuery implements SinglePartitionReadQuery
+public class VirtualTableSinglePartitionReadQuery extends VirtualTableReadQuery implements SinglePartitionReadQuery
 {
     private final DecoratedKey partitionKey;
     private final ClusteringIndexFilter clusteringIndexFilter;
 
-    public static SystemViewSinglePartitionReadQuery create(TableMetadata metadata,
-                                                            int nowInSec,
-                                                            ColumnFilter columnFilter,
-                                                            RowFilter rowFilter,
-                                                            DataLimits limits,
-                                                            DecoratedKey partitionKey,
-                                                            ClusteringIndexFilter clusteringIndexFilter)
+    public static VirtualTableSinglePartitionReadQuery create(TableMetadata metadata,
+                                                              int nowInSec,
+                                                              ColumnFilter columnFilter,
+                                                              RowFilter rowFilter,
+                                                              DataLimits limits,
+                                                              DecoratedKey partitionKey,
+                                                              ClusteringIndexFilter clusteringIndexFilter)
     {
-        return new SystemViewSinglePartitionReadQuery(metadata,
-                                                      nowInSec,
-                                                      columnFilter,
-                                                      rowFilter,
-                                                      limits,
-                                                      partitionKey,
-                                                      clusteringIndexFilter);
+        return new VirtualTableSinglePartitionReadQuery(metadata,
+                                                        nowInSec,
+                                                        columnFilter,
+                                                        rowFilter,
+                                                        limits,
+                                                        partitionKey,
+                                                        clusteringIndexFilter);
     }
 
-    private SystemViewSinglePartitionReadQuery(TableMetadata metadata,
-                                               int nowInSec,
-                                               ColumnFilter columnFilter,
-                                               RowFilter rowFilter,
-                                               DataLimits limits,
-                                               DecoratedKey partitionKey,
-                                               ClusteringIndexFilter clusteringIndexFilter)
+    private VirtualTableSinglePartitionReadQuery(TableMetadata metadata,
+                                                 int nowInSec,
+                                                 ColumnFilter columnFilter,
+                                                 RowFilter rowFilter,
+                                                 DataLimits limits,
+                                                 DecoratedKey partitionKey,
+                                                 ClusteringIndexFilter clusteringIndexFilter)
     {
         super(metadata, nowInSec, columnFilter, rowFilter, limits);
         this.partitionKey = partitionKey;
@@ -110,24 +112,24 @@ public class SystemViewSinglePartitionReadQuery extends SystemViewReadQuery impl
     @Override
     public SinglePartitionReadQuery withUpdatedLimit(DataLimits newLimits)
     {
-        return new SystemViewSinglePartitionReadQuery(metadata(),
-                                                      nowInSec(),
-                                                      columnFilter(),
-                                                      rowFilter(),
-                                                      newLimits,
-                                                      partitionKey(),
-                                                      clusteringIndexFilter);
+        return new VirtualTableSinglePartitionReadQuery(metadata(),
+                                                        nowInSec(),
+                                                        columnFilter(),
+                                                        rowFilter(),
+                                                        newLimits,
+                                                        partitionKey(),
+                                                        clusteringIndexFilter);
     }
 
     @Override
     public SinglePartitionReadQuery forPaging(Clustering lastReturned, DataLimits limits)
     {
-        return new SystemViewSinglePartitionReadQuery(metadata(),
-                                                      nowInSec(),
-                                                      columnFilter(),
-                                                      rowFilter(),
-                                                      limits,
-                                                      partitionKey(),
+        return new VirtualTableSinglePartitionReadQuery(metadata(),
+                                                        nowInSec(),
+                                                        columnFilter(),
+                                                        rowFilter(),
+                                                        limits,
+                                                        partitionKey(),
                                                       lastReturned == null ? clusteringIndexFilter
                                                               : clusteringIndexFilter.forPaging(metadata().comparator,
                                                                                                 lastReturned,
@@ -135,16 +137,16 @@ public class SystemViewSinglePartitionReadQuery extends SystemViewReadQuery impl
     }
 
     @Override
-    protected UnfilteredPartitionIterator querySystemView()
+    protected UnfilteredPartitionIterator queryVirtualTable()
     {
-        SystemView view = SystemViewManager.get(metadata());
+        VirtualTable view = Schema.instance.getVirtualTableNullable(metadata());
         return view.select(partitionKey, clusteringIndexFilter, columnFilter());
     }
 
     /**
      * Groups multiple single partition read queries.
      */
-    public static class Group extends SinglePartitionReadQuery.Group<SystemViewSinglePartitionReadQuery>
+    public static class Group extends SinglePartitionReadQuery.Group<VirtualTableSinglePartitionReadQuery>
     {
         public static Group create(TableMetadata metadata,
                                    int nowInSec,
@@ -154,10 +156,10 @@ public class SystemViewSinglePartitionReadQuery extends SystemViewReadQuery impl
                                    List<DecoratedKey> partitionKeys,
                                    ClusteringIndexFilter clusteringIndexFilter)
         {
-            List<SystemViewSinglePartitionReadQuery> queries = new ArrayList<>(partitionKeys.size());
+            List<VirtualTableSinglePartitionReadQuery> queries = new ArrayList<>(partitionKeys.size());
             for (DecoratedKey partitionKey : partitionKeys)
             {
-                queries.add(SystemViewSinglePartitionReadQuery.create(metadata,
+                queries.add(VirtualTableSinglePartitionReadQuery.create(metadata,
                                                                         nowInSec,
                                                                         columnFilter,
                                                                         rowFilter,
@@ -169,12 +171,12 @@ public class SystemViewSinglePartitionReadQuery extends SystemViewReadQuery impl
             return new Group(queries, limits);
         }
 
-        public Group(List<SystemViewSinglePartitionReadQuery> queries, DataLimits limits)
+        public Group(List<VirtualTableSinglePartitionReadQuery> queries, DataLimits limits)
         {
             super(queries, limits);
         }
 
-        public static Group one(SystemViewSinglePartitionReadQuery query)
+        public static Group one(VirtualTableSinglePartitionReadQuery query)
         {
             return new Group(Collections.singletonList(query), query.limits());
         }

@@ -70,7 +70,7 @@ public class BatchStatement implements CQLStatement
     private final boolean updatesStaticRow;
     private final Attributes attrs;
     private final boolean hasConditions;
-    private final boolean updateSystemViews;
+    private final boolean updatesVirtualTables;
 
     private static final Logger logger = LoggerFactory.getLogger(BatchStatement.class);
 
@@ -105,13 +105,13 @@ public class BatchStatement implements CQLStatement
         RegularAndStaticColumns.Builder conditionBuilder = RegularAndStaticColumns.builder();
         boolean updateRegular = false;
         boolean updateStatic = false;
-        boolean updateSystemViews = false;
+        boolean updatesVirtualTables = false;
 
         for (ModificationStatement stmt : statements)
         {
             regularBuilder.addAll(stmt.metadata(), stmt.updatedColumns());
             updateRegular |= stmt.updatesRegularRows();
-            updateSystemViews |= stmt.isVirtual();
+            updatesVirtualTables |= stmt.isVirtual();
             if (stmt.hasConditions())
             {
                 hasConditions = true;
@@ -125,7 +125,7 @@ public class BatchStatement implements CQLStatement
         this.updatesRegularRows = updateRegular;
         this.updatesStaticRow = updateStatic;
         this.hasConditions = hasConditions;
-        this.updateSystemViews = updateSystemViews;
+        this.updatesVirtualTables = updatesVirtualTables;
     }
 
     public Iterable<org.apache.cassandra.cql3.functions.Function> getFunctions()
@@ -166,25 +166,13 @@ public class BatchStatement implements CQLStatement
         boolean hasCounters = false;
         boolean hasNonCounters = false;
 
-        boolean hasSystemViews = false;
-        boolean hasNonsystemViews = false;
+        boolean hasVirtualTables = false;
+        boolean hasRegularTables = false;
 
         for (ModificationStatement statement : statements)
         {
-            if (timestampSet && statement.isCounter())
-                throw new InvalidRequestException("Cannot provide custom timestamp for a BATCH containing counters");
-
             if (timestampSet && statement.isTimestampSet())
                 throw new InvalidRequestException("Timestamp must be set either on BATCH or individual statements");
-
-            if (isCounter() && !statement.isCounter())
-                throw new InvalidRequestException("Cannot include non-counter statement in a counter batch");
-
-            if (isLogged() && statement.isCounter())
-                throw new InvalidRequestException("Cannot include a counter statement in a logged batch");
-
-            if (isLogged() && statement.isVirtual())
-                throw new InvalidRequestException("Cannot include a system view statement in a logged batch");
 
             if (statement.isCounter())
                 hasCounters = true;
@@ -192,16 +180,31 @@ public class BatchStatement implements CQLStatement
                 hasNonCounters = true;
 
             if (statement.isVirtual())
-                hasSystemViews = true;
+                hasVirtualTables = true;
             else
-                hasNonsystemViews = true;
+                hasRegularTables = true;
         }
+
+        if (timestampSet && hasCounters)
+            throw new InvalidRequestException("Cannot provide custom timestamp for a BATCH containing counters");
+
+        if (isCounter() && hasNonCounters)
+            throw new InvalidRequestException("Cannot include non-counter statement in a counter batch");
 
         if (hasCounters && hasNonCounters)
             throw new InvalidRequestException("Counter and non-counter mutations cannot exist in the same batch");
 
-        if (hasSystemViews && hasNonsystemViews)
-            throw new InvalidRequestException("System view and non system view mutations cannot exist in the same batch");
+        if (isLogged() && hasCounters)
+            throw new InvalidRequestException("Cannot include a counter statement in a logged batch");
+
+        if (isLogged() && hasVirtualTables)
+            throw new InvalidRequestException("Cannot include a virtual table statement in a logged batch");
+
+        if (hasVirtualTables && hasRegularTables)
+            throw new InvalidRequestException("Mutations for virtual and regular tables cannot exist in the same batch");
+
+        if (hasConditions && hasVirtualTables)
+            throw new InvalidRequestException("Conditional BATCH statements cannot include mutations for virtual tables");
 
         if (hasConditions)
         {
@@ -370,14 +373,9 @@ public class BatchStatement implements CQLStatement
             throw new InvalidRequestException("Invalid empty serial consistency level");
 
         if (hasConditions)
-        {
-            if (updateSystemViews)
-                return executeInternalWithConditions(options, queryState);
-
             return executeWithConditions(options, queryState, queryStartNanoTime);
-        }
 
-        if (updateSystemViews)
+        if (updatesVirtualTables)
             executeInternalWithoutCondition(queryState, options, queryStartNanoTime);
         else    
             executeWithoutConditions(getMutations(options, local, now, queryStartNanoTime), options.getConsistency(), queryStartNanoTime);
@@ -513,10 +511,7 @@ public class BatchStatement implements CQLStatement
         BatchQueryOptions batchOptions = BatchQueryOptions.withoutPerStatementVariables(options);
 
         if (hasConditions)
-        {
-
             return executeInternalWithConditions(batchOptions, queryState);
-        }
 
         executeInternalWithoutCondition(queryState, batchOptions, System.nanoTime());
         return new ResultMessage.Void();
