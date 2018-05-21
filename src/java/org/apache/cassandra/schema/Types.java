@@ -155,7 +155,7 @@ public final class Types implements Iterable<UserType>
             if (!thisNext.getKey().equals(otherNext.getKey()))
                 return false;
 
-            if (!thisNext.getValue().equals(otherNext.getValue(), true))  // ignore freezing
+            if (!thisNext.getValue().equals(otherNext.getValue()))
                 return false;
         }
         return true;

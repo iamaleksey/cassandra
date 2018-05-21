@@ -243,7 +243,7 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
             && Functions.typesMatch(returnType, that.returnType)
             && Objects.equal(stateFunction, that.stateFunction)
             && Objects.equal(finalFunction, that.finalFunction)
-            && ((stateType == that.stateType) || ((stateType != null) && stateType.equals(that.stateType, true)))  // ignore freezing
+            && ((stateType == that.stateType) || ((stateType != null) && stateType.equals(that.stateType)))
             && Objects.equal(initcond, that.initcond);
     }
 

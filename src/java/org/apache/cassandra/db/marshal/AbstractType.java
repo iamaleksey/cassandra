@@ -505,17 +505,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
         return getClass().getName();
     }
 
-    /**
-     * Checks to see if two types are equal when ignoring or not ignoring differences in being frozen, depending on
-     * the value of the ignoreFreezing parameter.
-     * @param other type to compare
-     * @param ignoreFreezing if true, differences in the types being frozen will be ignored
-     */
-    public boolean equals(Object other, boolean ignoreFreezing)
-    {
-        return this.equals(other);
-    }
-
     public void checkComparable()
     {
         switch (comparisonType)

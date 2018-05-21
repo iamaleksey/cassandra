@@ -333,12 +333,6 @@ public class UserType extends TupleType
     @Override
     public boolean equals(Object o)
     {
-        return o instanceof UserType && equals(o, false);
-    }
-
-    @Override
-    public boolean equals(Object o, boolean ignoreFreezing)
-    {
         if(!(o instanceof UserType))
             return false;
 
@@ -347,7 +341,7 @@ public class UserType extends TupleType
         if (!keyspace.equals(that.keyspace) || !name.equals(that.name) || !fieldNames.equals(that.fieldNames))
             return false;
 
-        if (!ignoreFreezing && isMultiCell != that.isMultiCell)
+        if (isMultiCell != that.isMultiCell)
             return false;
 
         if (this.types.size() != that.types.size())
@@ -355,10 +349,8 @@ public class UserType extends TupleType
 
         Iterator<AbstractType<?>> otherTypeIter = that.types.iterator();
         for (AbstractType<?> type : types)
-        {
-            if (!type.equals(otherTypeIter.next(), ignoreFreezing))
+            if (!type.equals(otherTypeIter.next()))
                 return false;
-        }
 
         return true;
     }
