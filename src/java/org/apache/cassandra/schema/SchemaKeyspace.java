@@ -283,25 +283,25 @@ public final class SchemaKeyspace
 
             Mutation.SimpleBuilder builder = makeCreateKeyspaceMutation(ks.name, ks.params, timestamp);
 
-            kd.types.created.forEach(t  -> addTypeToSchemaMutation(t, builder));
-            kd.types.dropped.forEach(t  -> addDropTypeToSchemaMutation(t, builder));
-            kd.types.altered.forEach(td -> addTypeToSchemaMutation(td.after, builder));
+            kd.types.created.forEach(t -> addTypeToSchemaMutation(t, builder));
+            kd.types.dropped.forEach(t -> addDropTypeToSchemaMutation(t, builder));
+            kd.types.altered(Difference.SHALLOW).forEach(td -> addTypeToSchemaMutation(td.after, builder));
 
-            kd.tables.created.forEach(t  -> addTableToSchemaMutation(t, true, builder));
-            kd.tables.dropped.forEach(t  -> addDropTableToSchemaMutation(t, builder));
-            kd.tables.altered.forEach(td -> addAlterTableToSchemaMutation(td.before, td.after, builder));
+            kd.tables.created.forEach(t -> addTableToSchemaMutation(t, true, builder));
+            kd.tables.dropped.forEach(t -> addDropTableToSchemaMutation(t, builder));
+            kd.tables.altered(Difference.SHALLOW).forEach(td -> addAlterTableToSchemaMutation(td.before, td.after, builder));
 
-            kd.views.created.forEach(v  -> addViewToSchemaMutation(v, true, builder));
-            kd.views.dropped.forEach(v  -> addDropViewToSchemaMutation(v, builder));
-            kd.views.altered.forEach(vd -> addAlterViewToSchemaMutation(vd.before, vd.after, builder));
+            kd.views.created.forEach(v -> addViewToSchemaMutation(v, true, builder));
+            kd.views.dropped.forEach(v -> addDropViewToSchemaMutation(v, builder));
+            kd.views.altered(Difference.SHALLOW).forEach(vd -> addAlterViewToSchemaMutation(vd.before, vd.after, builder));
 
-            kd.udfs.created.forEach(f  -> addFunctionToSchemaMutation((UDFunction) f, builder));
-            kd.udfs.dropped.forEach(f  -> addDropFunctionToSchemaMutation((UDFunction) f, builder));
-            kd.udfs.altered.forEach(fd -> addFunctionToSchemaMutation(fd.after, builder));
+            kd.udfs.created.forEach(f -> addFunctionToSchemaMutation((UDFunction) f, builder));
+            kd.udfs.dropped.forEach(f -> addDropFunctionToSchemaMutation((UDFunction) f, builder));
+            kd.udfs.altered(Difference.SHALLOW).forEach(fd -> addFunctionToSchemaMutation(fd.after, builder));
 
-            kd.udas.created.forEach(a  -> addAggregateToSchemaMutation((UDAggregate) a, builder));
-            kd.udas.dropped.forEach(a  -> addDropAggregateToSchemaMutation((UDAggregate) a, builder));
-            kd.udas.altered.forEach(ad -> addAggregateToSchemaMutation(ad.after, builder));
+            kd.udas.created.forEach(a -> addAggregateToSchemaMutation((UDAggregate) a, builder));
+            kd.udas.dropped.forEach(a -> addDropAggregateToSchemaMutation((UDAggregate) a, builder));
+            kd.udas.altered(Difference.SHALLOW).forEach(ad -> addAggregateToSchemaMutation(ad.after, builder));
 
             mutations.put(ks.name, builder.build());
         });

@@ -30,6 +30,7 @@ import org.apache.cassandra.db.marshal.AbstractType;
 import org.apache.cassandra.db.marshal.UserType;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.exceptions.InvalidRequestException;
+import org.apache.cassandra.schema.Difference;
 import org.apache.cassandra.schema.Functions;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.ProtocolVersion;
@@ -128,13 +129,11 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
     public void addFunctionsTo(List<Function> functions)
     {
         functions.add(this);
-        if (stateFunction != null)
-        {
-            stateFunction.addFunctionsTo(functions);
 
-            if (finalFunction != null)
-                finalFunction.addFunctionsTo(functions);
-        }
+        stateFunction.addFunctionsTo(functions);
+
+        if (finalFunction != null)
+            finalFunction.addFunctionsTo(functions);
     }
 
     public boolean isAggregate()
@@ -239,13 +238,83 @@ public class UDAggregate extends AbstractFunction implements AggregateFunction
             return false;
 
         UDAggregate that = (UDAggregate) o;
-        return Objects.equal(name, that.name)
-            && Functions.typesMatch(argTypes, that.argTypes)
-            && Functions.typesMatch(returnType, that.returnType)
+        return equalsWithoutTypesAndFunctions(that)
+            && argTypes.equals(that.argTypes)
+            && returnType.equals(that.returnType)
             && Objects.equal(stateFunction, that.stateFunction)
             && Objects.equal(finalFunction, that.finalFunction)
-            && ((stateType == that.stateType) || ((stateType != null) && stateType.equals(that.stateType, true)))  // ignore freezing
-            && Objects.equal(initcond, that.initcond);
+            && ((stateType == that.stateType) || ((stateType != null) && stateType.equals(that.stateType)));
+    }
+
+    private boolean equalsWithoutTypesAndFunctions(UDAggregate other)
+    {
+        return name.equals(other.name)
+            && argTypes.size() == other.argTypes.size()
+            && Objects.equal(initcond, other.initcond);
+    }
+
+    @Override
+    public Optional<Difference> compare(Function function)
+    {
+        if (!(function instanceof UDAggregate))
+            throw new IllegalArgumentException();
+
+        UDAggregate other = (UDAggregate) function;
+
+        if (!equalsWithoutTypesAndFunctions(other)
+        || ((null == finalFunction) != (null == other.finalFunction))
+        || ((null == stateType) != (null == other.stateType)))
+            return Optional.of(Difference.SHALLOW);
+
+        boolean differsDeeply = false;
+
+        if (null != finalFunction && !finalFunction.equals(other.finalFunction))
+        {
+            if (finalFunction.name().equals(other.finalFunction.name()))
+                differsDeeply = true;
+            else
+                return Optional.of(Difference.SHALLOW);
+        }
+
+        if (null != stateType && !stateType.equals(other.stateType))
+        {
+            if (stateType.asCQL3Type().toString().equals(other.stateType.asCQL3Type().toString()))
+                differsDeeply = true;
+            else
+                return Optional.of(Difference.SHALLOW);
+        }
+
+        if (!returnType.equals(other.returnType))
+        {
+            if (returnType.asCQL3Type().toString().equals(other.returnType.asCQL3Type().toString()))
+                differsDeeply = true;
+            else
+                return Optional.of(Difference.SHALLOW);
+        }
+
+        for (int i = 0; i < argTypes().size(); i++)
+        {
+            AbstractType<?> thisType = argTypes.get(i);
+            AbstractType<?> thatType = other.argTypes.get(i);
+
+            if (!thisType.equals(thatType))
+            {
+                if (thisType.asCQL3Type().toString().equals(thatType.asCQL3Type().toString()))
+                    differsDeeply = true;
+                else
+                    return Optional.of(Difference.SHALLOW);
+            }
+        }
+
+        if (!stateFunction.equals(other.stateFunction))
+        {
+            if (stateFunction.name().equals(other.stateFunction.name()))
+                differsDeeply = true;
+            else
+                return Optional.of(Difference.SHALLOW);
+        }
+
+        return differsDeeply ? Optional.of(Difference.DEEP) : Optional.empty();
     }
 
     @Override

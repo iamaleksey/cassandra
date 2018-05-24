@@ -27,6 +27,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -46,6 +47,7 @@ import com.datastax.driver.core.TypeCodec;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.marshal.UserType;
+import org.apache.cassandra.schema.Difference;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.cql3.ColumnIdentifier;
 import org.apache.cassandra.db.marshal.AbstractType;
@@ -422,7 +424,7 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
     }
 
     /**
-     * Like {@link #executeAsync(int, List)} but the first parameter is already in non-serialized form.
+     * Like {@link #executeAsync(ProtocolVersion, List)} but the first parameter is already in non-serialized form.
      * Remaining parameters (2nd paramters and all others) are in {@code parameters}.
      * This is used to prevent superfluous (de)serialization of the state of aggregates.
      * Means: scalar functions of aggregates are called using this variant.
@@ -631,12 +633,57 @@ public abstract class UDFunction extends AbstractFunction implements ScalarFunct
             return false;
 
         UDFunction that = (UDFunction)o;
-        return Objects.equal(name, that.name)
-            && Objects.equal(argNames, that.argNames)
-            && Functions.typesMatch(argTypes, that.argTypes)
-            && Functions.typesMatch(returnType, that.returnType)
-            && Objects.equal(language, that.language)
-            && Objects.equal(body, that.body);
+        return equalsWithoutTypes(that)
+            && argTypes.equals(that.argTypes)
+            && returnType.equals(that.returnType);
+    }
+
+    private boolean equalsWithoutTypes(UDFunction other)
+    {
+        return name.equals(other.name)
+            && argTypes.size() == other.argTypes.size()
+            && argNames.equals(other.argNames)
+            && body.equals(other.body)
+            && language.equals(other.language)
+            && calledOnNullInput == other.calledOnNullInput;
+    }
+
+    @Override
+    public Optional<Difference> compare(Function function)
+    {
+        if (!(function instanceof UDFunction))
+            throw new IllegalArgumentException();
+
+        UDFunction other = (UDFunction) function;
+
+        if (!equalsWithoutTypes(other))
+            return Optional.of(Difference.SHALLOW);
+
+        boolean typesDifferDeeply = false;
+
+        if (!returnType.equals(other.returnType))
+        {
+            if (returnType.asCQL3Type().toString().equals(other.returnType.asCQL3Type().toString()))
+                typesDifferDeeply = true;
+            else
+                return Optional.of(Difference.SHALLOW);
+        }
+
+        for (int i = 0; i < argTypes().size(); i++)
+        {
+            AbstractType<?> thisType = argTypes.get(i);
+            AbstractType<?> thatType = other.argTypes.get(i);
+
+            if (!thisType.equals(thatType))
+            {
+                if (thisType.asCQL3Type().toString().equals(thatType.asCQL3Type().toString()))
+                    typesDifferDeeply = true;
+                else
+                    return Optional.of(Difference.SHALLOW);
+            }
+        }
+
+        return typesDifferDeeply ? Optional.of(Difference.DEEP) : Optional.empty();
     }
 
     @Override

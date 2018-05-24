@@ -207,9 +207,9 @@ public final class Views implements Iterable<ViewMetadata>
         }
     }
 
-    static ViewsDiff diff(Views before, Views after, Diff.Mode mode)
+    static ViewsDiff diff(Views before, Views after)
     {
-        return ViewsDiff.diff(before, after, mode);
+        return ViewsDiff.diff(before, after);
     }
 
     static final class ViewsDiff extends Diff<Views, ViewMetadata>
@@ -221,7 +221,7 @@ public final class Views implements Iterable<ViewMetadata>
             super(created, dropped, altered);
         }
 
-        private static ViewsDiff diff(Views before, Views after, Mode mode)
+        private static ViewsDiff diff(Views before, Views after)
         {
             if (before == after)
                 return NONE;
@@ -233,8 +233,8 @@ public final class Views implements Iterable<ViewMetadata>
             before.forEach(viewBefore ->
             {
                 ViewMetadata viewAfter = after.getNullable(viewBefore.name());
-                if (null != viewAfter && !viewBefore.equals(viewAfter, mode))
-                    altered.add(new Altered<>(viewBefore, viewAfter));
+                if (null != viewAfter)
+                    viewBefore.compare(viewAfter).ifPresent(kind -> altered.add(new Altered<>(viewBefore, viewAfter, kind)));
             });
 
             return new ViewsDiff(created, dropped, altered.build());

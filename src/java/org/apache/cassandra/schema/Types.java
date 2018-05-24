@@ -183,7 +183,7 @@ public final class Types implements Iterable<UserType>
             if (!thisNext.getKey().equals(otherNext.getKey()))
                 return false;
 
-            if (!thisNext.getValue().equals(otherNext.getValue(), true))  // ignore freezing
+            if (!thisNext.getValue().equals(otherNext.getValue()))
                 return false;
         }
         return true;
@@ -358,9 +358,9 @@ public final class Types implements Iterable<UserType>
         }
     }
 
-    static TypesDiff diff(Types before, Types after, Diff.Mode mode)
+    static TypesDiff diff(Types before, Types after)
     {
-        return TypesDiff.diff(before, after, mode);
+        return TypesDiff.diff(before, after);
     }
 
     static final class TypesDiff extends Diff<Types, UserType>
@@ -372,7 +372,7 @@ public final class Types implements Iterable<UserType>
             super(created, dropped, altered);
         }
 
-        private static TypesDiff diff(Types before, Types after, Mode mode)
+        private static TypesDiff diff(Types before, Types after)
         {
             if (before == after)
                 return NONE;
@@ -384,8 +384,8 @@ public final class Types implements Iterable<UserType>
             before.forEach(typeBefore ->
             {
                 UserType typeAfter = after.getNullable(typeBefore.name);
-                if (null != typeAfter && !typeBefore.equals(typeAfter, mode))
-                    altered.add(new Altered<>(typeBefore, typeAfter));
+                if (null != typeAfter)
+                    typeBefore.compare(typeAfter).ifPresent(kind -> altered.add(new Altered<>(typeBefore, typeAfter, kind)));
             });
 
             return new TypesDiff(created, dropped, altered.build());

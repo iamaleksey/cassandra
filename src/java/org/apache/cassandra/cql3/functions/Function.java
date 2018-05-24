@@ -19,10 +19,11 @@ package org.apache.cassandra.cql3.functions;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.Optional;
 
 import org.apache.cassandra.cql3.AssignmentTestable;
 import org.apache.cassandra.db.marshal.AbstractType;
-import org.apache.cassandra.schema.Diff;
+import org.apache.cassandra.schema.Difference;
 import org.github.jamm.Unmetered;
 
 @Unmetered
@@ -58,8 +59,8 @@ public interface Function extends AssignmentTestable
      */
     public String columnName(List<String> columnNames);
 
-    default boolean equals(Function other, Diff.Mode mode)
+    public default Optional<Difference> compare(Function other)
     {
-        return equals(other);
+        throw new UnsupportedOperationException();
     }
 }

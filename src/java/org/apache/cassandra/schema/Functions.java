@@ -179,7 +179,7 @@ public final class Functions implements Iterable<Function>
      * or
      *    ALTER TYPE foo RENAME ...
      */
-    public static boolean typesMatch(AbstractType<?> t1, AbstractType<?> t2)
+    private static boolean typesMatch(AbstractType<?> t1, AbstractType<?> t2)
     {
         return t1.freeze().asCQL3Type().toString().equals(t2.freeze().asCQL3Type().toString());
     }
@@ -304,15 +304,15 @@ public final class Functions implements Iterable<Function>
     }
 
     @SuppressWarnings("unchecked")
-    static FunctionsDiff<UDFunction> udfsDiff(Functions before, Functions after, Diff.Mode mode)
+    static FunctionsDiff<UDFunction> udfsDiff(Functions before, Functions after)
     {
-        return (FunctionsDiff<UDFunction>) FunctionsDiff.diff(before, after, Filter.UDF, mode);
+        return (FunctionsDiff<UDFunction>) FunctionsDiff.diff(before, after, Filter.UDF);
     }
 
     @SuppressWarnings("unchecked")
-    static FunctionsDiff<UDAggregate> udasDiff(Functions before, Functions after, Diff.Mode mode)
+    static FunctionsDiff<UDAggregate> udasDiff(Functions before, Functions after)
     {
-        return (FunctionsDiff<UDAggregate>) FunctionsDiff.diff(before, after, Filter.UDA, mode);
+        return (FunctionsDiff<UDAggregate>) FunctionsDiff.diff(before, after, Filter.UDA);
     }
 
     public static final class FunctionsDiff<T extends Function> extends Diff<Functions, T>
@@ -324,7 +324,7 @@ public final class Functions implements Iterable<Function>
             super(created, dropped, altered);
         }
 
-        private static FunctionsDiff diff(Functions before, Functions after, Filter filter, Mode mode)
+        private static FunctionsDiff diff(Functions before, Functions after, Filter filter)
         {
             if (before == after)
                 return NONE;
@@ -337,8 +337,7 @@ public final class Functions implements Iterable<Function>
             {
                 after.find(functionBefore.name(), functionBefore.argTypes(), filter).ifPresent(functionAfter ->
                 {
-                    if (!functionBefore.equals(functionAfter, mode))
-                        altered.add(new Altered<>(functionBefore, functionAfter));
+                    functionBefore.compare(functionAfter).ifPresent(kind -> altered.add(new Altered<>(functionBefore, functionAfter, kind)));
                 });
             });
 

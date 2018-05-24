@@ -266,9 +266,9 @@ public final class KeyspaceMetadata
                                                                      params.replication.options);
     }
 
-    static Optional<KeyspaceDiff> diff(KeyspaceMetadata before, KeyspaceMetadata after, Diff.Mode mode)
+    static Optional<KeyspaceDiff> diff(KeyspaceMetadata before, KeyspaceMetadata after)
     {
-        return KeyspaceDiff.diff(before, after, mode);
+        return KeyspaceDiff.diff(before, after);
     }
 
     public static final class KeyspaceDiff
@@ -300,7 +300,7 @@ public final class KeyspaceMetadata
             this.udas = udas;
         }
 
-        private static Optional<KeyspaceDiff> diff(KeyspaceMetadata before, KeyspaceMetadata after, Diff.Mode mode)
+        private static Optional<KeyspaceDiff> diff(KeyspaceMetadata before, KeyspaceMetadata after)
         {
             if (before == after)
                 return Optional.empty();
@@ -311,16 +311,16 @@ public final class KeyspaceMetadata
                 throw new IllegalArgumentException(msg);
             }
 
-            TablesDiff tables = Tables.diff(before.tables, after.tables, mode);
-            ViewsDiff views = Views.diff(before.views, after.views, mode);
-            TypesDiff types = Types.diff(before.types, after.types, mode);
+            TablesDiff tables = Tables.diff(before.tables, after.tables);
+            ViewsDiff views = Views.diff(before.views, after.views);
+            TypesDiff types = Types.diff(before.types, after.types);
 
             @SuppressWarnings("unchecked") FunctionsDiff<UDFunction>  udfs = FunctionsDiff.NONE;
             @SuppressWarnings("unchecked") FunctionsDiff<UDAggregate> udas = FunctionsDiff.NONE;
             if (before.functions != after.functions)
             {
-                udfs = Functions.udfsDiff(before.functions, after.functions, mode);
-                udas = Functions.udasDiff(before.functions, after.functions, mode);
+                udfs = Functions.udfsDiff(before.functions, after.functions);
+                udas = Functions.udasDiff(before.functions, after.functions);
             }
 
             if (before.params.equals(after.params) && tables.isEmpty() && views.isEmpty() && types.isEmpty() && udfs.isEmpty() && udas.isEmpty())

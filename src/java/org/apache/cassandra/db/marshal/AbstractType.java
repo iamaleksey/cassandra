@@ -488,9 +488,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
 
     /**
      * Tests whether a CQL value having this type can be assigned to the provided receiver.
-     *
-     * @param keyspace the keyspace from which the receiver is.
-     * @param receiver the receiver for which we want to test type compatibility with.
      */
     public AssignmentTestable.TestResult testAssignment(AbstractType<?> receiverType)
     {
@@ -523,17 +520,6 @@ public abstract class AbstractType<T> implements Comparator<ByteBuffer>, Assignm
     public String toString()
     {
         return getClass().getName();
-    }
-
-    /**
-     * Checks to see if two types are equal when ignoring or not ignoring differences in being frozen, depending on
-     * the value of the ignoreFreezing parameter.
-     * @param other type to compare
-     * @param ignoreFreezing if true, differences in the types being frozen will be ignored
-     */
-    public boolean equals(Object other, boolean ignoreFreezing)
-    {
-        return this.equals(other);
     }
 
     public void checkComparable()

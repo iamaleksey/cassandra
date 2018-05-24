@@ -19,6 +19,7 @@ package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.commons.lang3.builder.ToStringBuilder;
@@ -91,15 +92,18 @@ public final class ViewMetadata
             return false;
 
         ViewMetadata other = (ViewMetadata) o;
-        return Objects.equals(baseTableId, other.baseTableId)
-               && Objects.equals(includeAllColumns, other.includeAllColumns)
-               && Objects.equals(whereClause, other.whereClause)
-               && Objects.equals(metadata, other.metadata);
+        return baseTableId.equals(other.baseTableId)
+            && includeAllColumns == other.includeAllColumns
+            && whereClause.equals(other.whereClause)
+            && metadata.equals(other.metadata);
     }
 
-    public boolean equals(ViewMetadata other, Diff.Mode mode)
+    Optional<Difference> compare(ViewMetadata other)
     {
-        return equals(other);
+        if (!baseTableId.equals(other.baseTableId) || includeAllColumns != other.includeAllColumns || !whereClause.equals(other.whereClause))
+            return Optional.of(Difference.SHALLOW);
+
+        return metadata.compare(other.metadata);
     }
 
     @Override

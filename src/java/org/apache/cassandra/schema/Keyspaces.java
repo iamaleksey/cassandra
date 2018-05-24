@@ -197,18 +197,17 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
      *
      * Has two modes of operation:
      *
-     * 1. Mode.ON_DISK - compares schemas as they would be serialized, e.g. ignores differences in UserType-s for tables,
+     * 1. Mode.DEEP - compares schemas as they would be serialized, e.g. ignores differences in UserType-s for tables,
      *    and only takes into account the names of UDTs, as we only store type names in system_schema.tables
-     * 2. Mode.IN_MEMORY - compares metadata objects thoroughly, accounting for every object in the graph. e.g. two TableMetadata
+     * 2. Mode.SHALLOW - compares metadata objects thoroughly, accounting for every object in the graph. e.g. two TableMetadata
      *    objects would be considered different if a UDT they refer to has added a new field
      *
      * @param before schema before the changes
      * @param after schema after the changes
-     * @param mode of comparison to make - in memory or on disk representations
      */
-    static KeyspacesDiff diff(Keyspaces before, Keyspaces after, Diff.Mode mode)
+    static KeyspacesDiff diff(Keyspaces before, Keyspaces after)
     {
-        return KeyspacesDiff.diff(before, after, mode);
+        return KeyspacesDiff.diff(before, after);
     }
 
     public static final class KeyspacesDiff
@@ -226,7 +225,7 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
             this.altered = altered;
         }
 
-        private static KeyspacesDiff diff(Keyspaces before, Keyspaces after, Diff.Mode mode)
+        private static KeyspacesDiff diff(Keyspaces before, Keyspaces after)
         {
             if (before == after)
                 return NONE;
@@ -239,7 +238,7 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
             {
                 KeyspaceMetadata keyspaceAfter = after.getNullable(keyspaceBefore.name);
                 if (null != keyspaceAfter)
-                    KeyspaceMetadata.diff(keyspaceBefore, keyspaceAfter, mode).ifPresent(altered::add);
+                    KeyspaceMetadata.diff(keyspaceBefore, keyspaceAfter).ifPresent(altered::add);
             });
 
             return new KeyspacesDiff(created, dropped, altered.build());

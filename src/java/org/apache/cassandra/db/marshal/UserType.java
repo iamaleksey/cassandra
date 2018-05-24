@@ -27,7 +27,7 @@ import com.google.common.collect.Lists;
 import org.apache.cassandra.cql3.*;
 import org.apache.cassandra.db.rows.Cell;
 import org.apache.cassandra.db.rows.CellPath;
-import org.apache.cassandra.schema.Diff;
+import org.apache.cassandra.schema.Difference;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.transport.ProtocolVersion;
 import org.apache.cassandra.serializers.TypeSerializer;
@@ -332,39 +332,44 @@ public class UserType extends TupleType
     @Override
     public boolean equals(Object o)
     {
-        return o instanceof UserType && equals(o, false);
-    }
-
-    @Override
-    public boolean equals(Object o, boolean ignoreFreezing)
-    {
         if(!(o instanceof UserType))
             return false;
 
         UserType that = (UserType)o;
 
-        if (!keyspace.equals(that.keyspace) || !name.equals(that.name) || !fieldNames.equals(that.fieldNames))
-            return false;
-
-        if (!ignoreFreezing && isMultiCell != that.isMultiCell)
-            return false;
-
-        if (this.types.size() != that.types.size())
-            return false;
-
-        Iterator<AbstractType<?>> otherTypeIter = that.types.iterator();
-        for (AbstractType<?> type : types)
-        {
-            if (!type.equals(otherTypeIter.next(), ignoreFreezing))
-                return false;
-        }
-
-        return true;
+        return equalsWithoutTypes(that) && types.equals(that.types);
     }
 
-    public boolean equals(UserType other, Diff.Mode mode)
+    private boolean equalsWithoutTypes(UserType other)
     {
-        return equals(other);
+        return name.equals(other.name)
+            && fieldNames.equals(other.fieldNames)
+            && keyspace.equals(other.keyspace)
+            && isMultiCell == other.isMultiCell;
+    }
+
+    public Optional<Difference> compare(UserType other)
+    {
+        if (!equalsWithoutTypes(other))
+            return Optional.of(Difference.SHALLOW);
+
+        boolean differsDeeply = false;
+
+        for (int i = 0; i < fieldTypes().size(); i++)
+        {
+            AbstractType<?> thisType = fieldType(i);
+            AbstractType<?> thatType = other.fieldType(i);
+
+            if (!thisType.equals(thatType))
+            {
+                if (thisType.asCQL3Type().toString().equals(thatType.asCQL3Type().toString()))
+                    differsDeeply = true;
+                else
+                    return Optional.of(Difference.SHALLOW);
+            }
+        }
+
+        return differsDeeply ? Optional.of(Difference.DEEP) : Optional.empty();
     }
 
     @Override

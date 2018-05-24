@@ -136,8 +136,8 @@ public final class Schema
         if (null != keyspace)
             keyspace.setMetadata(updated);
 
-        Tables.TablesDiff tablesDiff = Tables.diff(previous.tables, updated.tables, Diff.Mode.IN_MEMORY);
-        Views.ViewsDiff viewsDiff = Views.diff(previous.views, updated.views, Diff.Mode.IN_MEMORY);
+        Tables.TablesDiff tablesDiff = Tables.diff(previous.tables, updated.tables);
+        Views.ViewsDiff viewsDiff = Views.diff(previous.views, updated.views);
 
         MapDifference<String, TableMetadata> indexesDiff = previous.tables.indexesDiff(updated.tables);
 
@@ -548,7 +548,7 @@ public final class Schema
     {
         Keyspaces before = keyspaces.filter(k -> !SchemaConstants.isLocalSystemKeyspace(k.name));
         Keyspaces after = SchemaKeyspace.fetchNonSystemKeyspaces();
-        merge(Keyspaces.diff(before, after, Diff.Mode.IN_MEMORY));
+        merge(Keyspaces.diff(before, after));
         updateVersionAndAnnounce();
     }
 
@@ -573,7 +573,7 @@ public final class Schema
         {
             Keyspaces before = keyspaces;
             Keyspaces after = transformation.apply(before);
-            diff = Keyspaces.diff(before, after, Diff.Mode.IN_MEMORY);
+            diff = Keyspaces.diff(before, after);
         }
         catch (RuntimeException e)
         {
@@ -634,7 +634,7 @@ public final class Schema
         // apply the schema mutations and fetch the new versions of the altered keyspaces
         Keyspaces after = SchemaKeyspace.fetchKeyspaces(affectedKeyspaces);
 
-        merge(Keyspaces.diff(before, after, Diff.Mode.IN_MEMORY));
+        merge(Keyspaces.diff(before, after));
     }
 
     private void merge(KeyspacesDiff diff)

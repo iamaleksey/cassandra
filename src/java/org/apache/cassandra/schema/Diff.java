@@ -22,11 +22,6 @@ import com.google.common.collect.Iterables;
 
 public class Diff<T extends Iterable, S>
 {
-    public enum Mode
-    {
-        IN_MEMORY, ON_DISK
-    }
-
     public final T created;
     public final T dropped;
     public final ImmutableCollection<Altered<S>> altered;
@@ -43,15 +38,22 @@ public class Diff<T extends Iterable, S>
         return Iterables.isEmpty(created) && Iterables.isEmpty(dropped) && Iterables.isEmpty(altered);
     }
 
+    Iterable<Altered<S>> altered(Difference kind)
+    {
+        return Iterables.filter(altered, a -> a.kind == kind);
+    }
+
     public static final class Altered<T>
     {
         public final T before;
         public final T after;
+        public final Difference kind;
 
-        Altered(T before, T after)
+        Altered(T before, T after, Difference kind)
         {
             this.before = before;
             this.after = after;
+            this.kind = kind;
         }
     }
 }

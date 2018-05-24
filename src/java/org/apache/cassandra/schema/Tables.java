@@ -245,9 +245,9 @@ public final class Tables implements Iterable<TableMetadata>
         }
     }
 
-    static TablesDiff diff(Tables before, Tables after, Diff.Mode mode)
+    static TablesDiff diff(Tables before, Tables after)
     {
-        return TablesDiff.diff(before, after, mode);
+        return TablesDiff.diff(before, after);
     }
 
     public static final class TablesDiff extends Diff<Tables, TableMetadata>
@@ -259,7 +259,7 @@ public final class Tables implements Iterable<TableMetadata>
             super(created, dropped, altered);
         }
 
-        private static TablesDiff diff(Tables before, Tables after, Mode mode)
+        private static TablesDiff diff(Tables before, Tables after)
         {
             if (before == after)
                 return NONE;
@@ -271,8 +271,8 @@ public final class Tables implements Iterable<TableMetadata>
             before.forEach(tableBefore ->
             {
                 TableMetadata tableAfter = after.getNullable(tableBefore.id);
-                if (null != tableAfter && !tableBefore.equals(tableAfter, mode))
-                    altered.add(new Altered<>(tableBefore, tableAfter));
+                if (null != tableAfter)
+                    tableBefore.compare(tableAfter).ifPresent(kind -> altered.add(new Altered<>(tableBefore, tableAfter, kind)));
             });
 
             return new TablesDiff(created, dropped, altered.build());

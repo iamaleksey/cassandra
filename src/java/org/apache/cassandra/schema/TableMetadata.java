@@ -611,6 +611,11 @@ public final class TableMetadata
 
         TableMetadata tm = (TableMetadata) o;
 
+        return equalsWithoutColumns(tm) && columns.equals(tm.columns);
+    }
+
+    private boolean equalsWithoutColumns(TableMetadata tm)
+    {
         return keyspace.equals(tm.keyspace)
             && name.equals(tm.name)
             && id.equals(tm.id)
@@ -624,9 +629,39 @@ public final class TableMetadata
             && triggers.equals(tm.triggers);
     }
 
-    public boolean equals(TableMetadata other, Diff.Mode mode)
+    Optional<Difference> compare(TableMetadata other)
     {
-        return equals(other);
+        return equalsWithoutColumns(other)
+             ? compareColumns(other.columns)
+             : Optional.of(Difference.SHALLOW);
+    }
+
+    private Optional<Difference> compareColumns(Map<ByteBuffer, ColumnMetadata> other)
+    {
+        if (!columns.keySet().equals(other.keySet()))
+            return Optional.of(Difference.SHALLOW);
+
+        boolean differsDeeply = false;
+
+        for (Map.Entry<ByteBuffer, ColumnMetadata> entry : columns.entrySet())
+        {
+            ColumnMetadata thisColumn = entry.getValue();
+            ColumnMetadata thatColumn = other.get(entry.getKey());
+
+            Optional<Difference> difference = thisColumn.compare(thatColumn);
+            if (difference.isPresent())
+            {
+                switch (difference.get())
+                {
+                    case SHALLOW:
+                        return difference;
+                    case DEEP:
+                        differsDeeply = true;
+                }
+            }
+        }
+
+        return differsDeeply ? Optional.of(Difference.DEEP) : Optional.empty();
     }
 
     @Override
