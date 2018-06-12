@@ -225,7 +225,7 @@ public final class HintsService implements HintsServiceMBean
      * Will abort dispatch sessions that are currently in progress (which is okay, it's idempotent),
      * and make sure the buffers are flushed, hints files written and fsynced.
      */
-    public synchronized void shutdownBlocking()
+    public synchronized void shutdownBlocking() throws ExecutionException, InterruptedException
     {
         if (isShutDown)
             throw new IllegalStateException("HintsService has already been shut down");
@@ -237,8 +237,8 @@ public final class HintsService implements HintsServiceMBean
 
         triggerFlushingFuture.cancel(false);
 
-        writeExecutor.flushBufferPool(bufferPool);
-        writeExecutor.closeAllWriters();
+        writeExecutor.flushBufferPool(bufferPool).get();
+        writeExecutor.closeAllWriters().get();
 
         dispatchExecutor.shutdownBlocking();
         writeExecutor.shutdownBlocking();

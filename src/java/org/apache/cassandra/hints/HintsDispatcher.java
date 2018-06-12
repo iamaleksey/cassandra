@@ -54,11 +54,11 @@ final class HintsDispatcher implements AutoCloseable
     private final int messagingVersion;
     private final AtomicBoolean isPaused;
 
-    private long currentPageOffset;
+    private InputPosition currentPagePosition;
 
     private HintsDispatcher(HintsReader reader, UUID hostId, InetAddress address, int messagingVersion, AtomicBoolean isPaused)
     {
-        currentPageOffset = 0L;
+        currentPagePosition = null;
 
         this.reader = reader;
         this.hostId = hostId;
@@ -78,10 +78,9 @@ final class HintsDispatcher implements AutoCloseable
         reader.close();
     }
 
-    void seek(long bytes)
+    void seek(InputPosition position)
     {
-        reader.seek(bytes);
-        currentPageOffset = 0L;
+        reader.seek(position);
     }
 
     /**
@@ -91,7 +90,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         for (HintsReader.Page page : reader)
         {
-            currentPageOffset = page.offset;
+            currentPagePosition = page.position;
             if (dispatch(page) != Action.CONTINUE)
                 return false;
         }
@@ -102,9 +101,9 @@ final class HintsDispatcher implements AutoCloseable
     /**
      * @return offset of the first non-delivered page
      */
-    long dispatchOffset()
+    InputPosition dispatchPosition()
     {
-        return currentPageOffset;
+        return currentPagePosition;
     }
 
     private boolean isHostAlive()

@@ -69,6 +69,14 @@ final class HintsDispatchExecutor
     {
         scheduledDispatches.clear();
         executor.shutdownNow();
+        try
+        {
+            executor.awaitTermination(1, TimeUnit.MINUTES);
+        }
+        catch (InterruptedException e)
+        {
+            throw new AssertionError(e);
+        }
     }
 
     boolean isScheduled(HintsStore store)
@@ -255,7 +263,7 @@ final class HintsDispatchExecutor
         private boolean deliver(HintsDescriptor descriptor, InetAddress address)
         {
             File file = new File(hintsDirectory, descriptor.fileName());
-            Long offset = store.getDispatchOffset(descriptor).orElse(null);
+            InputPosition offset = store.getDispatchOffset(descriptor);
 
             try (HintsDispatcher dispatcher = HintsDispatcher.create(file, rateLimiter, address, descriptor.hostId, isPaused))
             {
@@ -271,7 +279,7 @@ final class HintsDispatchExecutor
                 }
                 else
                 {
-                    store.markDispatchOffset(descriptor, dispatcher.dispatchOffset());
+                    store.markDispatchOffset(descriptor, dispatcher.dispatchPosition());
                     store.offerFirst(descriptor);
                     logger.info("Finished hinted handoff of file {} to endpoint {}: {}, partially", descriptor.fileName(), address, hostId);
                     return false;
