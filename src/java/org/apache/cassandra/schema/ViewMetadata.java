@@ -18,7 +18,6 @@
 package org.apache.cassandra.schema;
 
 import java.nio.ByteBuffer;
-import java.util.Objects;
 import java.util.Optional;
 
 import org.apache.commons.lang3.builder.HashCodeBuilder;

@@ -623,7 +623,6 @@ public final class TableMetadata
             && kind == tm.kind
             && params.equals(tm.params)
             && flags.equals(tm.flags)
-            && columns.equals(tm.columns)
             && droppedColumns.equals(tm.droppedColumns)
             && indexes.equals(tm.indexes)
             && triggers.equals(tm.triggers);

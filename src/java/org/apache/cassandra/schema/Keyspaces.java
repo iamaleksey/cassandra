@@ -192,19 +192,6 @@ public final class Keyspaces implements Iterable<KeyspaceMetadata>
         }
     }
 
-    /**
-     * Calculates the difference between two schemas.
-     *
-     * Has two modes of operation:
-     *
-     * 1. Mode.DEEP - compares schemas as they would be serialized, e.g. ignores differences in UserType-s for tables,
-     *    and only takes into account the names of UDTs, as we only store type names in system_schema.tables
-     * 2. Mode.SHALLOW - compares metadata objects thoroughly, accounting for every object in the graph. e.g. two TableMetadata
-     *    objects would be considered different if a UDT they refer to has added a new field
-     *
-     * @param before schema before the changes
-     * @param after schema after the changes
-     */
     static KeyspacesDiff diff(Keyspaces before, Keyspaces after)
     {
         return KeyspacesDiff.diff(before, after);
