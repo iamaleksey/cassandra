@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Iterator;
 import java.util.UUID;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import com.google.common.base.Function;
@@ -52,9 +53,11 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.io.sstable.ReducingKeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.UUIDGen;
 import org.apache.cassandra.utils.concurrent.Refs;
@@ -121,6 +124,10 @@ public class ViewBuilderTask extends CompactionInfo.Holder implements Callable<L
             logger.debug("Starting new view build for range {}", range);
         else
             logger.debug("Resuming view build for range {} from token {} with {} covered keys", range, prevToken, keysBuilt);
+
+        boolean schemaConverged = Gossiper.instance.waitForSchemaAgreement(StorageService.RING_DELAY, TimeUnit.MILLISECONDS);
+        if (!schemaConverged)
+            throw new RuntimeException("Failed to get schema to converge, aborting view build for " + view.name);
 
         Function<org.apache.cassandra.db.lifecycle.View, Iterable<SSTableReader>> function;
         function = org.apache.cassandra.db.lifecycle.View.select(SSTableSet.CANONICAL, s -> range.intersects(s.getBounds()));

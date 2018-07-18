@@ -37,6 +37,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.Pair;
 import org.slf4j.Logger;
@@ -1833,4 +1834,43 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.info("No gossip backlog; proceeding");
     }
 
+    public boolean waitForSchemaAgreement(long maxWait, TimeUnit unit)
+    {
+        int waited = 0;
+        int toWait = 50;
+
+        Set<InetAddressAndPort> members = getLiveTokenOwners();
+
+        while (true)
+        {
+            if (nodesAgreeOnSchema(members))
+                return true;
+
+            if (waited >= unit.toMillis(maxWait))
+                return false;
+
+            Uninterruptibles.sleepUninterruptibly(toWait, TimeUnit.MILLISECONDS);
+
+            waited += toWait;
+            toWait = Math.min(1000, toWait * 2);
+        }
+    }
+
+    private boolean nodesAgreeOnSchema(Collection<InetAddressAndPort> nodes)
+    {
+        if (nodes.size() == 1)
+            return true;
+
+        UUID localVersion = Schema.instance.getVersion();
+
+        for (InetAddressAndPort node : nodes)
+        {
+            EndpointState state = getEndpointStateForEndpoint(node);
+            UUID remoteVersion = null != state ? state.getSchemaVersion() : null;
+            if (!localVersion.equals(remoteVersion))
+                return false;
+        }
+
+        return true;
+    }
 }
