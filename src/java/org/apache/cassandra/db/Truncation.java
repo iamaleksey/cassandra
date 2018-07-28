@@ -22,8 +22,8 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 
 /**
  * A truncate operation descriptor
@@ -39,11 +39,6 @@ public class Truncation
     {
         this.keyspace = keyspace;
         this.columnFamily = columnFamily;
-    }
-
-    public MessageOut<Truncation> createMessage()
-    {
-        return new MessageOut<Truncation>(MessagingService.Verb.TRUNCATE, this, serializer);
     }
 
     public String toString()

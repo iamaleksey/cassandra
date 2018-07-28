@@ -75,6 +75,12 @@ public final class Throwables
     }
 
     @SafeVarargs
+    public static <E extends Exception> void maybeFail(DiscreteAction<? extends E> ... actions)
+    {
+        maybeFail(Throwables.<E>perform(null, Stream.of(actions)));
+    }
+
+    @SafeVarargs
     public static <E extends Exception> void perform(DiscreteAction<? extends E> ... actions) throws E
     {
         Throwables.<E>perform(Stream.of(actions));

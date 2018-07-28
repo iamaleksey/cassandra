@@ -81,7 +81,7 @@ public class BufferPoolTest
     {
         final int size = 1024;
         for (int i = size;
-                 i <= BufferPool.CHUNK_SIZE;
+                 i <= BufferPool.NORMAL_CHUNK_SIZE;
                  i += size)
         {
             checkPageAligned(i);
@@ -165,7 +165,7 @@ public class BufferPoolTest
     @Test
     public void testRecycle()
     {
-        requestUpToSize(RandomAccessReader.DEFAULT_BUFFER_SIZE, 3 * BufferPool.CHUNK_SIZE);
+        requestUpToSize(RandomAccessReader.DEFAULT_BUFFER_SIZE, 3 * BufferPool.NORMAL_CHUNK_SIZE);
     }
 
     private void requestDoubleMaxMemory()
@@ -198,7 +198,7 @@ public class BufferPoolTest
     @Test
     public void testBigRequest()
     {
-        final int size = BufferPool.CHUNK_SIZE + 1;
+        final int size = BufferPool.NORMAL_CHUNK_SIZE + 1;
 
         ByteBuffer buffer = BufferPool.get(size);
         assertNotNull(buffer);
@@ -210,7 +210,7 @@ public class BufferPoolTest
     public void testFillUpChunks()
     {
         final int size = RandomAccessReader.DEFAULT_BUFFER_SIZE;
-        final int numBuffers = BufferPool.CHUNK_SIZE / size;
+        final int numBuffers = BufferPool.NORMAL_CHUNK_SIZE / size;
 
         List<ByteBuffer> buffers1 = new ArrayList<>(numBuffers);
         List<ByteBuffer> buffers2 = new ArrayList<>(numBuffers);
@@ -242,7 +242,7 @@ public class BufferPoolTest
     public void testOutOfOrderFrees()
     {
         final int size = 4096;
-        final int maxFreeSlots = BufferPool.CHUNK_SIZE / size;
+        final int maxFreeSlots = BufferPool.NORMAL_CHUNK_SIZE / size;
 
         final int[] idxs = new int[maxFreeSlots];
         for (int i = 0; i < maxFreeSlots; i++)
@@ -255,7 +255,7 @@ public class BufferPoolTest
     public void testInOrderFrees()
     {
         final int size = 4096;
-        final int maxFreeSlots = BufferPool.CHUNK_SIZE / size;
+        final int maxFreeSlots = BufferPool.NORMAL_CHUNK_SIZE / size;
 
         final int[] idxs = new int[maxFreeSlots];
         for (int i = 0; i < maxFreeSlots; i++)
@@ -285,7 +285,7 @@ public class BufferPoolTest
     private void doTestRandomFrees(long seed)
     {
         final int size = 4096;
-        final int maxFreeSlots = BufferPool.CHUNK_SIZE / size;
+        final int maxFreeSlots = BufferPool.NORMAL_CHUNK_SIZE / size;
 
         final int[] idxs = new int[maxFreeSlots];
         for (int i = 0; i < maxFreeSlots; i++)
@@ -315,7 +315,7 @@ public class BufferPoolTest
         BufferPool.Chunk chunk = BufferPool.currentChunk();
         assertFalse(chunk.isFree());
 
-        int freeSize = BufferPool.CHUNK_SIZE - maxFreeSlots * size;
+        int freeSize = BufferPool.NORMAL_CHUNK_SIZE - maxFreeSlots * size;
         assertEquals(freeSize, chunk.free());
 
         for (int i : toReleaseIdxs)
@@ -378,7 +378,7 @@ public class BufferPoolTest
     @Test
     public void testChunkExhausted()
     {
-        final int size = BufferPool.CHUNK_SIZE / 64; // 1kbit
+        final int size = BufferPool.NORMAL_CHUNK_SIZE / 64; // 1kbit
         int[] sizes = new int[128];
         Arrays.fill(sizes, size);
 
@@ -505,7 +505,7 @@ public class BufferPoolTest
         ByteBuffer buffer = BufferPool.get(size);
         assertEquals(size, buffer.capacity());
 
-        if (size > 0 && size < BufferPool.CHUNK_SIZE)
+        if (size > 0 && size < BufferPool.NORMAL_CHUNK_SIZE)
         {
             BufferPool.Chunk chunk = BufferPool.currentChunk();
             assertNotNull(chunk);

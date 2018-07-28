@@ -20,28 +20,29 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 
-import org.apache.cassandra.hints.HintResponse;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.async.OutboundConnectionIdentifier;
-import org.apache.cassandra.net.async.OutboundConnectionIdentifier.ConnectionType;
+import org.apache.cassandra.net.async.OutboundConnection;
+
+import static org.apache.cassandra.net.async.OutboundConnection.Type.URGENT;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 
 /**
- * Conceptually the same as {@link org.apache.cassandra.gms.EchoMessage}, but indicates to the recipient which
- * {@link ConnectionType} should be used for the response.
+ * Indicates to the recipient which {@link OutboundConnection.Type} should be used for the response.
  */
 public class PingMessage
 {
     public static IVersionedSerializer<PingMessage> serializer = new PingMessageSerializer();
 
-    public static final PingMessage smallChannelMessage = new PingMessage(ConnectionType.SMALL_MESSAGE);
-    public static final PingMessage largeChannelMessage = new PingMessage(ConnectionType.LARGE_MESSAGE);
-    public static final PingMessage gossipChannelMessage = new PingMessage(ConnectionType.GOSSIP);
+    public static final PingMessage forSmall = new PingMessage(SMALL_MESSAGE);
+    public static final PingMessage forLarge = new PingMessage(LARGE_MESSAGE);
+    public static final PingMessage forUrgent = new PingMessage(URGENT);
 
-    public final ConnectionType connectionType;
+    public final OutboundConnection.Type connectionType;
 
-    public PingMessage(ConnectionType connectionType)
+    public PingMessage(OutboundConnection.Type connectionType)
     {
         this.connectionType = connectionType;
     }
@@ -50,27 +51,22 @@ public class PingMessage
     {
         public void serialize(PingMessage t, DataOutputPlus out, int version) throws IOException
         {
-            out.writeByte(t.connectionType.getId());
+            out.writeByte(t.connectionType.id);
         }
 
         public PingMessage deserialize(DataInputPlus in, int version) throws IOException
         {
-            ConnectionType connectionType = ConnectionType.fromId(in.readByte());
-
-            // if we ever create a new connection type, then during a rolling upgrade, the old nodes won't know about
-            // the new connection type (as it won't recognize the id), so just default to the small message type.
-            if (connectionType ==  null)
-                connectionType = ConnectionType.SMALL_MESSAGE;
-
+            OutboundConnection.Type connectionType = OutboundConnection.Type.fromId(in.readByte());
             switch (connectionType)
             {
                 case LARGE_MESSAGE:
-                    return largeChannelMessage;
-                case GOSSIP:
-                    return gossipChannelMessage;
+                    return forLarge;
+                case URGENT:
+                    return forUrgent;
                 case SMALL_MESSAGE:
+                    return forSmall;
                 default:
-                    return smallChannelMessage;
+                    throw new IllegalStateException();
             }
         }
 

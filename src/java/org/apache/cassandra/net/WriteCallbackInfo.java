@@ -33,13 +33,13 @@ public class WriteCallbackInfo extends CallbackInfo
     private final Replica replica;
 
     public WriteCallbackInfo(Replica replica,
-                             IAsyncCallback callback,
-                             MessageOut message,
-                             IVersionedSerializer<?> serializer,
+                             IAsyncCallbackWithFailure<?> callback,
+                             Message message,
                              ConsistencyLevel consistencyLevel,
-                             boolean allowHints)
+                             boolean allowHints,
+                             Verb verb)
     {
-        super(replica.endpoint(), callback, serializer, true);
+        super(replica.endpoint(), callback, verb);
         assert message != null;
         this.mutation = shouldHint(allowHints, message, consistencyLevel);
         //Local writes shouldn't go through messaging service (https://issues.apache.org/jira/browse/CASSANDRA-10477)
@@ -69,10 +69,10 @@ public class WriteCallbackInfo extends CallbackInfo
                                         : (Mutation) object;
     }
 
-    private static Object shouldHint(boolean allowHints, MessageOut sentMessage, ConsistencyLevel consistencyLevel)
+    private static Object shouldHint(boolean allowHints, Message sentMessage, ConsistencyLevel consistencyLevel)
     {
         return allowHints
-               && sentMessage.verb != MessagingService.Verb.COUNTER_MUTATION
+               && sentMessage.verb != Verb.COUNTER_MUTATION_REQ
                && consistencyLevel != ConsistencyLevel.ANY
                ? sentMessage.payload : null;
     }

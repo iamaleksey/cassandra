@@ -44,10 +44,12 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.ReplicaUtils;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -241,8 +243,10 @@ public class WriteResponseHandlerTest
                                                                    null, WriteType.SIMPLE, queryStartTime, ideal);
     }
 
-    private static MessageIn createDummyMessage(int target)
+    private static Message createDummyMessage(int target)
     {
-        return MessageIn.create(targets.get(target).endpoint(), null, null,  null, 0, 0L);
+        return Message.builder(Verb.ECHO_REQ, noPayload)
+                      .from(targets.get(target).endpoint())
+                      .build();
     }
 }

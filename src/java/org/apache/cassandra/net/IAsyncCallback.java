@@ -28,7 +28,7 @@ public interface IAsyncCallback<T>
     /**
      * @param msg response received.
      */
-    void response(MessageIn<T> msg);
+    void response(Message<T> msg);
 
     /**
      * @return true if this callback is on the read path and its latency should be

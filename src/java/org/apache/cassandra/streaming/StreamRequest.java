@@ -67,7 +67,7 @@ public class StreamRequest
             out.writeUTF(request.keyspace);
             out.writeInt(request.columnFamilies.size());
 
-            CompactEndpointSerializationHelper.streamingInstance.serialize(request.full.endpoint(), out, version);
+            CompactEndpointSerializationHelper.instance.serialize(request.full.endpoint(), out, version);
             serializeReplicas(request.full, out, version);
             serializeReplicas(request.transientReplicas, out, version);
             for (String cf : request.columnFamilies)
@@ -90,7 +90,7 @@ public class StreamRequest
         {
             String keyspace = in.readUTF();
             int cfCount = in.readInt();
-            InetAddressAndPort endpoint = CompactEndpointSerializationHelper.streamingInstance.deserialize(in, version);
+            InetAddressAndPort endpoint = CompactEndpointSerializationHelper.instance.deserialize(in, version);
 
             RangesAtEndpoint full = deserializeReplicas(in, version, endpoint, true);
             RangesAtEndpoint transientReplicas = deserializeReplicas(in, version, endpoint, false);
@@ -121,7 +121,7 @@ public class StreamRequest
         {
             int size = TypeSizes.sizeof(request.keyspace);
             size += TypeSizes.sizeof(request.columnFamilies.size());
-            size += CompactEndpointSerializationHelper.streamingInstance.serializedSize(request.full.endpoint(), version);
+            size += CompactEndpointSerializationHelper.instance.serializedSize(request.full.endpoint(), version);
             size += replicasSerializedSize(request.transientReplicas, version);
             size += replicasSerializedSize(request.full, version);
             for (String cf : request.columnFamilies)

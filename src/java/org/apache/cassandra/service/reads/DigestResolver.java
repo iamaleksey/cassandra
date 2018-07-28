@@ -33,7 +33,7 @@ import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.service.reads.repair.NoopReadRepair;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -42,7 +42,7 @@ import static com.google.common.collect.Iterables.any;
 
 public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> extends ResponseResolver<E, P>
 {
-    private volatile MessageIn<ReadResponse> dataResponse;
+    private volatile Message<ReadResponse> dataResponse;
 
     public DigestResolver(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, long queryStartNanoTime)
     {
@@ -52,7 +52,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
     }
 
     @Override
-    public void preprocess(MessageIn<ReadResponse> message)
+    public void preprocess(Message<ReadResponse> message)
     {
         super.preprocess(message);
         Replica replica = replicaPlan().getReplicaFor(message.from);
@@ -66,7 +66,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
         return hasTransientResponse(responses.snapshot());
     }
 
-    private boolean hasTransientResponse(Collection<MessageIn<ReadResponse>> responses)
+    private boolean hasTransientResponse(Collection<Message<ReadResponse>> responses)
     {
         return any(responses,
                 msg -> !msg.payload.isDigestResponse()
@@ -77,7 +77,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
     {
         assert isDataPresent();
 
-        Collection<MessageIn<ReadResponse>> responses = this.responses.snapshot();
+        Collection<Message<ReadResponse>> responses = this.responses.snapshot();
 
         if (!hasTransientResponse(responses))
         {
@@ -92,7 +92,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
 
             dataResolver.preprocess(dataResponse);
             // Reconcile with transient replicas
-            for (MessageIn<ReadResponse> response : responses)
+            for (Message<ReadResponse> response : responses)
             {
                 Replica replica = replicaPlan().getReplicaFor(response.from);
                 if (replica.isTransient())
@@ -109,7 +109,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
 
         // validate digests against each other; return false immediately on mismatch.
         ByteBuffer digest = null;
-        for (MessageIn<ReadResponse> message : responses.snapshot())
+        for (Message<ReadResponse> message : responses.snapshot())
         {
             if (replicaPlan().getReplicaFor(message.from).isTransient())
                 continue;
@@ -138,7 +138,7 @@ public class DigestResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
         DigestResolverDebugResult[] ret = new DigestResolverDebugResult[responses.size()];
         for (int i = 0; i < responses.size(); i++)
         {
-            MessageIn<ReadResponse> message = responses.get(i);
+            Message<ReadResponse> message = responses.get(i);
             ReadResponse response = message.payload;
             String digestHex = ByteBufferUtil.bytesToHex(response.digest(command));
             ret[i] = new DigestResolverDebugResult(message.from, digestHex, message.payload.isDigestResponse());

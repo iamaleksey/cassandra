@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.MessagingService.Verb;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.Clock;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -52,7 +52,7 @@ public abstract class Sampler<T>
     {
         samplerExecutor.setRejectedExecutionHandler((runnable, executor) ->
         {
-            MessagingService.instance().incrementDroppedMessages(Verb._SAMPLE);
+            MessagingService.instance().droppedMessages.increment(Verb._SAMPLE);
         });
     }
 

@@ -17,26 +17,31 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.concurrent.TimeUnit;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.ApproximateTime;
+
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class ResponseVerbHandler implements IVerbHandler
 {
+    public static final ResponseVerbHandler instance = new ResponseVerbHandler();
+
     private static final Logger logger = LoggerFactory.getLogger( ResponseVerbHandler.class );
 
-    public void doVerb(MessageIn message, int id)
+    public void doVerb(Message message)
     {
-        long latency = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - MessagingService.instance().getRegisteredCallbackAge(id));
-        CallbackInfo callbackInfo = MessagingService.instance().removeRegisteredCallback(id);
+
+        long latencyNanos = ApproximateTime.nanoTime() - MessagingService.instance().callbacks.getCreationTimeNanos(message.id);
+        CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id);
         if (callbackInfo == null)
         {
             String msg = "Callback already removed for {} (from {})";
-            logger.trace(msg, id, message.from);
-            Tracing.trace(msg, id, message.from);
+            logger.trace(msg, message.id, message.from);
+            Tracing.trace(msg, message.id, message.from);
             return;
         }
 
@@ -44,12 +49,11 @@ public class ResponseVerbHandler implements IVerbHandler
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, message.getFailureReason());
+            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, (RequestFailureReason) message.payload);
         }
         else
         {
-            //TODO: Should we add latency only in success cases?
-            MessagingService.instance().maybeAddLatency(cb, message.from, latency);
+            MessagingService.instance().latency.maybeAdd(cb, message.from, latencyNanos, NANOSECONDS);
             cb.response(message);
         }
 

@@ -23,26 +23,22 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.ParameterType;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+
 public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 {
+    public static final ReadCommandVerbHandler instance = new ReadCommandVerbHandler();
+
     private static final Logger logger = LoggerFactory.getLogger(ReadCommandVerbHandler.class);
 
-    protected IVersionedSerializer<ReadResponse> serializer()
-    {
-        return ReadResponse.serializer;
-    }
-
-    public void doVerb(MessageIn<ReadCommand> message, int id)
+    public void doVerb(Message<ReadCommand> message)
     {
         if (StorageService.instance.isBootstrapMode())
         {
@@ -52,9 +48,10 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         ReadCommand command = message.payload;
         validateTransientStatus(message);
 
-        command.setMonitoringTime(message.constructionTime, message.isCrossNode(), message.getTimeout(), message.getSlowQueryTimeout());
+        long timeout = message.expiresAtNanos - message.createdAtNanos;
+        command.setMonitoringTime(message.createdAtNanos, message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
 
-        if (message.parameters.containsKey(ParameterType.TRACK_REPAIRED_DATA))
+        if (message.trackRepairedData())
             command.trackRepairedStatus();
 
         ReadResponse response;
@@ -67,16 +64,16 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         if (!command.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from);
-            MessagingService.instance().incrementDroppedMessages(message, message.getLifetimeInMS());
+            MessagingService.instance().droppedMessages.incrementWithLatency(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             return;
         }
 
         Tracing.trace("Enqueuing response to {}", message.from);
-        MessageOut<ReadResponse> reply = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, response, serializer());
-        MessagingService.instance().sendReply(reply, id, message.from);
+        Message<ReadResponse> reply = message.responseWith(response);
+        MessagingService.instance().sendResponse(reply, message.from);
     }
 
-    private void validateTransientStatus(MessageIn<ReadCommand> message)
+    private void validateTransientStatus(Message<ReadCommand> message)
     {
         ReadCommand command = message.payload;
         Token token;
@@ -100,7 +97,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (!command.acceptsTransient() && replica.isTransient())
         {
-            MessagingService.instance().incrementDroppedMessages(message, message.getLifetimeInMS());
+            MessagingService.instance().droppedMessages.incrementWithLatency(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             throw new InvalidRequestException(String.format("Attempted to serve %s data request from %s node in %s",
                                                             command.acceptsTransient() ? "transient" : "full",
                                                             replica.isTransient() ? "transient" : "full",

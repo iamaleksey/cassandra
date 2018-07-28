@@ -42,12 +42,11 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.OutboundConnectionIdentifier.ConnectionType;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.net.MessagingService.Verb.PING;
-import static org.apache.cassandra.net.async.OutboundConnectionIdentifier.ConnectionType.LARGE_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnectionIdentifier.ConnectionType.SMALL_MESSAGE;
+import static org.apache.cassandra.net.Verb.PING_REQ;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 
 public class StartupClusterConnectivityChecker
 {
@@ -190,7 +189,7 @@ public class StartupClusterConnectivityChecker
                 return false;
             }
 
-            public void response(MessageIn msg)
+            public void response(Message msg)
             {
                 if (acks.incrementAndCheck(msg.from))
                 {
@@ -202,14 +201,12 @@ public class StartupClusterConnectivityChecker
             }
         };
 
-        MessageOut<PingMessage> smallChannelMessageOut = new MessageOut<>(PING, PingMessage.smallChannelMessage,
-                                                                          PingMessage.serializer, SMALL_MESSAGE);
-        MessageOut<PingMessage> largeChannelMessageOut = new MessageOut<>(PING, PingMessage.largeChannelMessage,
-                                                                          PingMessage.serializer, LARGE_MESSAGE);
+        Message<PingMessage> small = Message.out(PING_REQ, PingMessage.forSmall);
+        Message<PingMessage> large = Message.out(PING_REQ, PingMessage.forLarge);
         for (InetAddressAndPort peer : peers)
         {
-            MessagingService.instance().sendRR(smallChannelMessageOut, peer, responseHandler);
-            MessagingService.instance().sendRR(largeChannelMessageOut, peer, responseHandler);
+            MessagingService.instance().sendRR(small, peer, responseHandler, SMALL_MESSAGE);
+            MessagingService.instance().sendRR(large, peer, responseHandler, LARGE_MESSAGE);
         }
     }
 

@@ -52,10 +52,10 @@ import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.IMessageSink;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.async.MessageCallbacks;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -156,7 +156,7 @@ public class RepairJobTest
     public void reset()
     {
         ActiveRepairService.instance.terminateSessions();
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().messageSink.clear();
         FBUtilities.reset();
     }
 
@@ -171,7 +171,7 @@ public class RepairJobTest
         mockTrees.put(addr2, createInitialTree(false));
         mockTrees.put(addr3, createInitialTree(false));
 
-        List<MessageOut> observedMessages = new ArrayList<>();
+        List<Message<?>> observedMessages = new ArrayList<>();
         interceptRepairMessages(mockTrees, observedMessages);
 
         job.run();
@@ -208,7 +208,7 @@ public class RepairJobTest
         List<TreeResponse> mockTreeResponses = mockTrees.entrySet().stream()
                                                         .map(e -> new TreeResponse(e.getKey(), e.getValue()))
                                                         .collect(Collectors.toList());
-        List<MessageOut> messages = new ArrayList<>();
+        List<Message<?>> messages = new ArrayList<>();
         interceptRepairMessages(mockTrees, messages);
 
         long singleTreeSize = ObjectSizes.measureDeep(mockTrees.get(addr1));
@@ -792,11 +792,11 @@ public class RepairJobTest
     }
 
     private void interceptRepairMessages(Map<InetAddressAndPort, MerkleTrees> mockTrees,
-                                         List<MessageOut> messageCapture)
+                                         List<Message<?>> messageCapture)
     {
-        MessagingService.instance().addMessageSink(new IMessageSink()
+        MessagingService.instance().messageSink.add(new MessageSink.Sink()
         {
-            public boolean allowOutgoingMessage(MessageOut message, int id, InetAddressAndPort to)
+            public boolean allowOutbound(Message<?> message, InetAddressAndPort to)
             {
                 if (message == null || !(message.payload instanceof RepairMessage))
                     return false;
@@ -811,11 +811,8 @@ public class RepairJobTest
                 switch (rm.messageType)
                 {
                     case SNAPSHOT:
-                        MessageIn<?> messageIn = MessageIn.create(to, null,
-                                                                  Collections.emptyMap(),
-                                                                  MessagingService.Verb.REQUEST_RESPONSE,
-                                                                  MessagingService.current_version);
-                        MessagingService.instance().receive(messageIn, id);
+                        Message<?> messageIn = message.emptyResponse();
+                        MessagingService.instance().process(messageIn, 0, MessageCallbacks.NOOP);
                         break;
                     case VALIDATION_REQUEST:
                         session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
@@ -831,9 +828,9 @@ public class RepairJobTest
                 return false;
             }
 
-            public boolean allowIncomingMessage(MessageIn message, int id)
+            public boolean allowInbound(Message<?> message)
             {
-                return message.verb == MessagingService.Verb.REQUEST_RESPONSE;
+                return message.verb.isResponse();
             }
         });
     }

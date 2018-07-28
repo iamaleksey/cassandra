@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.Verb;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
@@ -38,7 +39,7 @@ public class MessagingMetrics
     private static final MetricNameFactory factory = new DefaultNameFactory("Messaging");
     public final Timer crossNodeLatency;
     public final ConcurrentHashMap<String, Timer> dcLatency;
-    public final ConcurrentHashMap<String, Timer> queueWaitLatency;
+    public final ConcurrentHashMap<Verb, Timer> queueWaitLatency;
 
     public MessagingMetrics()
     {
@@ -47,7 +48,7 @@ public class MessagingMetrics
         queueWaitLatency = new ConcurrentHashMap<>();
     }
 
-    public void addTimeTaken(InetAddressAndPort from, long timeTaken)
+    public void addTimeTaken(InetAddressAndPort from, long timeTaken, TimeUnit units)
     {
         String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
         Timer timer = dcLatency.get(dc);
@@ -55,11 +56,11 @@ public class MessagingMetrics
         {
             timer = dcLatency.computeIfAbsent(dc, k -> Metrics.timer(factory.createMetricName(dc + "-Latency")));
         }
-        timer.update(timeTaken, TimeUnit.MILLISECONDS);
-        crossNodeLatency.update(timeTaken, TimeUnit.MILLISECONDS);
+        timer.update(timeTaken, units);
+        crossNodeLatency.update(timeTaken, units);
     }
 
-    public void addQueueWaitTime(String verb, long timeTaken)
+    public void addQueueWaitTime(Verb verb, long timeTaken, TimeUnit units)
     {
         if (timeTaken < 0)
             // the measurement is not accurate, ignore the negative timeTaken
@@ -70,6 +71,6 @@ public class MessagingMetrics
         {
             timer = queueWaitLatency.computeIfAbsent(verb, k -> Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
         }
-        timer.update(timeTaken, TimeUnit.MILLISECONDS);
+        timer.update(timeTaken, units);
     }
 }

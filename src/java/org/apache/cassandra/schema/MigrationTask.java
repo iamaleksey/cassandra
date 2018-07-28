@@ -33,10 +33,12 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.WrappedRunnable;
+
+import static org.apache.cassandra.net.NoPayload.noPayload;
+import static org.apache.cassandra.net.Verb.SCHEMA_PULL_REQ;
 
 final class MigrationTask extends WrappedRunnable
 {
@@ -78,14 +80,14 @@ final class MigrationTask extends WrappedRunnable
             return;
         }
 
-        MessageOut message = new MessageOut<>(MessagingService.Verb.MIGRATION_REQUEST, null, MigrationManager.MigrationsSerializer.instance);
+        Message message = Message.out(SCHEMA_PULL_REQ, noPayload);
 
         final CountDownLatch completionLatch = new CountDownLatch(1);
 
         IAsyncCallback<Collection<Mutation>> cb = new IAsyncCallback<Collection<Mutation>>()
         {
             @Override
-            public void response(MessageIn<Collection<Mutation>> message)
+            public void response(Message<Collection<Mutation>> message)
             {
                 try
                 {

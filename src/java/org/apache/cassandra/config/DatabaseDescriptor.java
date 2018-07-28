@@ -27,6 +27,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -72,6 +73,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import org.apache.commons.lang3.StringUtils;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.io.util.FileUtils.ONE_GB;
 
 public class DatabaseDescriptor
@@ -80,6 +82,7 @@ public class DatabaseDescriptor
     {
         // This static block covers most usages
         FBUtilities.preventIllegalAccessWarnings();
+        System.setProperty("io.netty.transport.estimateSizeOnSubmit", "false");
     }
 
     private static final Logger logger = LoggerFactory.getLogger(DatabaseDescriptor.class);
@@ -1448,9 +1451,9 @@ public class DatabaseDescriptor
         return Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "ssl_storage_port", Integer.toString(conf.ssl_storage_port)));
     }
 
-    public static long getRpcTimeout()
+    public static long getRpcTimeout(TimeUnit unit)
     {
-        return conf.request_timeout_in_ms;
+        return unit.convert(conf.request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setRpcTimeout(long timeOutInMillis)
@@ -1458,9 +1461,9 @@ public class DatabaseDescriptor
         conf.request_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getReadRpcTimeout()
+    public static long getReadRpcTimeout(TimeUnit unit)
     {
-        return conf.read_request_timeout_in_ms;
+        return unit.convert(conf.read_request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setReadRpcTimeout(long timeOutInMillis)
@@ -1468,9 +1471,9 @@ public class DatabaseDescriptor
         conf.read_request_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getRangeRpcTimeout()
+    public static long getRangeRpcTimeout(TimeUnit unit)
     {
-        return conf.range_request_timeout_in_ms;
+        return unit.convert(conf.range_request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setRangeRpcTimeout(long timeOutInMillis)
@@ -1478,9 +1481,9 @@ public class DatabaseDescriptor
         conf.range_request_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getWriteRpcTimeout()
+    public static long getWriteRpcTimeout(TimeUnit unit)
     {
-        return conf.write_request_timeout_in_ms;
+        return unit.convert(conf.write_request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setWriteRpcTimeout(long timeOutInMillis)
@@ -1488,9 +1491,9 @@ public class DatabaseDescriptor
         conf.write_request_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getCounterWriteRpcTimeout()
+    public static long getCounterWriteRpcTimeout(TimeUnit unit)
     {
-        return conf.counter_write_request_timeout_in_ms;
+        return unit.convert(conf.counter_write_request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setCounterWriteRpcTimeout(long timeOutInMillis)
@@ -1498,9 +1501,9 @@ public class DatabaseDescriptor
         conf.counter_write_request_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getCasContentionTimeout()
+    public static long getCasContentionTimeout(TimeUnit unit)
     {
-        return conf.cas_contention_timeout_in_ms;
+        return unit.convert(conf.cas_contention_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setCasContentionTimeout(long timeOutInMillis)
@@ -1508,9 +1511,9 @@ public class DatabaseDescriptor
         conf.cas_contention_timeout_in_ms = timeOutInMillis;
     }
 
-    public static long getTruncateRpcTimeout()
+    public static long getTruncateRpcTimeout(TimeUnit unit)
     {
-        return conf.truncate_request_timeout_in_ms;
+        return unit.convert(conf.truncate_request_timeout_in_ms, MILLISECONDS);
     }
 
     public static void setTruncateRpcTimeout(long timeOutInMillis)
@@ -1523,27 +1526,27 @@ public class DatabaseDescriptor
         return conf.cross_node_timeout;
     }
 
-    public static long getSlowQueryTimeout()
+    public static long getSlowQueryTimeout(TimeUnit units)
     {
-        return conf.slow_query_log_timeout_in_ms;
+        return units.convert(conf.slow_query_log_timeout_in_ms, MILLISECONDS);
     }
 
     /**
      * @return the minimum configured {read, write, range, truncate, misc} timeout
      */
-    public static long getMinRpcTimeout()
+    public static long getMinRpcTimeout(TimeUnit unit)
     {
-        return Longs.min(getRpcTimeout(),
-                         getReadRpcTimeout(),
-                         getRangeRpcTimeout(),
-                         getWriteRpcTimeout(),
-                         getCounterWriteRpcTimeout(),
-                         getTruncateRpcTimeout());
+        return Longs.min(getRpcTimeout(unit),
+                         getReadRpcTimeout(unit),
+                         getRangeRpcTimeout(unit),
+                         getWriteRpcTimeout(unit),
+                         getCounterWriteRpcTimeout(unit),
+                         getTruncateRpcTimeout(unit));
     }
 
-    public static long getPingTimeout()
+    public static long getPingTimeout(TimeUnit unit)
     {
-        return TimeUnit.SECONDS.toMillis(getBlockForPeersTimeoutInSeconds());
+        return unit.convert(getBlockForPeersTimeoutInSeconds(), TimeUnit.SECONDS);
     }
 
     public static double getPhiConvictThreshold()
@@ -1833,12 +1836,43 @@ public class DatabaseDescriptor
         return conf.rpc_keepalive;
     }
 
-    public static int getInternodeSendBufferSize()
+    public static int getInternodeSocketSendBufferSizeInBytes()
     {
+        // TODO: rename?
         return conf.internode_send_buff_size_in_bytes;
     }
 
-    public static int getInternodeRecvBufferSize()
+    public static int getInternodeApplicationSendQueueCapacityInBytes()
+    {
+        return conf.internode_application_send_queue_capacity_in_bytes;
+    }
+
+    public static int getInternodeApplicationReserveSendQueueCapacityInBytes()
+    {
+        return conf.internode_application_reserve_send_queue_capacity_in_bytes;
+    }
+
+    public static int getInternodeApplicationReserveSendQueueGlobalCapacityInBytes()
+    {
+        return conf.internode_application_reserve_send_queue_global_capacity_in_bytes;
+    }
+
+    public static int getInternodeApplicationReceiveQueueCapacityInBytes()
+    {
+        return conf.internode_application_receive_queue_capacity_in_bytes;
+    }
+
+    public static int getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes()
+    {
+        return conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes;
+    }
+
+    public static int getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes()
+    {
+        return conf.internode_application_reserve_receive_queue_global_capacity_in_bytes;
+    }
+
+    public static int getInternodeSocketRecvBufferSizeInBytes()
     {
         return conf.internode_recv_buff_size_in_bytes;
     }
@@ -2140,6 +2174,12 @@ public class DatabaseDescriptor
     public static EncryptionOptions getNativeProtocolEncryptionOptions()
     {
         return conf.client_encryption_options;
+    }
+
+    @VisibleForTesting
+    public static void updateNativeProtocolEncryptionOptions(Function<EncryptionOptions, EncryptionOptions> update)
+    {
+        conf.client_encryption_options = update.apply(conf.client_encryption_options);
     }
 
     public static int getHintedHandoffThrottleInKB()
@@ -2510,16 +2550,6 @@ public class DatabaseDescriptor
         conf.otc_coalescing_enough_coalesced_messages = otc_coalescing_enough_coalesced_messages;
     }
 
-    public static int getOtcBacklogExpirationInterval()
-    {
-        return conf.otc_backlog_expiration_interval_ms;
-    }
-
-    public static void setOtcBacklogExpirationInterval(int intervalInMillis)
-    {
-        conf.otc_backlog_expiration_interval_ms = intervalInMillis;
-    }
- 
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;

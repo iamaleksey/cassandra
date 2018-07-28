@@ -870,6 +870,9 @@ request_timeout_in_ms: 10000
 # which picks up the OS default and configure the net.ipv4.tcp_retries2 sysctl to be ~8.
 # internode_tcp_user_timeout_in_ms = 30000
 
+# The maximum continuous period a connection may be unwritable in application space
+# internode_application_timeout_in_ms = 30000
+
 # How long before a node logs slow queries. Select queries that take longer than
 # this timeout to execute, will generate an aggregated log message, so that slow queries
 # can be identified. Set this value to zero to disable slow query logging.

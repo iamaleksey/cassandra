@@ -43,7 +43,7 @@ import org.apache.cassandra.db.transform.FilteredPartitions;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
 import org.apache.cassandra.service.reads.repair.RepairedDataTracker;
@@ -80,7 +80,7 @@ public class DataResolver<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     {
         // We could get more responses while this method runs, which is ok (we're happy to ignore any response not here
         // at the beginning of this method), so grab the response count once and use that through the method.
-        Collection<MessageIn<ReadResponse>> messages = responses.snapshot();
+        Collection<Message<ReadResponse>> messages = responses.snapshot();
         assert !any(messages, msg -> msg.payload.isDigestResponse());
 
         E replicas = replicaPlan().candidates().select(transform(messages, msg -> msg.from), false);

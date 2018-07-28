@@ -36,7 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.UUIDGen;
 
 public class PrepareCallback extends AbstractPaxosCallback<PrepareResponse>
@@ -53,13 +53,13 @@ public class PrepareCallback extends AbstractPaxosCallback<PrepareResponse>
     public PrepareCallback(DecoratedKey key, TableMetadata metadata, int targets, ConsistencyLevel consistency, long queryStartNanoTime)
     {
         super(targets, consistency, queryStartNanoTime);
-        // need to inject the right key in the empty commit so comparing with empty commits in the reply works as expected
+        // need to inject the right key in the empty commit so comparing with empty commits in the respond works as expected
         mostRecentCommit = Commit.emptyCommit(key, metadata);
         mostRecentInProgressCommit = Commit.emptyCommit(key, metadata);
         mostRecentInProgressCommitWithUpdate = Commit.emptyCommit(key, metadata);
     }
 
-    public synchronized void response(MessageIn<PrepareResponse> message)
+    public synchronized void response(Message<PrepareResponse> message)
     {
         PrepareResponse response = message.payload;
         logger.trace("Prepare response {} from {}", response, message.from);

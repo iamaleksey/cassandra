@@ -22,15 +22,17 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.FSError;
 import org.apache.cassandra.net.IVerbHandler;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tracing.Tracing;
 
 public class TruncateVerbHandler implements IVerbHandler<Truncation>
 {
+    public static final TruncateVerbHandler instance = new TruncateVerbHandler();
+
     private static final Logger logger = LoggerFactory.getLogger(TruncateVerbHandler.class);
 
-    public void doVerb(MessageIn<Truncation> message, int id)
+    public void doVerb(Message<Truncation> message)
     {
         Truncation t = message.payload;
         Tracing.trace("Applying truncation of {}.{}", t.keyspace, t.columnFamily);
@@ -50,13 +52,13 @@ public class TruncateVerbHandler implements IVerbHandler<Truncation>
         Tracing.trace("Enqueuing response to truncate operation to {}", message.from);
 
         TruncateResponse response = new TruncateResponse(t.keyspace, t.columnFamily, true);
-        logger.trace("{} applied.  Enqueuing response to {}@{} ", t, id, message.from );
-        MessagingService.instance().sendReply(response.createMessage(), id, message.from);
+        logger.trace("{} applied.  Enqueuing response to {}@{} ", t, message.id, message.from);
+        MessagingService.instance().sendResponse(message.responseWith(response), message.from);
     }
 
-    private static void respondError(Truncation t, MessageIn truncateRequestMessage)
+    private static void respondError(Truncation t, Message truncateRequestMessage)
     {
         TruncateResponse response = new TruncateResponse(t.keyspace, t.columnFamily, false);
-        MessagingService.instance().sendOneWay(response.createMessage(), truncateRequestMessage.from);
+        MessagingService.instance().sendOneWay(truncateRequestMessage.responseWith(response), truncateRequestMessage.from);
     }
 }

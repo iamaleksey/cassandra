@@ -17,44 +17,57 @@
  */
 package org.apache.cassandra.net.async;
 
-import java.io.DataInput;
-import java.io.DataOutput;
+import java.io.EOFException;
 import java.io.IOException;
-import java.net.InetAddress;
+import java.nio.ByteBuffer;
 import java.util.Objects;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.primitives.Ints;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.ByteBufInputStream;
-import io.netty.buffer.ByteBufOutputStream;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.CompactEndpointSerializationHelper;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingService.AcceptVersions;
+import org.apache.cassandra.utils.memory.BufferPool;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.net.MessagingService.getBits;
+import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
+import static org.apache.cassandra.net.async.Crc.*;
+import static org.apache.cassandra.net.async.Crc.computeCrc32;
 
 /**
  * Messages for the handshake phase of the internode protocol.
+ *
+ * The modern handshake is composed of 2 messages: Initiate and Accept
  * <p>
- * The handshake's main purpose is to establish a protocol version that both side can talk, as well as exchanging a few connection
- * options/parameters. The handshake is composed of 3 messages, the first being sent by the initiator of the connection. The other
+ * The legacy handshake is composed of 3 messages, the first being sent by the initiator of the connection. The other
  * side then answer with the 2nd message. At that point, if a version mismatch is detected by the connection initiator,
  * it will simply disconnect and reconnect with a more appropriate version. But if the version is acceptable, the connection
  * initiator sends the third message of the protocol, after which it considers the connection ready.
- * <p>
- * See below for a more precise description of each of those 3 messages.
- * <p>
- * Note that this handshake protocol doesn't fully apply to streaming. For streaming, only the first message is sent,
- * after which the streaming protocol takes over (not documented here)
  */
 public class HandshakeProtocol
 {
+    static final long TIMEOUT_MILLIS = 3 * DatabaseDescriptor.getRpcTimeout(MILLISECONDS);
+
+    public enum Mode
+    {
+        STREAM,
+        REGULAR // GOSSIP, SMALL or LARGE if pre40; GOSSIP or SMALL if post40
+    }
+
     /**
      * The initial message sent when a node creates a new connection to a remote peer. This message contains:
-     *   1) the {@link MessagingService#PROTOCOL_MAGIC} number (4 bytes).
+     *   1) the {@link Message#PROTOCOL_MAGIC} number (4 bytes).
      *   2) the connection flags (4 bytes), which encodes:
      *      - the version the initiator thinks should be used for the connection (in practice, either the initiator
      *        version if it's the first time we connect to that remote since startup, or the last version known for that
@@ -62,6 +75,8 @@ public class HandshakeProtocol
      *      - the "mode" of the connection: whether it is for streaming or for messaging.
      *      - whether compression should be used or not (if it is, compression is enabled _after_ the last message of the
      *        handshake has been sent).
+     *   3) the connection initiator's broadcast address
+     *   4) a CRC protecting the message from corruption
      * <p>
      * More precisely, connection flags:
      * <pre>
@@ -69,246 +84,324 @@ public class HandshakeProtocol
      *                      1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3
      *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * |U U C M       |                |                               |
-     * |N N M O       |     VERSION    |             unused            |
-     * |U U P D       |                |                               |
+     * |U U C M C      |    REQUEST    |      MIN      |      MAX      |
+     * |N N M O R      |    VERSION    |   SUPPORTED   |   SUPPORTED   |
+     * |U U P D C      |  (DEPRECATED) |    VERSION    |    VERSION    |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * }
      * </pre>
      * UNU - unused bits lowest two bits; from a historical note: used to be "serializer type," which was always Binary
      * CMP - compression enabled bit
-     * MOD - connection mode. If the bit is on, the connection is for streaming; if the bit is off, it is for inter-node messaging.
-     * VERSION - if a streaming connection, indicates the streaming protocol version {@link org.apache.cassandra.streaming.messages.StreamMessage#CURRENT_VERSION};
-     * if a messaging connection, indicates the messaging protocol version the initiator *thinks* should be used.
+     * MOD - connection mode; if the bit is on, the connection is for streaming; if the bit is off, it is for inter-node messaging.
+     * CRC - crc enabled bit
+     * VERSION - {@link org.apache.cassandra.net.MessagingService#current_version}
      */
-    public static class FirstHandshakeMessage
+    public static class Initiate
     {
         /** Contains the PROTOCOL_MAGIC (int) and the flags (int). */
-        private static final int LENGTH = 8;
+        private static final int MIN_LENGTH = 8;
+        private static final int MAX_LENGTH = 12 + CompactEndpointSerializationHelper.MAXIMUM_SIZE;
 
-        final int messagingVersion;
-        final NettyFactory.Mode mode;
-        final boolean compressionEnabled;
+        @Deprecated // this is ignored by post40 nodes, i.e. if maxMessagingVersion is set
+        final int requestMessagingVersion;
+        // the messagingVersion bounds the sender will accept to initiate a connection;
+        // if the remote peer supports any, the newest supported version will be selected; otherwise the nearest supported version
+        final AcceptVersions acceptVersions;
+        final Mode mode;
+        final boolean withCrc;
+        final boolean withCompression;
+        final InetAddressAndPort from;
 
-        public FirstHandshakeMessage(int messagingVersion, NettyFactory.Mode mode, boolean compressionEnabled)
+        Initiate(int requestMessagingVersion, AcceptVersions acceptVersions, Mode mode, boolean withCompression, boolean withCrc, InetAddressAndPort from)
         {
-            assert messagingVersion > 0;
-            this.messagingVersion = messagingVersion;
+            this.requestMessagingVersion = requestMessagingVersion;
+            this.acceptVersions = acceptVersions;
             this.mode = mode;
-            this.compressionEnabled = compressionEnabled;
+            this.withCompression = withCompression;
+            this.withCrc = withCrc;
+            this.from = from;
         }
 
         @VisibleForTesting
         int encodeFlags()
         {
             int flags = 0;
-            if (compressionEnabled)
+            if (withCompression)
                 flags |= 1 << 2;
-            if (mode == NettyFactory.Mode.STREAMING)
+            if (mode == Mode.STREAM)
                 flags |= 1 << 3;
+            if (withCrc)
+                flags |= 1 << 4;
 
-            flags |= (messagingVersion << 8);
+            flags |= (requestMessagingVersion << 8);
+            if (acceptVersions.max < VERSION_40)
+                return flags; // for testing, permit serializing as though we are pre40
+            flags |= (acceptVersions.min << 16);
+            flags |= (acceptVersions.max << 24);
             return flags;
         }
 
-        public ByteBuf encode(ByteBufAllocator allocator)
+        public ByteBuf encode()
         {
-            ByteBuf buffer = allocator.directBuffer(LENGTH, LENGTH);
-            buffer.writerIndex(0);
-            buffer.writeInt(MessagingService.PROTOCOL_MAGIC);
-            buffer.writeInt(encodeFlags());
-            return buffer;
+            ByteBuffer buffer = BufferPool.get(MAX_LENGTH, BufferType.OFF_HEAP);
+            try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
+            {
+                out.writeInt(Message.PROTOCOL_MAGIC);
+                out.writeInt(encodeFlags());
+                if (acceptVersions.max >= VERSION_40)
+                {
+                    CompactEndpointSerializationHelper.instance.serialize(from, out, requestMessagingVersion);
+                    out.writeInt(computeCrc32(buffer, 0, buffer.position()));
+                }
+                buffer.flip();
+                return BufferPoolAllocator.wrap(buffer);
+            }
+            catch (IOException e)
+            {
+                throw new IllegalStateException(e);
+            }
         }
 
-        static FirstHandshakeMessage maybeDecode(ByteBuf in) throws IOException
+        static Initiate maybeDecode(ByteBuf buf) throws IOException
         {
-            if (in.readableBytes() < LENGTH)
+            if (buf.readableBytes() < MIN_LENGTH)
                 return null;
 
-            MessagingService.validateMagic(in.readInt());
-            int flags = in.readInt();
-            int version = MessagingService.getBits(flags, 15, 8);
-            NettyFactory.Mode mode = MessagingService.getBits(flags, 3, 1) == 1
-                                     ? NettyFactory.Mode.STREAMING
-                                     : NettyFactory.Mode.MESSAGING;
-            boolean compressed = MessagingService.getBits(flags, 2, 1) == 1;
-            return new FirstHandshakeMessage(version, mode, compressed);
+            ByteBuffer nio = buf.nioBuffer();
+            int start = nio.position();
+            try (DataInputBuffer in = new DataInputBuffer(nio, false))
+            {
+                validateLegacyProtocolMagic(in.readInt());
+                int flags = in.readInt();
+
+                int requestedMessagingVersion = getBits(flags, 8, 8);
+                int minMessagingVersion = getBits(flags, 16, 8);
+                int maxMessagingVersion = getBits(flags, 24, 8);
+                boolean isStream = getBits(flags, 3, 1) == 1;
+                boolean withCompression = getBits(flags, 2, 1) == 1;
+                boolean withCrc = getBits(flags, 4, 1) == 1;
+                Mode mode = isStream ? Mode.STREAM : Mode.REGULAR;
+
+                InetAddressAndPort from = null;
+
+                if (maxMessagingVersion >= MessagingService.VERSION_40)
+                {
+                    from = CompactEndpointSerializationHelper.instance.deserialize(in, requestedMessagingVersion);
+
+                    int computed = computeCrc32(nio, start, nio.position());
+                    int read = in.readInt();
+                    if (read != computed)
+                        throw new InvalidCrc(read, computed);
+                }
+
+                buf.skipBytes(nio.position() - start);
+                return new Initiate(requestedMessagingVersion,
+                                    minMessagingVersion == 0 && maxMessagingVersion == 0
+                                        ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
+                                    mode, withCompression, withCrc, from);
+
+            }
+            catch (EOFException e)
+            {
+                return null;
+            }
         }
 
+        @VisibleForTesting
         @Override
         public boolean equals(Object other)
         {
-            if (!(other instanceof FirstHandshakeMessage))
+            if (!(other instanceof Initiate))
                 return false;
 
-            FirstHandshakeMessage that = (FirstHandshakeMessage)other;
-            return this.messagingVersion == that.messagingVersion
-                   && this.mode == that.mode
-                   && this.compressionEnabled == that.compressionEnabled;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(messagingVersion, mode, compressionEnabled);
+            Initiate that = (Initiate)other;
+            return    this.mode == that.mode
+                   && this.withCompression == that.withCompression
+                   && this.withCrc == that.withCrc
+                   && Objects.equals(this.requestMessagingVersion, that.requestMessagingVersion)
+                   && Objects.equals(this.acceptVersions, that.acceptVersions);
         }
 
         @Override
         public String toString()
         {
-            return String.format("FirstHandshakeMessage - messaging version: %d, mode: %s, compress: %b", messagingVersion, mode, compressionEnabled);
+            return String.format("Initiate(request: %d, min: %d, max: %d, mode: %s, compress: %b, from: %s)",
+                                 requestMessagingVersion,
+                                 acceptVersions == null ? requestMessagingVersion : acceptVersions.min,
+                                 acceptVersions == null ? requestMessagingVersion : acceptVersions.max,
+                                 mode, withCompression, from);
         }
     }
 
+
     /**
-     * The second message of the handshake, sent by the node receiving the {@link FirstHandshakeMessage} back to the
-     * connection initiator. This message contains the messaging version of the peer sending this message,
-     * so {@link org.apache.cassandra.net.MessagingService#current_version}.
+     * The second message of the handshake, sent by the node receiving the {@link Initiate} back to the
+     * connection initiator.
+     *
+     * This message contains
+     *   1) the messaging version of the peer sending this message
+     *   2) the negotiated messaging version if one could be accepted by both peers,
+     *      or if not the closest version that this peer could support to the ones requested
+     *   3) a CRC protectingn the integrity of the message
+     *
+     * Note that the pre40 equivalent of this message contains ONLY the messaging version of the peer.
      */
-    static class SecondHandshakeMessage
+    static class Accept
     {
         /** The messaging version sent by the receiving peer (int). */
-        private static final int LENGTH = 4;
+        private static final int MAX_LENGTH = 12;
 
-        final int messagingVersion;
+        final int useMessagingVersion;
+        final int maxMessagingVersion;
 
-        SecondHandshakeMessage(int messagingVersion)
+        Accept(int useMessagingVersion, int maxMessagingVersion)
         {
-            this.messagingVersion = messagingVersion;
+            this.useMessagingVersion = useMessagingVersion;
+            this.maxMessagingVersion = maxMessagingVersion;
         }
 
         public ByteBuf encode(ByteBufAllocator allocator)
         {
-            ByteBuf buffer = allocator.directBuffer(LENGTH, LENGTH);
-            buffer.writerIndex(0);
+            ByteBuf buffer = allocator.directBuffer(MAX_LENGTH);
+            buffer.clear();
+            buffer.writeInt(maxMessagingVersion);
+            buffer.writeInt(useMessagingVersion);
+            buffer.writeInt(computeCrc32(buffer, 0, 8));
+            return buffer;
+        }
+
+        /**
+         * Respond to pre40 nodes only with our current messagingVersion
+         */
+        public static ByteBuf respondPre40(int messagingVersion, ByteBufAllocator allocator)
+        {
+            ByteBuf buffer = allocator.directBuffer(4);
+            buffer.clear();
             buffer.writeInt(messagingVersion);
             return buffer;
         }
 
-        static SecondHandshakeMessage maybeDecode(ByteBuf in)
+        static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion) throws InvalidCrc
         {
-            return in.readableBytes() >= LENGTH ? new SecondHandshakeMessage(in.readInt()) : null;
+            int readerIndex = in.readerIndex();
+            if (in.readableBytes() < 4)
+                return null;
+            int maxMessagingVersion = in.readInt();
+            int useMessagingVersion = 0;
+            if (handshakeMessagingVersion >= VERSION_40)
+            {
+                if (in.readableBytes() < 8)
+                {
+                    in.readerIndex(readerIndex);
+                    return null;
+                }
+                useMessagingVersion = in.readInt();
+                // verify crc
+                int computed = computeCrc32(in, readerIndex, readerIndex + 8);
+                int read = in.readInt();
+                if (read != computed)
+                    throw new InvalidCrc(read, computed);
+            }
+            return new Accept(useMessagingVersion, maxMessagingVersion);
         }
 
+        @VisibleForTesting
         @Override
         public boolean equals(Object other)
         {
-            return other instanceof SecondHandshakeMessage
-                   && this.messagingVersion == ((SecondHandshakeMessage) other).messagingVersion;
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Integer.hashCode(messagingVersion);
+            return other instanceof Accept
+                   && this.useMessagingVersion == ((Accept) other).useMessagingVersion
+                   && this.maxMessagingVersion == ((Accept) other).maxMessagingVersion;
         }
 
         @Override
         public String toString()
         {
-            return String.format("SecondHandshakeMessage - messaging version: %d", messagingVersion);
+            return String.format("Accept(use: %d, max: %d)", useMessagingVersion, maxMessagingVersion);
         }
     }
 
     /**
-     * The third message of the handshake, sent by the connection initiator on reception of {@link SecondHandshakeMessage}.
+     * The third message of the handshake, sent by pre40 nodes on reception of {@link Accept}.
      * This message contains:
-     *   1) the connection initiator's messaging version (4 bytes) - {@link org.apache.cassandra.net.MessagingService#current_version}.
+     *   1) The connection initiator's {@link org.apache.cassandra.net.MessagingService#current_version} (4 bytes).
      *      This indicates the max messaging version supported by this node.
-     *   2) the connection initiator's broadcast address as encoded by {@link org.apache.cassandra.net.CompactEndpointSerializationHelper}.
-     *      This can be either 5 bytes for an IPv4 address, or 17 bytes for an IPv6 one.
+     *   2) The connection initiator's broadcast address as encoded by {@link org.apache.cassandra.net.CompactEndpointSerializationHelper}.
+     *      This can be either 7 bytes for an IPv4 address, or 19 bytes for an IPv6 one, post40.
+     *      This can be either 5 bytes for an IPv4 address, or 17 bytes for an IPv6 one, pre40.
      * <p>
-     * This message concludes the handshake protocol. After that, the connection will used either for streaming, or to
-     * send messages. If the connection is to be compressed, compression is enabled only after this message is sent/received.
+     * This message concludes the legacy handshake protocol.
      */
-    static class ThirdHandshakeMessage
+    static class ConfirmOutboundPre40
     {
-        /**
-         * The third message contains the version and IP address of the sending node. Because the IP can be either IPv4 or
-         * IPv6, this can be either 9 (4 for version + 5 for IP) or 21 (4 for version + 17 for IP) bytes. Since we can't know
-         * a priori if the IP address will be v4 or v6, go with the minimum required bytes and hope that if the address is
-         * v6, we'll have the extra 12 bytes in the packet.
-         */
-        private static final int MIN_LENGTH = 9;
+        private static final int MAX_LENGTH = 4 + CompactEndpointSerializationHelper.MAXIMUM_SIZE;
 
-        /**
-         * The internode messaging version of the peer; used for serializing to a version the peer understands.
-         */
-        final int messagingVersion;
-        final InetAddressAndPort address;
+        final int maxMessagingVersion;
+        final InetAddressAndPort from;
 
-        ThirdHandshakeMessage(int messagingVersion, InetAddressAndPort address)
+        ConfirmOutboundPre40(int maxMessagingVersion, InetAddressAndPort from)
         {
-            this.messagingVersion = messagingVersion;
-            this.address = address;
+            this.maxMessagingVersion = maxMessagingVersion;
+            this.from = from;
         }
 
-        @SuppressWarnings("resource")
-        public ByteBuf encode(ByteBufAllocator allocator)
+        public ByteBuf encode()
         {
-            int bufLength = Ints.checkedCast(Integer.BYTES + CompactEndpointSerializationHelper.instance.serializedSize(address, messagingVersion));
-            ByteBuf buffer = allocator.directBuffer(bufLength, bufLength);
-            buffer.writerIndex(0);
-
-            // the max messaging version supported by the local node (not #messagingVersion)
-            buffer.writeInt(MessagingService.current_version);
-            try
+            ByteBuffer buffer = BufferPool.get(MAX_LENGTH, BufferType.OFF_HEAP);
+            try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
             {
-                DataOutputPlus dop = new ByteBufDataOutputPlus(buffer);
-                CompactEndpointSerializationHelper.instance.serialize(address, dop, messagingVersion);
-                return buffer;
+                out.writeInt(maxMessagingVersion);
+                CompactEndpointSerializationHelper.instance.serialize(from, out, maxMessagingVersion);
+                buffer.flip();
+                return BufferPoolAllocator.wrap(buffer);
             }
             catch (IOException e)
             {
-                // Shouldn't happen, we're serializing in memory.
-                throw new AssertionError(e);
+                throw new IllegalStateException(e);
             }
         }
 
         @SuppressWarnings("resource")
-        static ThirdHandshakeMessage maybeDecode(ByteBuf in)
+        static ConfirmOutboundPre40 maybeDecode(ByteBuf in)
         {
-            if (in.readableBytes() < MIN_LENGTH)
-                return null;
-
-            in.markReaderIndex();
-            int version = in.readInt();
-            DataInputPlus input = new ByteBufDataInputPlus(in);
+            ByteBuffer nio = in.nioBuffer();
+            int start = nio.position();
+            DataInputPlus input = new DataInputBuffer(nio, false);
             try
             {
+                int version = input.readInt();
                 InetAddressAndPort address = CompactEndpointSerializationHelper.instance.deserialize(input, version);
-                return new ThirdHandshakeMessage(version, address);
+                in.skipBytes(nio.position() - start);
+                return new ConfirmOutboundPre40(version, address);
             }
-            catch (IOException e)
+            catch (EOFException e)
             {
                 // makes the assumption we didn't have enough bytes to deserialize an IPv6 address,
                 // as we only check the MIN_LENGTH of the buf.
-                in.resetReaderIndex();
                 return null;
+            }
+            catch (IOException e)
+            {
+                throw new IllegalStateException(e);
             }
         }
 
+        @VisibleForTesting
         @Override
         public boolean equals(Object other)
         {
-            if (!(other instanceof ThirdHandshakeMessage))
+            if (!(other instanceof ConfirmOutboundPre40))
                 return false;
 
-            ThirdHandshakeMessage that = (ThirdHandshakeMessage)other;
-            return this.messagingVersion == that.messagingVersion
-                   && Objects.equals(this.address, that.address);
-        }
-
-        @Override
-        public int hashCode()
-        {
-            return Objects.hash(messagingVersion, address);
+            ConfirmOutboundPre40 that = (ConfirmOutboundPre40) other;
+            return this.maxMessagingVersion == that.maxMessagingVersion
+                   && Objects.equals(this.from, that.from);
         }
 
         @Override
         public String toString()
         {
-            return String.format("ThirdHandshakeMessage - messaging version: %d, address = %s", messagingVersion, address);
+            return String.format("ConfirmOutboundPre40(maxMessagingVersion: %d; address: %s)", maxMessagingVersion, from);
         }
     }
 }

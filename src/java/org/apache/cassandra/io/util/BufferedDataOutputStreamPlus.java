@@ -29,7 +29,6 @@ import com.google.common.base.Preconditions;
 import net.nicoulaj.compilecommand.annotations.DontInline;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.utils.memory.MemoryUtil;
-import org.apache.cassandra.utils.vint.VIntCoding;
 
 /**
  * An implementation of the DataOutputStreamPlus interface using a ByteBuffer to stage writes
@@ -242,25 +241,6 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
     }
 
     @Override
-    public void writeVInt(long value) throws IOException
-    {
-        writeUnsignedVInt(VIntCoding.encodeZigZag64(value));
-    }
-
-    @Override
-    public void writeUnsignedVInt(long value) throws IOException
-    {
-        int size = VIntCoding.computeUnsignedVIntSize(value);
-        if (size == 1)
-        {
-            write((int) value);
-            return;
-        }
-
-        write(VIntCoding.encodeVInt(value, size), 0, size);
-    }
-
-    @Override
     public void writeFloat(float v) throws IOException
     {
         writeInt(Float.floatToRawIntBits(v));
@@ -302,13 +282,6 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
         UnbufferedDataOutputStreamPlus.writeUTF(s, this);
     }
 
-    @Override
-    public void write(Memory memory, long offset, long length) throws IOException
-    {
-        for (ByteBuffer buffer : memory.asByteBuffers(offset, length))
-            write(buffer);
-    }
-
     /*
      * Count is the number of bytes remaining to write ignoring already remaining capacity
      */
@@ -336,16 +309,6 @@ public class BufferedDataOutputStreamPlus extends DataOutputStreamPlus
         channel.close();
         FileUtils.clean(buffer);
         buffer = null;
-    }
-
-    @Override
-    public <R> R applyToChannel(CheckedFunction<WritableByteChannel, R, IOException> f) throws IOException
-    {
-        if (strictFlushing)
-            throw new UnsupportedOperationException();
-        //Don't allow writes to the underlying channel while data is buffered
-        flush();
-        return f.apply(channel);
     }
 
     public BufferedDataOutputStreamPlus order(ByteOrder order)

@@ -46,11 +46,14 @@ import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.InOurDcTester;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.IAsyncCallback;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.tracing.Tracing;
+
+import static org.apache.cassandra.net.Verb.*;
 
 public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
         extends AbstractFuture<Object> implements IAsyncCallback<Object>
@@ -111,7 +114,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
     }
 
     @Override
-    public void response(MessageIn<Object> msg)
+    public void response(Message<Object> msg)
     {
         ack(msg.from);
     }
@@ -138,7 +141,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
     }
 
     @VisibleForTesting
-    protected void sendRR(MessageOut<Mutation> message, InetAddressAndPort endpoint)
+    protected void sendRR(Message<Mutation> message, InetAddressAndPort endpoint)
     {
         MessagingService.instance().sendRR(message, endpoint, this);
     }
@@ -157,7 +160,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
 
             Tracing.trace("Sending read-repair-mutation to {}", destination);
             // use a separate verb here to avoid writing hints on timeouts
-            sendRR(mutation.createMessage(MessagingService.Verb.READ_REPAIR), destination.endpoint());
+            sendRR(Message.out(READ_REPAIR_REQ, mutation), destination.endpoint());
             ColumnFamilyStore.metricsFor(tableId).readRepairRequests.mark();
 
             if (!shouldBlockOn.test(destination.endpoint()))
@@ -214,7 +217,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
 
         for (Replica replica : newCandidates)
         {
-            int versionIdx = msgVersionIdx(MessagingService.instance().getVersion(replica.endpoint()));
+            int versionIdx = msgVersionIdx(MessagingService.instance().versions.get(replica.endpoint()));
 
             Mutation mutation = versionedMutations[versionIdx];
 
@@ -232,7 +235,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
             }
 
             Tracing.trace("Sending speculative read-repair-mutation to {}", replica);
-            sendRR(mutation.createMessage(MessagingService.Verb.READ_REPAIR), replica.endpoint());
+            sendRR(Message.out(READ_REPAIR_REQ, mutation), replica.endpoint());
             ReadRepairDiagnostics.speculatedWrite(this, replica.endpoint(), mutation);
         }
     }

@@ -2475,12 +2475,14 @@ public abstract class SSTableReader extends SSTable implements SelfRefCounted<SS
         return reader;
     }
 
-    public static void shutdownBlocking() throws InterruptedException
+    public static void shutdownBlocking(long timeout, TimeUnit unit) throws InterruptedException, TimeoutException
     {
         if (syncExecutor != null)
         {
             syncExecutor.shutdownNow();
-            syncExecutor.awaitTermination(0, TimeUnit.SECONDS);
+            syncExecutor.awaitTermination(timeout, unit);
+            if (!syncExecutor.isTerminated())
+                throw new TimeoutException();
         }
         resetTidying();
     }

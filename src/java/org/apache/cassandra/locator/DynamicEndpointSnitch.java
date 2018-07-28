@@ -35,6 +35,7 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
+import org.apache.cassandra.net.ILatencySubscriber;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -253,7 +254,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         throw new UnsupportedOperationException("You shouldn't wrap the DynamicEndpointSnitch (within itself or otherwise)");
     }
 
-    public void receiveTiming(InetAddressAndPort host, long latency) // this is cheap
+    public void receiveTiming(InetAddressAndPort host, long latency, TimeUnit unit) // this is cheap
     {
         ExponentiallyDecayingReservoir sample = samples.get(host);
         if (sample == null)
@@ -263,7 +264,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
             if (sample == null)
                 sample = maybeNewSample;
         }
-        sample.update(latency);
+        sample.update(unit.toMillis(latency));
     }
 
     private void updateScores() // this is expensive
@@ -274,7 +275,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         {
             if (MessagingService.instance() != null)
             {
-                MessagingService.instance().register(this);
+                MessagingService.instance().latency.subscribe(this);
                 registered = true;
             }
 

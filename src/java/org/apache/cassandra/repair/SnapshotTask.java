@@ -25,9 +25,12 @@ import com.google.common.util.concurrent.AbstractFuture;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SnapshotMessage;
+
+import static java.util.concurrent.TimeUnit.HOURS;
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * SnapshotTask is a task that sends snapshot request.
@@ -45,9 +48,9 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
 
     public void run()
     {
-        MessagingService.instance().sendRR(new SnapshotMessage(desc).createMessage(),
-                endpoint,
-                new SnapshotCallback(this), TimeUnit.HOURS.toMillis(1), true);
+        MessagingService.instance().sendRR(Message.out(REPAIR_REQ, new SnapshotMessage(desc)),
+                                           endpoint,
+                                           new SnapshotCallback(this));
     }
 
     /**
@@ -67,7 +70,7 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
          *
          * @param msg response received.
          */
-        public void response(MessageIn msg)
+        public void response(Message msg)
         {
             task.set(task.endpoint);
         }

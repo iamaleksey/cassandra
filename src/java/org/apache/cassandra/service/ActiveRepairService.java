@@ -59,8 +59,8 @@ import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.CommonRange;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -80,6 +80,7 @@ import org.apache.cassandra.utils.UUIDGen;
 
 import static com.google.common.collect.Iterables.concat;
 import static com.google.common.collect.Iterables.transform;
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * ActiveRepairService is the starting point for manual "active" repairs.
@@ -398,7 +399,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
         IAsyncCallbackWithFailure callback = new IAsyncCallbackWithFailure()
         {
-            public void response(MessageIn msg)
+            public void response(Message msg)
             {
                 prepareLatch.countDown();
             }
@@ -425,8 +426,8 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             if (FailureDetector.instance.isAlive(neighbour))
             {
                 PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
-                MessageOut<RepairMessage> msg = message.createMessage();
-                MessagingService.instance().sendRR(msg, neighbour, callback, DatabaseDescriptor.getRpcTimeout(), true);
+                Message<RepairMessage> msg = Message.out(REPAIR_REQ, message);
+                MessagingService.instance().sendRR(msg, neighbour, callback);
             }
             else
             {
