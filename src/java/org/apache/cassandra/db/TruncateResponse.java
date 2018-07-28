@@ -22,8 +22,7 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Message;
 
 /**
  * This message is sent back the truncate operation and basically specifies if
@@ -44,9 +43,9 @@ public class TruncateResponse
         this.success = success;
     }
 
-    public MessageOut<TruncateResponse> createMessage()
+    public Message<TruncateResponse> createResponse(Message<?> respondingTo)
     {
-        return new MessageOut<TruncateResponse>(MessagingService.Verb.REQUEST_RESPONSE, this, serializer);
+        return Message.respond(respondingTo, this);
     }
 
     public static class TruncateResponseSerializer implements IVersionedSerializer<TruncateResponse>

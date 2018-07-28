@@ -22,8 +22,8 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 
 public class SnapshotCommand
 {
@@ -42,9 +42,9 @@ public class SnapshotCommand
         this.clear_snapshot = clearSnapshot;
     }
 
-    public MessageOut createMessage()
+    public Message createMessage()
     {
-        return new MessageOut<SnapshotCommand>(MessagingService.Verb.SNAPSHOT, this, serializer);
+        return Message.out(Verb.SNAPSHOT_REQ, this);
     }
 
     @Override

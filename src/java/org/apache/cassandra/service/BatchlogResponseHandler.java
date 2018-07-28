@@ -24,7 +24,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 
 public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
 {
@@ -47,7 +47,7 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return wrapped.ackCount();
     }
 
-    public void response(MessageIn<T> msg)
+    public void response(Message<T> msg)
     {
         wrapped.response(msg);
         if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)

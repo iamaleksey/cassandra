@@ -58,6 +58,7 @@ import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
@@ -195,7 +196,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster, 
             if (null != prev)
                 throw new IllegalStateException("Cluster cannot have multiple nodes with same InetAddressAndPort: " + instance.broadcastAddressAndPort() + " vs " + prev.broadcastAddressAndPort());
         }
-        this.filters = new MessageFilters(this);
+        this.filters = new MessageFilters();
     }
 
     protected abstract I newInstanceWrapper(Versions.Version version, InstanceConfig config);
@@ -230,7 +231,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster, 
 
 
     public IMessageFilters filters() { return filters; }
-    public MessageFilters.Builder verbs(MessagingService.Verb ... verbs) { return filters.verbs(verbs); }
+    public MessageFilters.Builder verbs(Verb... verbs) { return filters.verbs(verbs); }
 
     public void disableAutoCompaction(String keyspace)
     {

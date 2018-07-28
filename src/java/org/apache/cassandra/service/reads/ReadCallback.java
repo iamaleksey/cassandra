@@ -37,11 +37,12 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> implements IAsyncCallbackWithFailure<ReadResponse>
 {
@@ -98,7 +99,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
     public void awaitResults() throws ReadFailureException, ReadTimeoutException
     {
-        boolean signaled = await(command.getTimeout(), TimeUnit.MILLISECONDS);
+        boolean signaled = await(command.getTimeout(MILLISECONDS), TimeUnit.MILLISECONDS);
         boolean failed = failures > 0 && blockFor + failures > replicaPlan().contacts().size();
         if (signaled && !failed)
             return;
@@ -125,7 +126,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         return blockFor;
     }
 
-    public void response(MessageIn<ReadResponse> message)
+    public void response(Message<ReadResponse> message)
     {
         resolver.preprocess(message);
         int n = waitingFor(message.from)
@@ -146,11 +147,8 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
     public void response(ReadResponse result)
     {
-        MessageIn<ReadResponse> message = MessageIn.create(FBUtilities.getBroadcastAddressAndPort(),
-                                                           result,
-                                                           Collections.emptyMap(),
-                                                           MessagingService.Verb.INTERNAL_RESPONSE,
-                                                           MessagingService.current_version);
+        Verb kind = command.isRangeRequest() ? Verb.RANGE_RSP : Verb.READ_RSP;
+        Message<ReadResponse> message = Message.respondInternal(kind, result);
         response(message);
     }
 

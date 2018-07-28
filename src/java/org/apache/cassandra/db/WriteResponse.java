@@ -22,8 +22,7 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Message;
 
 /*
  * This empty response is sent by a replica to inform the coordinator that the write succeeded
@@ -34,13 +33,11 @@ public final class WriteResponse
 
     private static final WriteResponse instance = new WriteResponse();
 
-    private WriteResponse()
-    {
-    }
+    private WriteResponse() {}
 
-    public static MessageOut<WriteResponse> createMessage()
+    public static Message<WriteResponse> createResponse(Message<?> to)
     {
-        return new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, instance, serializer);
+        return Message.respond(to, instance);
     }
 
     public static class Serializer implements IVersionedSerializer<WriteResponse>

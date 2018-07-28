@@ -56,6 +56,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -72,7 +73,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.FailSession;
 import org.apache.cassandra.repair.messages.FinalizeCommit;
@@ -88,6 +89,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 import static org.apache.cassandra.repair.consistent.ConsistentSession.State.*;
 
 /**
@@ -493,7 +495,7 @@ public class LocalSessions
     protected void sendMessage(InetAddressAndPort destination, RepairMessage message)
     {
         logger.trace("sending {} to {}", message, destination);
-        MessageOut<RepairMessage> messageOut = new MessageOut<RepairMessage>(MessagingService.Verb.REPAIR_MESSAGE, message, RepairMessage.serializer);
+        Message<RepairMessage> messageOut = Message.out(REPAIR_REQ, message);
         MessagingService.instance().sendOneWay(messageOut, destination);
     }
 

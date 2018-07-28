@@ -31,8 +31,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.FileUtils;
-import org.apache.cassandra.net.async.ByteBufDataOutputStreamPlus;
+import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.utils.FBUtilities;
@@ -55,10 +54,9 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
     }
 
     @Override
-    public void write(DataOutputStreamPlus out) throws IOException
+    public void write(DataOutputStreamPlus output) throws IOException
     {
-        assert out instanceof ByteBufDataOutputStreamPlus;
-        ByteBufDataOutputStreamPlus output = (ByteBufDataOutputStreamPlus)out;
+        AsyncChannelOutputPlus out = (AsyncChannelOutputPlus) output;
         long totalSize = totalSize();
         logger.debug("[Stream #{}] Start streaming file {} to {}, repairedAt = {}, totalSize = {}", session.planId(),
                      sstable.getFilename(), session.peer, sstable.getSSTableMetadata().repairedAt, totalSize);
@@ -82,26 +80,18 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 long bytesTransferred = 0;
                 while (bytesTransferred < length)
                 {
-                    final int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
-                    limiter.acquire(toTransfer);
+                    int toTransfer = (int) Math.min(CHUNK_SIZE, length - bytesTransferred);
+                    long position = section.lowerPosition + bytesTransferred;
 
-                    ByteBuffer outBuffer = ByteBuffer.allocateDirect(toTransfer);
-                    long lastWrite;
-                    try
-                    {
-                        lastWrite = fc.read(outBuffer, section.lowerPosition + bytesTransferred);
-                        assert lastWrite == toTransfer : String.format("could not read required number of bytes from file to be streamed: read %d bytes, wanted %d bytes", lastWrite, toTransfer);
+                    out.writeToChannel(bufferSupplier -> {
+                        ByteBuffer outBuffer = bufferSupplier.get(toTransfer);
+                        long read = fc.read(outBuffer, position);
+                        assert read == toTransfer : String.format("could not read required number of bytes from file to be streamed: read %d bytes, wanted %d bytes", read, toTransfer);
                         outBuffer.flip();
-                        output.writeToChannel(outBuffer);
-                    }
-                    catch (IOException e)
-                    {
-                        FileUtils.clean(outBuffer);
-                        throw e;
-                    }
+                    }, limiter);
 
-                    bytesTransferred += lastWrite;
-                    progress += lastWrite;
+                    bytesTransferred += toTransfer;
+                    progress += toTransfer;
                     session.progress(sstable.descriptor.filenameFor(Component.DATA), ProgressInfo.Direction.OUT, progress, totalSize);
                 }
             }

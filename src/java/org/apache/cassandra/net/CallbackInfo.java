@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net;
 
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
 /**
@@ -29,23 +28,21 @@ public class CallbackInfo
 {
     protected final InetAddressAndPort target;
     protected final IAsyncCallback callback;
-    protected final IVersionedSerializer<?> serializer;
-    private final boolean failureCallback;
+
+    @Deprecated // for 3.0 compatibility purposes only
+    public final Verb verb;
 
     /**
      * Create CallbackInfo without sent message
      *
      * @param target target to send message
      * @param callback
-     * @param serializer serializer to deserialize response message
-     * @param failureCallback True when we have a callback to handle failures
      */
-    public CallbackInfo(InetAddressAndPort target, IAsyncCallback callback, IVersionedSerializer<?> serializer, boolean failureCallback)
+    public CallbackInfo(InetAddressAndPort target, IAsyncCallback callback, Verb verb)
     {
         this.target = target;
         this.callback = callback;
-        this.serializer = serializer;
-        this.failureCallback = failureCallback;
+        this.verb = verb;
     }
 
     public boolean shouldHint()
@@ -55,7 +52,7 @@ public class CallbackInfo
 
     public boolean isFailureCallback()
     {
-        return failureCallback;
+        return callback instanceof IAsyncCallbackWithFailure<?>;
     }
 
     public String toString()
@@ -63,8 +60,7 @@ public class CallbackInfo
         return "CallbackInfo(" +
                "target=" + target +
                ", callback=" + callback +
-               ", serializer=" + serializer +
-               ", failureCallback=" + failureCallback +
+               ", failureCallback=" + isFailureCallback() +
                ')';
     }
 }

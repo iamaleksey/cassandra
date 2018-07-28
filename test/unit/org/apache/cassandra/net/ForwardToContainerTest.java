@@ -57,7 +57,7 @@ public class ForwardToContainerTest
                                                               InetAddressAndPort.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"),
                                                               InetAddressAndPort.getByName("[2001:0db8:0000:0000:0000:ff00:0042:8329]:7000"));
 
-        ForwardToContainer ftc = new ForwardToContainer(addresses, new int[] { 44, 45, 46, 47, 48, 49 });
+        ForwardToContainer ftc = new ForwardToContainer(addresses, new long[] { 44, 45, 46, 47, 48, 49 });
         ByteBuffer buffer;
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {

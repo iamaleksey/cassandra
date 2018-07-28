@@ -15,12 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
+import java.util.HashMap;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableMap;
+import javax.annotation.Nullable;
 
 import org.apache.cassandra.io.DummyByteVersionedSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -28,43 +28,76 @@ import org.apache.cassandra.io.ShortVersionedSerializer;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static java.lang.Math.max;
+
 /**
  * Type names and serializers for various parameters that
  */
 public enum ParameterType
 {
-    FORWARD_TO("FORWARD_TO", ForwardToSerializer.instance),
-    FORWARD_FROM("FORWARD_FROM", CompactEndpointSerializationHelper.instance),
-    FAILURE_RESPONSE("FAIL", DummyByteVersionedSerializer.instance),
-    FAILURE_REASON("FAIL_REASON", ShortVersionedSerializer.instance),
-    FAILURE_CALLBACK("CAL_BAC", DummyByteVersionedSerializer.instance),
-    TRACE_SESSION("TraceSession", UUIDSerializer.serializer),
-    TRACE_TYPE("TraceType", Tracing.traceTypeSerializer),
-    TRACK_REPAIRED_DATA("TrackRepaired", DummyByteVersionedSerializer.instance);
+    FORWARD_TO          (0, "FORWARD_TO",    ForwardToSerializer.instance),
+    FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
+    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance),
+    FAILURE_REASON      (3, "FAIL_REASON",   ShortVersionedSerializer.instance),
+    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance),
+    TRACE_SESSION       (5, "TraceSession",  UUIDSerializer.serializer),
+    TRACE_TYPE          (6, "TraceType",     Tracing.traceTypeSerializer),
+    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance);
 
-    public static final Map<String, ParameterType> byName;
-    public final String key;
+    public final int id;
+    public final String legacyAlias;
     public final IVersionedSerializer serializer;
+
+    private static final ParameterType[] idToTypeMap;
+    private static final Map<String, ParameterType> aliasToTypeMap;
 
     static
     {
-        ImmutableMap.Builder<String, ParameterType> builder = ImmutableMap.builder();
-        for (ParameterType type : values())
+        ParameterType[] types = values();
+
+        int max = -1;
+        for (ParameterType t : types)
+            max = max(t.id, max);
+
+        ParameterType[] idMap = new ParameterType[max + 1];
+        Map<String, ParameterType> aliasMap = new HashMap<>();
+
+        for (ParameterType type : types)
         {
-            builder.put(type.key, type);
+            if (idMap[type.id] != null)
+                throw new RuntimeException("Two ParamaterType-s that map to the same id: " + type.id);
+            idMap[type.id] = type;
+
+            if (aliasMap.put(type.legacyAlias, type) != null)
+                throw new RuntimeException("Two ParamaterType-s that map to the same legacy alias: " + type.legacyAlias);
         }
-        byName = builder.build();
+
+        idToTypeMap = idMap;
+        aliasToTypeMap = aliasMap;
     }
 
-    ParameterType(String key, IVersionedSerializer serializer)
+    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer)
     {
-        this.key = key;
+        if (id < 0)
+            throw new IllegalArgumentException("ParameterType id must be non-negative");
+
+        this.id = id;
+        this.legacyAlias = legacyAlias;
         this.serializer = serializer;
     }
 
-    public String key()
+    @Nullable
+    public static ParameterType lookUpById(int id)
     {
-        return key;
+        if (id < 0)
+            throw new IllegalArgumentException("ParameterType id must be non-negative (got " + id + ')');
+
+        return id < idToTypeMap.length ? idToTypeMap[id] : null;
     }
 
+    @Nullable
+    public static ParameterType lookUpByAlias(String alias)
+    {
+        return aliasToTypeMap.get(alias);
+    }
 }

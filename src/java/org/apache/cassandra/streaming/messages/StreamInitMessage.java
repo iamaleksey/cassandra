@@ -72,7 +72,7 @@ public class StreamInitMessage extends StreamMessage
     {
         public void serialize(StreamInitMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
         {
-            CompactEndpointSerializationHelper.streamingInstance.serialize(message.from, out, version);
+            CompactEndpointSerializationHelper.instance.serialize(message.from, out, version);
             out.writeInt(message.sessionIndex);
             UUIDSerializer.serializer.serialize(message.planId, out, MessagingService.current_version);
             out.writeUTF(message.streamOperation.getDescription());
@@ -87,7 +87,7 @@ public class StreamInitMessage extends StreamMessage
 
         public StreamInitMessage deserialize(DataInputPlus in, int version, StreamSession session) throws IOException
         {
-            InetAddressAndPort from = CompactEndpointSerializationHelper.streamingInstance.deserialize(in, version);
+            InetAddressAndPort from = CompactEndpointSerializationHelper.instance.deserialize(in, version);
             int sessionIndex = in.readInt();
             UUID planId = UUIDSerializer.serializer.deserialize(in, MessagingService.current_version);
             String description = in.readUTF();
@@ -100,7 +100,7 @@ public class StreamInitMessage extends StreamMessage
 
         public long serializedSize(StreamInitMessage message, int version)
         {
-            long size = CompactEndpointSerializationHelper.streamingInstance.serializedSize(message.from, version);
+            long size = CompactEndpointSerializationHelper.instance.serializedSize(message.from, version);
             size += TypeSizes.sizeof(message.sessionIndex);
             size += UUIDSerializer.serializer.serializedSize(message.planId, MessagingService.current_version);
             size += TypeSizes.sizeof(message.streamOperation.getDescription());

@@ -17,24 +17,25 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.AbstractFuture;
+
+import io.netty.util.concurrent.ImmediateEventExecutor;
+import org.apache.cassandra.net.async.AsyncPromise;
 
 /**
  * A callback specialized for returning a value from a single target; that is, this is for messages
  * that we only send to one recipient.
  */
-public class AsyncOneResponse<T> extends AbstractFuture<T> implements IAsyncCallback<T>
+public class AsyncOneResponse<T> extends AsyncPromise<T> implements IAsyncCallback<T>
 {
-    private final long start = System.nanoTime();
-
-    public void response(MessageIn<T> response)
+    public AsyncOneResponse()
     {
-        set(response.payload);
+        super(ImmediateEventExecutor.INSTANCE);
+    }
+
+    public void response(Message<T> response)
+    {
+        setSuccess(response.payload);
     }
 
     public boolean isLatencyForSnitch()
@@ -42,29 +43,11 @@ public class AsyncOneResponse<T> extends AbstractFuture<T> implements IAsyncCall
         return false;
     }
 
-    @Override
-    public T get(long timeout, TimeUnit unit) throws TimeoutException
-    {
-        long adjustedTimeout = unit.toNanos(timeout) - (System.nanoTime() - start);
-        if (adjustedTimeout <= 0)
-        {
-            throw new TimeoutException("Operation timed out.");
-        }
-        try
-        {
-            return super.get(adjustedTimeout, TimeUnit.NANOSECONDS);
-        }
-        catch (InterruptedException | ExecutionException e)
-        {
-            throw new AssertionError(e);
-        }
-    }
-
     @VisibleForTesting
     public static <T> AsyncOneResponse<T> immediate(T value)
     {
         AsyncOneResponse<T> response = new AsyncOneResponse<>();
-        response.set(value);
+        response.setSuccess(value);
         return response;
     }
 }

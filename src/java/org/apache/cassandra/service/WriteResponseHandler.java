@@ -23,7 +23,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.db.WriteType;
 
 /**
@@ -51,7 +51,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         this(replicaPlan, null, writeType, queryStartNanoTime);
     }
 
-    public void response(MessageIn<T> m)
+    public void response(Message<T> m)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();

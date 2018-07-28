@@ -41,6 +41,8 @@ public final class EchoMessage
     {
         public void serialize(EchoMessage t, DataOutputPlus out, int version) throws IOException
         {
+            if (t != instance)
+                throw new IllegalStateException();
         }
 
         public EchoMessage deserialize(DataInputPlus in, int version) throws IOException

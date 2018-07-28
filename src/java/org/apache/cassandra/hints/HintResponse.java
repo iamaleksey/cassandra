@@ -21,8 +21,11 @@ package org.apache.cassandra.hints;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
+
+import static org.apache.cassandra.net.Verb.*;
 
 /**
  * An empty successful response to a HintMessage.
@@ -32,8 +35,6 @@ public final class HintResponse
     public static final IVersionedSerializer<HintResponse> serializer = new Serializer();
 
     static final HintResponse instance = new HintResponse();
-    static final MessageOut<HintResponse> message =
-        new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, instance, serializer);
 
     private HintResponse()
     {

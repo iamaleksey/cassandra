@@ -41,9 +41,11 @@ import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
+
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 
 public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
@@ -90,12 +92,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
 
     public void get() throws WriteTimeoutException, WriteFailureException
     {
-        long timeout = currentTimeout();
+        long timeoutNanos = currentTimeoutNanos();
 
         boolean success;
         try
         {
-            success = condition.await(timeout, TimeUnit.NANOSECONDS);
+            success = condition.await(timeoutNanos, NANOSECONDS);
         }
         catch (InterruptedException ex)
         {
@@ -120,12 +122,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
         }
     }
 
-    public final long currentTimeout()
+    public final long currentTimeoutNanos()
     {
         long requestTimeout = writeType == WriteType.COUNTER
-                              ? DatabaseDescriptor.getCounterWriteRpcTimeout()
-                              : DatabaseDescriptor.getWriteRpcTimeout();
-        return TimeUnit.MILLISECONDS.toNanos(requestTimeout) - (System.nanoTime() - queryStartNanoTime);
+                              ? DatabaseDescriptor.getCounterWriteRpcTimeout(NANOSECONDS)
+                              : DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS);
+        return requestTimeout - (System.nanoTime() - queryStartNanoTime);
     }
 
     /**
@@ -143,7 +145,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
      * on whether the CL was achieved. Only call this after the subclass has completed all it's processing
      * since the subclass instance may be queried to find out if the CL was achieved.
      */
-    protected final void logResponseToIdealCLDelegate(MessageIn<T> m)
+    protected final void logResponseToIdealCLDelegate(Message<T> m)
     {
         //Tracking ideal CL was not configured
         if (idealCLDelegate == null)
@@ -187,7 +189,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     }
 
     /**
-     * @return the minimum number of endpoints that must reply.
+     * @return the minimum number of endpoints that must respond.
      */
     protected int blockFor()
     {
@@ -227,7 +229,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /**
      * null message means "response from local write"
      */
-    public abstract void response(MessageIn<T> msg);
+    public abstract void response(Message<T> msg);
 
     protected void signal()
     {
@@ -301,12 +303,12 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
             timeout = Math.min(timeout, cf.additionalWriteLatencyNanos);
 
         // no latency information, or we're overloaded
-        if (timeout > TimeUnit.MILLISECONDS.toNanos(mutation.getTimeout()))
+        if (timeout > mutation.getTimeout(NANOSECONDS))
             return;
 
         try
         {
-            if (!condition.await(timeout, TimeUnit.NANOSECONDS))
+            if (!condition.await(timeout, NANOSECONDS))
             {
                 for (ColumnFamilyStore cf : cfs)
                     cf.metric.additionalWrites.inc();

@@ -25,8 +25,9 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 /**
@@ -53,9 +54,9 @@ final class EncodedHintMessage
         this.version = version;
     }
 
-    MessageOut<EncodedHintMessage> createMessageOut()
+    Message<EncodedHintMessage> createMessageOut()
     {
-        return new MessageOut<>(MessagingService.Verb.HINT, this, serializer);
+        return Message.out(Verb.HINT_REQ, this);
     }
 
     public long getHintCreationTime()

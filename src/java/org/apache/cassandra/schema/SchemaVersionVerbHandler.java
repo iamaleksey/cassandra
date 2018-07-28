@@ -23,24 +23,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.IVerbHandler;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.UUIDSerializer;
+import org.apache.cassandra.net.Verb;
 
 public final class SchemaVersionVerbHandler implements IVerbHandler
 {
+    public static final SchemaVersionVerbHandler instance = new SchemaVersionVerbHandler();
+
     private final Logger logger = LoggerFactory.getLogger(SchemaVersionVerbHandler.class);
 
-    public void doVerb(MessageIn message, int id)
+    public void doVerb(Message message)
     {
         logger.trace("Received schema version request from {}", message.from);
 
-        MessageOut<UUID> response =
-            new MessageOut<>(MessagingService.Verb.INTERNAL_RESPONSE,
-                             Schema.instance.getVersion(),
-                             UUIDSerializer.serializer);
+        Message<UUID> response = Message.respond(message, Schema.instance.getVersion());
 
-        MessagingService.instance().sendReply(response, id, message.from);
+        MessagingService.instance().sendResponse(response, message.from);
     }
 }

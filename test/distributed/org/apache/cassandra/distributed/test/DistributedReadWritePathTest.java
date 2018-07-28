@@ -24,7 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.distributed.Cluster;
 
-import static org.apache.cassandra.net.MessagingService.Verb.READ_REPAIR;
+import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
 
 public class DistributedReadWritePathTest extends DistributedTestBase
 {
@@ -105,7 +105,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
 
             assertRows(cluster.get(3).executeInternal("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1"));
 
-            cluster.verbs(READ_REPAIR).to(3).drop();
+            cluster.verbs(READ_REPAIR_REQ).to(3).drop();
             assertRows(cluster.coordinator(1).execute("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = 1",
                                                      ConsistencyLevel.QUORUM),
                        row(1, 1, 1));
@@ -145,6 +145,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
         }
     }
 
+    // TODO: these tests only work with message sink delivery, as they depend on trapping exceptions on inbound message parsing
     @Test
     public void readWithSchemaDisagreement() throws Throwable
     {

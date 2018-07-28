@@ -26,10 +26,12 @@ import org.apache.cassandra.tracing.Tracing;
 
 public class MutationVerbHandler implements IVerbHandler<Mutation>
 {
-    private void reply(int id, InetAddressAndPort replyTo)
+    public static final MutationVerbHandler instance = new MutationVerbHandler();
+
+    private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
     {
-        Tracing.trace("Enqueuing response to {}", replyTo);
-        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, replyTo);
+        Tracing.trace("Enqueuing response to {}", respondToAddress);
+        MessagingService.instance().sendResponse(WriteResponse.createResponse(respondTo), respondToAddress);
     }
 
     private void failed()
@@ -37,14 +39,14 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         Tracing.trace("Payload application resulted in WriteTimeout, not replying");
     }
 
-    public void doVerb(MessageIn<Mutation> message, int id)
+    public void doVerb(Message<Mutation> message)
     {
         // Check if there were any forwarding headers in this message
-        InetAddressAndPort from = (InetAddressAndPort)message.parameters.get(ParameterType.FORWARD_FROM);
-        InetAddressAndPort replyTo;
+        InetAddressAndPort from = (InetAddressAndPort)message.parameters.get(ParameterType.FORWARDED_FROM);
+        InetAddressAndPort respondToAddress;
         if (from == null)
         {
-            replyTo = message.from;
+            respondToAddress = message.from;
             ForwardToContainer forwardTo = (ForwardToContainer)message.parameters.get(ParameterType.FORWARD_TO);
             if (forwardTo != null)
                 forwardToLocalNodes(message.payload, message.verb, forwardTo, message.from);
@@ -52,12 +54,12 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         else
         {
 
-            replyTo = from;
+            respondToAddress = from;
         }
 
         try
         {
-            message.payload.applyFuture().thenAccept(o -> reply(id, replyTo)).exceptionally(wto -> {
+            message.payload.applyFuture().thenAccept(o -> respond(message, respondToAddress)).exceptionally(wto -> {
                 failed();
                 return null;
             });
@@ -68,17 +70,17 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         }
     }
 
-    private static void forwardToLocalNodes(Mutation mutation, MessagingService.Verb verb, ForwardToContainer forwardTo, InetAddressAndPort from)
+    private static void forwardToLocalNodes(Mutation mutation, Verb verb, ForwardToContainer forwardTo, InetAddressAndPort from)
     {
         // tell the recipients who to send their ack to
-        MessageOut<Mutation> message = new MessageOut<>(verb, mutation, Mutation.serializer).withParameter(ParameterType.FORWARD_FROM, from);
+        Message<Mutation> message = Message.outWithParameter(verb, mutation, ParameterType.FORWARDED_FROM, from);
         Iterator<InetAddressAndPort> iterator = forwardTo.targets.iterator();
         // Send a message to each of the addresses on our Forward List
         for (int i = 0; i < forwardTo.targets.size(); i++)
         {
             InetAddressAndPort address = iterator.next();
             Tracing.trace("Enqueuing forwarded write to {}", address);
-            MessagingService.instance().sendOneWay(message, forwardTo.messageIds[i], address);
+            MessagingService.instance().sendOneWay(message.withId(forwardTo.messageIds[i]), address);
         }
     }
 }

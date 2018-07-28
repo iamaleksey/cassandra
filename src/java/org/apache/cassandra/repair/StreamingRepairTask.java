@@ -95,7 +95,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     }
 
     /**
-     * If we succeeded on both stream in and out, reply back to coordinator
+     * If we succeeded on both stream in and out, respond back to coordinator
      */
     public void onSuccess(StreamState state)
     {
@@ -104,7 +104,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     }
 
     /**
-     * If we failed on either stream in or out, reply fail to coordinator
+     * If we failed on either stream in or out, respond fail to coordinator
      */
     public void onFailure(Throwable t)
     {

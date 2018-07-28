@@ -26,7 +26,7 @@ import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.NetworkTopologyStrategy;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 
@@ -65,7 +65,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         }
     }
 
-    public void response(MessageIn<T> message)
+    public void response(Message<T> message)
     {
         try
         {

@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.List;
 
 import com.google.common.base.Preconditions;
 
@@ -31,11 +32,11 @@ import org.apache.cassandra.locator.InetAddressAndPort;
  */
 public class ForwardToContainer implements Serializable
 {
-    public final Collection<InetAddressAndPort> targets;
-    public final int[] messageIds;
+    public final List<InetAddressAndPort> targets;
+    public final long[] messageIds;
 
-    public ForwardToContainer(Collection<InetAddressAndPort> targets,
-                              int[] messageIds)
+    public ForwardToContainer(List<InetAddressAndPort> targets,
+                              long[] messageIds)
     {
         Preconditions.checkArgument(targets.size() == messageIds.length);
         this.targets = targets;

@@ -65,6 +65,11 @@ public final class InetAddressAndPort implements Comparable<InetAddressAndPort>,
         this.addressBytes = addressBytes;
     }
 
+    public InetAddressAndPort withPort(int port)
+    {
+        return new InetAddressAndPort(address, addressBytes, port);
+    }
+
     private static void validatePortRange(int port)
     {
         if (port < 0 | port > 65535)
@@ -201,4 +206,10 @@ public final class InetAddressAndPort implements Comparable<InetAddressAndPort>,
     {
         defaultPort = port;
     }
+
+    public static int getDefaultPort()
+    {
+        return defaultPort;
+    }
+
 }

@@ -65,8 +65,8 @@ public class CompactEndpointSerializationHelperTest
         }
         else
         {
-            assertEquals(roundtripped.address, address.address);
-            assertEquals(7000, roundtripped.port);
+            assertEquals(address.address, roundtripped.address);
+            assertEquals(InetAddressAndPort.getDefaultPort(), roundtripped.port);
         }
     }
 }

@@ -20,12 +20,12 @@ package org.apache.cassandra.net;
 
 public class PingVerbHandler implements IVerbHandler<PingMessage>
 {
+    public static final PingVerbHandler instance = new PingVerbHandler();
+
     @Override
-    public void doVerb(MessageIn<PingMessage> message, int id)
+    public void doVerb(Message<PingMessage> message)
     {
-        MessageOut<PongMessage> msg = new MessageOut<>(MessagingService.Verb.REQUEST_RESPONSE, PongMessage.instance,
-                                                       PongMessage.serializer,
-                                                       message.payload.connectionType);
-        MessagingService.instance().sendReply(msg, id, message.from);
+        Message<PongMessage> msg = Message.respond(message, PongMessage.instance);
+        MessagingService.instance().sendResponse(msg, message.from, message.payload.connectionType);
     }
 }

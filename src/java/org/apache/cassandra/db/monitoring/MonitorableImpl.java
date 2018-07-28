@@ -18,11 +18,13 @@
 
 package org.apache.cassandra.db.monitoring;
 
+import org.apache.cassandra.utils.ApproximateTime;
+
 public abstract class MonitorableImpl implements Monitorable
 {
     private MonitoringState state;
     private boolean isSlow;
-    private long constructionTime = -1;
+    private long constructionTimeNanos = -1;
     private long timeout;
     private long slowTimeout;
     private boolean isCrossNode;
@@ -41,18 +43,18 @@ public abstract class MonitorableImpl implements Monitorable
     public void setMonitoringTime(long constructionTime, boolean isCrossNode, long timeout, long slowTimeout)
     {
         assert constructionTime >= 0;
-        this.constructionTime = constructionTime;
+        this.constructionTimeNanos = constructionTime;
         this.isCrossNode = isCrossNode;
         this.timeout = timeout;
         this.slowTimeout = slowTimeout;
     }
 
-    public long constructionTime()
+    public long constructionTimeNanos()
     {
-        return constructionTime;
+        return constructionTimeNanos;
     }
 
-    public long timeout()
+    public long timeoutNanos()
     {
         return timeout;
     }
@@ -62,7 +64,7 @@ public abstract class MonitorableImpl implements Monitorable
         return isCrossNode;
     }
 
-    public long slowTimeout()
+    public long slowTimeoutNanos()
     {
         return slowTimeout;
     }
@@ -95,8 +97,8 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (constructionTime >= 0)
-                MonitoringTask.addFailedOperation(this, ApproximateTime.currentTimeMillis());
+            if (constructionTimeNanos >= 0)
+                MonitoringTask.addFailedOperation(this, ApproximateTime.nanoTime());
 
             state = MonitoringState.ABORTED;
             return true;
@@ -109,8 +111,8 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (isSlow && slowTimeout > 0 && constructionTime >= 0)
-                MonitoringTask.addSlowOperation(this, ApproximateTime.currentTimeMillis());
+            if (isSlow && slowTimeout > 0 && constructionTimeNanos >= 0)
+                MonitoringTask.addSlowOperation(this, ApproximateTime.nanoTime());
 
             state = MonitoringState.COMPLETED;
             return true;
@@ -121,10 +123,10 @@ public abstract class MonitorableImpl implements Monitorable
 
     private void check()
     {
-        if (constructionTime < 0 || state != MonitoringState.IN_PROGRESS)
+        if (constructionTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
             return;
 
-        long elapsed = ApproximateTime.currentTimeMillis() - constructionTime;
+        long elapsed = ApproximateTime.nanoTime() - constructionTimeNanos;
 
         if (elapsed >= slowTimeout && !isSlow)
             isSlow = true;

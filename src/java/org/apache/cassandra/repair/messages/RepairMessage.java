@@ -24,9 +24,11 @@ import com.google.common.base.Preconditions;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairJobDesc;
+
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * Base class of all repair related request/response messages.
@@ -92,9 +94,9 @@ public abstract class RepairMessage
         this.desc = desc;
     }
 
-    public MessageOut<RepairMessage> createMessage()
+    public Message<RepairMessage> createMessage()
     {
-        return new MessageOut<>(MessagingService.Verb.REPAIR_MESSAGE, this, RepairMessage.serializer);
+        return Message.out(REPAIR_REQ, this);
     }
 
 

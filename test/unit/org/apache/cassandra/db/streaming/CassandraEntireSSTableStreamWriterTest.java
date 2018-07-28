@@ -43,9 +43,9 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
 import org.apache.cassandra.net.async.ByteBufDataInputPlus;
-import org.apache.cassandra.net.async.ByteBufDataOutputStreamPlus;
-import org.apache.cassandra.net.async.NonClosingDefaultFileRegion;
+import org.apache.cassandra.net.async.SharedDefaultFileRegion;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -114,7 +114,7 @@ public class CassandraEntireSSTableStreamWriterTest
         CassandraEntireSSTableStreamWriter writer = new CassandraEntireSSTableStreamWriter(sstable, session, CassandraOutgoingFile.getComponentManifest(sstable));
 
         EmbeddedChannel channel = new EmbeddedChannel();
-        ByteBufDataOutputStreamPlus out = ByteBufDataOutputStreamPlus.create(session, channel, 1024 * 1024);
+        AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, 1024 * 1024);
         writer.write(out);
 
         Queue msgs = channel.outboundMessages();
@@ -133,7 +133,7 @@ public class CassandraEntireSSTableStreamWriterTest
         // This is needed as Netty releases the ByteBuffers as soon as the channel is flushed
         ByteBuf serializedFile = Unpooled.buffer(8192);
         EmbeddedChannel channel = createMockNettyChannel(serializedFile);
-        ByteBufDataOutputStreamPlus out = ByteBufDataOutputStreamPlus.create(session, channel, 1024 * 1024);
+        AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, 1024 * 1024);
 
         writer.write(out);
 
@@ -188,7 +188,7 @@ public class CassandraEntireSSTableStreamWriterTest
                 @Override
                 public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception
                 {
-                    ((NonClosingDefaultFileRegion) msg).transferTo(wbc, 0);
+                    ((SharedDefaultFileRegion) msg).transferTo(wbc, 0);
                     super.write(ctx, msg, promise);
                 }
             });

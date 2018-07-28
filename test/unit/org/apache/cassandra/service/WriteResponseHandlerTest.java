@@ -44,7 +44,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.ReplicaUtils;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
@@ -241,8 +241,10 @@ public class WriteResponseHandlerTest
                                                                    null, WriteType.SIMPLE, queryStartTime, ideal);
     }
 
-    private static MessageIn createDummyMessage(int target)
+    private static Message createDummyMessage(int target)
     {
-        return MessageIn.create(targets.get(target).endpoint(), null, null,  null, 0, 0L);
+        return Message.builder(null, null)
+                      .from(targets.get(target).endpoint())
+                      .build();
     }
 }

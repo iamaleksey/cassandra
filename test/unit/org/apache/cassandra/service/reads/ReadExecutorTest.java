@@ -42,11 +42,14 @@ import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaUtils;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.locator.ReplicaUtils.full;
+import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
@@ -205,22 +208,15 @@ public class ReadExecutorTest
         }
 
         @Override
-        public long getTimeout()
+        public long getTimeout(TimeUnit unit)
         {
-            return timeout;
+            return unit.convert(timeout, MILLISECONDS);
         }
 
         @Override
-        public MessageOut createMessage()
+        public Message createMessage()
         {
-            return new MessageOut(MessagingService.Verb.BATCH_REMOVE)
-            {
-                @Override
-                public int serializedSize(int version)
-                {
-                    return 0;
-                }
-            };
+            return Message.out(Verb.ECHO_REQ, emptyMessage);
         }
 
     }

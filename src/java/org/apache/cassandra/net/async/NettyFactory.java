@@ -1,62 +1,54 @@
 package org.apache.cassandra.net.async;
 
-import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.zip.Checksum;
-
+import java.util.zip.CRC32;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
-import io.netty.channel.ChannelInitializer;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelPipeline;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
 import io.netty.channel.epoll.EpollChannelOption;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
 import io.netty.channel.epoll.EpollSocketChannel;
-import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import io.netty.handler.codec.compression.Lz4FrameEncoder;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
-import io.netty.util.concurrent.DefaultEventExecutor;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
-
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
-import org.apache.cassandra.auth.IInternodeAuthenticator;
-import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
-import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.concurrent.NamedThreadFactory;
+import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.service.NativeTransportService;
-import org.apache.cassandra.utils.ChecksumType;
-import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.FBUtilities;
+
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 /**
  * A factory for building Netty {@link Channel}s. Channels here are setup with a pipeline to participate
@@ -66,180 +58,163 @@ public final class NettyFactory
 {
     private static final Logger logger = LoggerFactory.getLogger(NettyFactory.class);
 
-    /**
-     * The block size for use with netty's lz4 code.
-     */
-    private static final int COMPRESSION_BLOCK_SIZE = 1 << 16;
+    private static final int EVENT_THREADS = Integer.getInteger(Config.PROPERTY_PREFIX + "internode-event-threads", FBUtilities.getAvailableProcessors());
 
-    private static final int LZ4_HASH_SEED = 0x9747b28c;
-
-    public enum Mode { MESSAGING, STREAMING }
-
-    static final String SSL_CHANNEL_HANDLER_NAME = "ssl";
-    private static final String OPTIONAL_SSL_CHANNEL_HANDLER_NAME = "optionalSsl";
-    static final String INBOUND_COMPRESSOR_HANDLER_NAME = "inboundCompressor";
-    static final String OUTBOUND_COMPRESSOR_HANDLER_NAME = "outboundCompressor";
-    private static final String HANDSHAKE_HANDLER_NAME = "handshakeHandler";
-    public static final String INBOUND_STREAM_HANDLER_NAME = "inboundStreamHandler";
+    private static final int LEGACY_COMPRESSION_BLOCK_SIZE = 1 << 16;
+    private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
 
     /** a useful addition for debugging; simply set to true to get more data in your logs */
-    private static final boolean WIRETRACE = false;
+    static final boolean WIRETRACE = false;
     static
     {
         if (WIRETRACE)
             InternalLoggerFactory.setDefaultFactory(Slf4JLoggerFactory.INSTANCE);
     }
 
-    private static final boolean DEFAULT_USE_EPOLL = NativeTransportService.useEpoll();
+    public static final boolean USE_EPOLL = NativeTransportService.useEpoll();
+
+    private static final FastThreadLocal<CRC32> crc32 = new FastThreadLocal<CRC32>()
+    {
+        @Override
+        protected CRC32 initialValue()
+        {
+            return new CRC32();
+        }
+    };
+
+    static CRC32 crc32()
+    {
+        CRC32 crc = crc32.get();
+        crc.reset();
+        return crc;
+    }
+
+    static final int CRC24_INIT = 0x875060;
+    // Polynomial chosen from https://users.ece.cmu.edu/~koopman/crc/index.html
+    // Provides hamming distance of 8 for messages up to length 105 bits;
+    // we only support 8-64 bits at present, with an expected range of 40-48.
+    static final int CRC24_POLY = 0x1974F0B;
+    private static final int[] CRC24_LOOKUP = Crc24Lookup.compute();
 
     /**
-     * The size of the receive queue for the outbound channels. As outbound channels do not receive data
-     * (outside of the internode messaging protocol's handshake), this value can be relatively small.
+     * NOTE: the order of bytes must reach the wire in the same order the CRC is computed, with the CRC
+     * immediately following in a trailer.  Since we read in least significant byte order, if you
+     * write to a buffer using putInt or putLong, the byte order will be reversed and
+     * you will lose the guarantee of protection from bit storm corruptions of 24 bits in length.
+     *
+     * Make sure either to write byte-by-byte to the wire, or to use Integer/Long.reverseBytes if you
+     * write to a BIG_ENDIAN buffer.
+     *
+     * See http://users.ece.cmu.edu/~koopman/pubs/ray06_crcalgorithms.pdf
+     *
+     * Complain to the ethernet spec writers, for having inverse bit to byte significance order.
+     *
+     * @param bytes an up to 8-byte register containing bytes to compute the CRC over
+     *              the bytes AND bits will be read least-significant to most significant.
+     * @param len   the number of bytes, greater than 0 and fewer than 9, to be read from bytes
+     * @return      the least-significant bit AND byte order crc24 using the CRC24_POLY polynomial
      */
-    private static final int OUTBOUND_CHANNEL_RECEIVE_BUFFER_SIZE = 1 << 10;
+    public static int crc24(long bytes, int len)
+    {
+        int crc = CRC24_INIT;
+        while (len-- > 0)
+        {
+            crc ^= (bytes & 0xff) << 16;
+            crc = (crc << 8) ^ CRC24_LOOKUP[(crc >> 16) & 0xff];
+            bytes >>= 8;
+        }
+        return crc & 0xffffff;
+    }
 
-    /**
-     * The size of the send queue for the inbound channels. As inbound channels do not send data
-     * (outside of the internode messaging protocol's handshake), this value can be relatively small.
-     */
-    private static final int INBOUND_CHANNEL_SEND_BUFFER_SIZE = 1 << 10;
+    private static class Crc24Lookup
+    {
+        // https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks#Generating_the_tables
+        private static int[] compute()
+        {
+            int[] lookup = new int[256];
+            int crc = 0x800000;
+            for (int i = 1 ; i < 256 ; i <<= 1)
+            {
+                if ((crc & 0x800000) != 0)
+                    crc = (crc << 1) ^ CRC24_POLY;
+                else
+                    crc <<= 1;
+
+                for (int j = 0 ; j < i ; ++j)
+                    lookup[i + j] = crc ^ lookup[j];
+            }
+            return lookup;
+        }
+    }
 
     /**
      * A factory instance that all normal, runtime code should use. Separate instances should only be used for testing.
      */
-    public static final NettyFactory instance = new NettyFactory(DEFAULT_USE_EPOLL);
+    public static final NettyFactory instance = new NettyFactory(USE_EPOLL);
 
     private final boolean useEpoll;
-    private final EventLoopGroup acceptGroup;
 
-    private final EventLoopGroup inboundGroup;
-    private final EventLoopGroup outboundGroup;
-    public final EventLoopGroup streamingGroup;
+    private final EventLoopGroup acceptGroup;
+    private final EventLoopGroup defaultGroup;
+    // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
+    private final EventLoopGroup outboundStreamingGroup;
+    final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("MessagingService-SynchronousWork"));
 
     /**
      * Constructor that allows modifying the {@link NettyFactory#useEpoll} for testing purposes. Otherwise, use the
      * default {@link #instance}.
      */
-    @VisibleForTesting
-    NettyFactory(boolean useEpoll)
+    private NettyFactory(boolean useEpoll)
     {
         this.useEpoll = useEpoll;
-        acceptGroup = getEventLoopGroup(useEpoll, determineAcceptGroupSize(DatabaseDescriptor.getInternodeMessagingEncyptionOptions()),
-                                        "MessagingService-NettyAcceptor-Thread", false);
-        inboundGroup = getEventLoopGroup(useEpoll, FBUtilities.getAvailableProcessors(), "MessagingService-NettyInbound-Thread", false);
-        outboundGroup = getEventLoopGroup(useEpoll, FBUtilities.getAvailableProcessors(), "MessagingService-NettyOutbound-Thread", true);
-        streamingGroup = getEventLoopGroup(useEpoll, FBUtilities.getAvailableProcessors(), "Streaming-Netty-Thread", false);
+        this.acceptGroup = getEventLoopGroup(useEpoll, 1, "Messaging-AcceptLoop");
+        this.defaultGroup = getEventLoopGroup(useEpoll, EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
+        this.outboundStreamingGroup = getEventLoopGroup(useEpoll, EVENT_THREADS, "Streaming-EventLoop");
     }
 
-    /**
-     * Determine the number of accept threads we need, which is based upon the number of listening sockets we will have.
-     * The idea is one accept thread per listening socket.
-     */
-    public static int determineAcceptGroupSize(ServerEncryptionOptions serverEncryptionOptions)
-    {
-        int listenSocketCount = 1;
-
-        boolean listenOnBroadcastAddr = MessagingService.shouldListenOnBroadcastAddress();
-        if (listenOnBroadcastAddr)
-            listenSocketCount++;
-
-        if (serverEncryptionOptions.enable_legacy_ssl_storage_port)
-        {
-            listenSocketCount++;
-
-            if (listenOnBroadcastAddr)
-                listenSocketCount++;
-        }
-
-        return listenSocketCount;
-    }
-
-    /**
-     * Create an {@link EventLoopGroup}, for epoll or nio. The {@code boostIoRatio} flag passes a hint to the netty
-     * event loop threads to optimize comsuming all the tasks from the netty channel before checking for IO activity.
-     * By default, netty will process some maximum number of tasks off it's queue before it will check for activity on
-     * any of the open FDs, which basically amounts to checking for any incoming data. If you have a class of event loops
-     * that that do almost *no* inbound activity (like cassandra's outbound channels), then it behooves us to have the
-     * outbound netty channel consume as many tasks as it can before making the system calls to check up on the FDs,
-     * as we're not expecting any incoming data on those sockets, anyways. Thus, we pass the magic value {@code 100}
-     * to achieve the maximum consuption from the netty queue. (for implementation details, as of netty 4.1.8,
-     * see {@link io.netty.channel.epoll.EpollEventLoop#run()}.
-     */
-    static EventLoopGroup getEventLoopGroup(boolean useEpoll, int threadCount, String threadNamePrefix, boolean boostIoRatio)
+    private static EventLoopGroup getEventLoopGroup(boolean useEpoll, int threadCount, String threadNamePrefix)
     {
         if (useEpoll)
         {
             logger.debug("using netty epoll event loop for pool prefix {}", threadNamePrefix);
-            EpollEventLoopGroup eventLoopGroup = new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
-            if (boostIoRatio)
-                eventLoopGroup.setIoRatio(100);
-            return eventLoopGroup;
+            return new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
         }
 
         logger.debug("using netty nio event loop for pool prefix {}", threadNamePrefix);
-        NioEventLoopGroup eventLoopGroup = new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
-        if (boostIoRatio)
-            eventLoopGroup.setIoRatio(100);
-        return eventLoopGroup;
+        return new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
     }
 
-    /**
-     * Create a {@link Channel} that listens on the {@code localAddr}. This method will block while trying to bind to the address,
-     * but it does not make a remote call.
-     */
-    public Channel createInboundChannel(InetAddressAndPort localAddr, InboundInitializer initializer, int receiveBufferSize) throws ConfigurationException
+    Bootstrap newBootstrap(EventLoop eventLoop, int tcpUserTimeoutInMS)
     {
-        String nic = FBUtilities.getNetworkInterface(localAddr.address);
-        logger.info("Starting Messaging Service on {} {}, encryption: {}",
-                    localAddr, nic == null ? "" : String.format(" (%s)", nic), encryptionLogStatement(initializer.encryptionOptions));
-        Class<? extends ServerChannel> transport = useEpoll ? EpollServerSocketChannel.class : NioServerSocketChannel.class;
-        ServerBootstrap bootstrap = new ServerBootstrap().group(acceptGroup, inboundGroup)
-                                                         .channel(transport)
-                                                         .option(ChannelOption.SO_BACKLOG, 500)
-                                                         .childOption(ChannelOption.SO_KEEPALIVE, true)
-                                                         .childOption(ChannelOption.TCP_NODELAY, true)
-                                                         .childOption(ChannelOption.SO_REUSEADDR, true)
-                                                         .childOption(ChannelOption.SO_SNDBUF, INBOUND_CHANNEL_SEND_BUFFER_SIZE)
-                                                         .childHandler(initializer);
+        if (eventLoop == null)
+            throw new IllegalArgumentException("must provide eventLoop");
 
+        Class<? extends Channel> transport = useEpoll ? EpollSocketChannel.class
+                                                      : NioSocketChannel.class;
+
+        Bootstrap bootstrap = new Bootstrap()
+                              .group(eventLoop)
+                              .channel(transport)
+                              .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
+                              .option(ChannelOption.SO_KEEPALIVE, true);
         if (useEpoll)
-            bootstrap.childOption(EpollChannelOption.TCP_USER_TIMEOUT, DatabaseDescriptor.getInternodeTcpUserTimeoutInMS());
+            bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, tcpUserTimeoutInMS);
 
-        if (receiveBufferSize > 0)
-            bootstrap.childOption(ChannelOption.SO_RCVBUF, receiveBufferSize);
+        return bootstrap;
+    }
 
-        ChannelFuture channelFuture = bootstrap.bind(new InetSocketAddress(localAddr.address, localAddr.port));
+    ServerBootstrap newServerBootstrap()
+    {
+        Class<? extends ServerChannel> transport = useEpoll ? EpollServerSocketChannel.class
+                                                            : NioServerSocketChannel.class;
 
-        if (!channelFuture.awaitUninterruptibly().isSuccess())
-        {
-            if (channelFuture.channel().isOpen())
-                channelFuture.channel().close();
-
-            Throwable failedChannelCause = channelFuture.cause();
-
-            String causeString = "";
-            if (failedChannelCause != null && failedChannelCause.getMessage() != null)
-                causeString = failedChannelCause.getMessage();
-
-            if (causeString.contains("in use"))
-            {
-                throw new ConfigurationException(localAddr + " is in use by another process.  Change listen_address:storage_port " +
-                                                 "in cassandra.yaml to values that do not conflict with other services");
-            }
-            // looking at the jdk source, solaris/windows bind failue messages both use the phrase "cannot assign requested address".
-            // windows message uses "Cannot" (with a capital 'C'), and solaris (a/k/a *nux) doe not. hence we search for "annot" <sigh>
-            else if (causeString.contains("annot assign requested address"))
-            {
-                throw new ConfigurationException("Unable to bind to address " + localAddr
-                                                 + ". Set listen_address in cassandra.yaml to an interface you can bind to, e.g., your private IP address on EC2");
-            }
-            else
-            {
-                throw new ConfigurationException("failed to bind to: " + localAddr, failedChannelCause);
-            }
-        }
-
-        return channelFuture.channel();
+        return new ServerBootstrap()
+               .group(acceptGroup, defaultGroup)
+               .channel(transport)
+               .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
+               .option(ChannelOption.SO_KEEPALIVE, true)
+               .option(ChannelOption.SO_REUSEADDR, true)
+               .option(ChannelOption.TCP_NODELAY, true); // we only send handshake messages; no point ever delaying
     }
 
     /**
@@ -264,50 +239,7 @@ public final class NettyFactory
         }
     }
 
-    public static class InboundInitializer extends ChannelInitializer<SocketChannel>
-    {
-        private final IInternodeAuthenticator authenticator;
-        private final ServerEncryptionOptions encryptionOptions;
-        private final ChannelGroup channelGroup;
-
-        public InboundInitializer(IInternodeAuthenticator authenticator, ServerEncryptionOptions encryptionOptions, ChannelGroup channelGroup)
-        {
-            this.authenticator = authenticator;
-            this.encryptionOptions = encryptionOptions;
-            this.channelGroup = channelGroup;
-        }
-
-        @Override
-        public void initChannel(SocketChannel channel) throws Exception
-        {
-            channelGroup.add(channel);
-            ChannelPipeline pipeline = channel.pipeline();
-
-            // order of handlers: ssl -> logger -> handshakeHandler
-            if (encryptionOptions.enabled)
-            {
-                if (encryptionOptions.optional)
-                {
-                    pipeline.addFirst(OPTIONAL_SSL_CHANNEL_HANDLER_NAME, new OptionalSslHandler(encryptionOptions));
-                }
-                else
-                {
-                    SslContext sslContext = SSLFactory.getOrCreateSslContext(encryptionOptions, true, SSLFactory.SocketType.SERVER);
-                    InetSocketAddress peer = encryptionOptions.require_endpoint_verification ? channel.remoteAddress() : null;
-                    SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
-                    logger.trace("creating inbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
-                    pipeline.addFirst(SSL_CHANNEL_HANDLER_NAME, sslHandler);
-                }
-            }
-
-            if (WIRETRACE)
-                pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
-
-            channel.pipeline().addLast(HANDSHAKE_HANDLER_NAME, new InboundHandshakeHandler(authenticator));
-        }
-    }
-
-    private static String encryptionLogStatement(ServerEncryptionOptions options)
+    static String encryptionLogStatement(EncryptionOptions options)
     {
         if (options == null)
             return "disabled";
@@ -316,103 +248,62 @@ public final class NettyFactory
         return "enabled (" + encryptionType + ')';
     }
 
-    /**
-     * Create the {@link Bootstrap} for connecting to a remote peer. This method does <b>not</b> attempt to connect to the peer,
-     * and thus does not block.
-     */
-    @VisibleForTesting
-    public Bootstrap createOutboundBootstrap(OutboundConnectionParams params)
+    static int computeCrc32(ByteBuf buffer, int startReaderIndex, int endReaderIndex)
     {
-        logger.debug("creating outbound bootstrap to peer {}, compression: {}, encryption: {}, coalesce: {}, protocolVersion: {}",
-                     params.connectionId.connectionAddress(),
-                     params.compress, encryptionLogStatement(params.encryptionOptions),
-                     params.coalescingStrategy.isPresent() ? params.coalescingStrategy.get() : CoalescingStrategies.Strategy.DISABLED,
-                     params.protocolVersion);
-        Class<? extends Channel> transport = useEpoll ? EpollSocketChannel.class : NioSocketChannel.class;
-        Bootstrap bootstrap = new Bootstrap().group(params.mode == Mode.MESSAGING ? outboundGroup : streamingGroup)
-                              .channel(transport)
-                              .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, params.tcpConnectTimeoutInMS)
-                              .option(ChannelOption.SO_KEEPALIVE, true)
-                              .option(ChannelOption.SO_REUSEADDR, true)
-                              .option(ChannelOption.SO_SNDBUF, params.sendBufferSize)
-                              .option(ChannelOption.SO_RCVBUF, OUTBOUND_CHANNEL_RECEIVE_BUFFER_SIZE)
-                              .option(ChannelOption.TCP_NODELAY, params.tcpNoDelay)
-                              .option(ChannelOption.WRITE_BUFFER_WATER_MARK, params.waterMark)
-                              .handler(new OutboundInitializer(params));
-        if (useEpoll)
-            bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, params.tcpUserTimeoutInMS);
-
-        InetAddressAndPort remoteAddress = params.connectionId.connectionAddress();
-        bootstrap.remoteAddress(new InetSocketAddress(remoteAddress.address, remoteAddress.port));
-        return bootstrap;
+        CRC32 crc = crc32();
+        crc.update(buffer.internalNioBuffer(startReaderIndex, endReaderIndex - startReaderIndex));
+        return (int) crc.getValue();
     }
 
-    public static class OutboundInitializer extends ChannelInitializer<SocketChannel>
+    static int computeCrc32(ByteBuffer buffer, int start, int end)
     {
-        private final OutboundConnectionParams params;
+        CRC32 crc = crc32();
+        updateCrc32(crc, buffer, start, end);
+        return (int) crc.getValue();
+    }
 
-        OutboundInitializer(OutboundConnectionParams params)
-        {
-            this.params = params;
-        }
+    static void updateCrc32(CRC32 crc, ByteBuffer buffer, int start, int end)
+    {
+        int savePosition = buffer.position();
+        int saveLimit = buffer.limit();
+        buffer.limit(end);
+        buffer.position(start);
+        crc.update(buffer);
+        buffer.limit(saveLimit);
+        buffer.position(savePosition);
+    }
 
-        /**
-         * {@inheritDoc}
-         *
-         * To determine if we should enable TLS, we only need to check if {@link #params#encryptionOptions} is set.
-         * The logic for figuring that out is is located in {@link MessagingService#getMessagingConnection(InetAddress)};
-         */
-        public void initChannel(SocketChannel channel) throws Exception
-        {
-            ChannelPipeline pipeline = channel.pipeline();
+    static ChannelOutboundHandlerAdapter getLZ4Encoder(int messagingVersion)
+    {
+        if (messagingVersion < VERSION_40)
+            return new Lz4FrameEncoder(LZ4Factory.fastestInstance(), false, LEGACY_COMPRESSION_BLOCK_SIZE, XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum());
+        return LZ4Encoder.fastInstance;
+    }
 
-            // order of handlers: ssl -> logger -> handshakeHandler
-            if (params.encryptionOptions != null)
-            {
-                SslContext sslContext = SSLFactory.getOrCreateSslContext(params.encryptionOptions, true, SSLFactory.SocketType.CLIENT);
-                // for some reason channel.remoteAddress() will return null
-                InetAddressAndPort address = params.connectionId.remote();
-                InetSocketAddress peer = params.encryptionOptions.require_endpoint_verification ? new InetSocketAddress(address.address, address.port) : null;
-                SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
-                logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
-                pipeline.addFirst(SSL_CHANNEL_HANDLER_NAME, sslHandler);
-            }
+    static ChannelInboundHandlerAdapter getLZ4Decoder(int messagingVersion)
+    {
+        if (messagingVersion < VERSION_40)
+            return new Lz4FrameDecoder(LZ4Factory.fastestInstance(), XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum());
+        return LZ4Decoder.fast();
+    }
 
-            if (NettyFactory.WIRETRACE)
-                pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
+    public EventLoopGroup defaultGroup()
+    {
+        return defaultGroup;
+    }
 
-            pipeline.addLast(HANDSHAKE_HANDLER_NAME, new OutboundHandshakeHandler(params));
-        }
+    public EventLoopGroup outboundStreamingGroup()
+    {
+        return outboundStreamingGroup;
     }
 
     public void close() throws InterruptedException
     {
-        EventLoopGroup[] groups = new EventLoopGroup[] { acceptGroup, outboundGroup, inboundGroup, streamingGroup };
+        EventLoopGroup[] groups = new EventLoopGroup[] { acceptGroup, defaultGroup };
         for (EventLoopGroup group : groups)
             group.shutdownGracefully(0, 2, TimeUnit.SECONDS);
         for (EventLoopGroup group : groups)
             group.awaitTermination(60, TimeUnit.SECONDS);
     }
 
-    static Lz4FrameEncoder createLz4Encoder(int protocolVersion)
-    {
-        return new Lz4FrameEncoder(LZ4Factory.fastestInstance(), false, COMPRESSION_BLOCK_SIZE, checksumForFrameEncoders(protocolVersion));
-    }
-
-    private static Checksum checksumForFrameEncoders(int protocolVersion)
-    {
-        if (protocolVersion >= MessagingService.current_version)
-            return ChecksumType.CRC32.newInstance();
-        return XXHashFactory.fastestInstance().newStreamingHash32(LZ4_HASH_SEED).asChecksum();
-    }
-
-    static Lz4FrameDecoder createLz4Decoder(int protocolVersion)
-    {
-        return new Lz4FrameDecoder(LZ4Factory.fastestInstance(), checksumForFrameEncoders(protocolVersion));
-    }
-
-    public static EventExecutor executorForChannelGroups()
-    {
-        return new DefaultEventExecutor();
-    }
 }

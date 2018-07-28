@@ -23,8 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
-import com.google.common.base.Function;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -40,68 +40,78 @@ public class ExpiringMap<K, V>
     public static class CacheableObject<T>
     {
         public final T value;
-        public final long timeout;
-        private final long createdAt;
+        public final long expiresAtNanos;
+        public final long createdAt;
 
-        private CacheableObject(T value, long timeout)
+        private CacheableObject(T value, long timeout, TimeUnit unit)
         {
             assert value != null;
             this.value = value;
-            this.timeout = timeout;
             this.createdAt = Clock.instance.nanoTime();
+            this.expiresAtNanos = createdAt + unit.toNanos(timeout);
+        }
+
+        private CacheableObject(T value, long expiresAtNanos)
+        {
+            assert value != null;
+            this.value = value;
+            this.expiresAtNanos = expiresAtNanos;
+            this.createdAt = Clock.instance.nanoTime();
+        }
+
+        public long timeout()
+        {
+            return expiresAtNanos - createdAt;
         }
 
         private boolean isReadyToDieAt(long atNano)
         {
-            return atNano - createdAt > TimeUnit.MILLISECONDS.toNanos(timeout);
+            return atNano > expiresAtNanos;
         }
     }
 
     // if we use more ExpiringMaps we may want to add multiple threads to this executor
-    private static final ScheduledExecutorService service = new DebuggableScheduledThreadPoolExecutor("EXPIRING-MAP-REAPER");
+    private final ScheduledExecutorService service = new DebuggableScheduledThreadPoolExecutor("EXPIRING-MAP-REAPER");
 
-    private final ConcurrentMap<K, CacheableObject<V>> cache = new ConcurrentHashMap<K, CacheableObject<V>>();
+    private final ConcurrentMap<K, CacheableObject<V>> cache = new ConcurrentHashMap<>();
     private final long defaultExpiration;
+    private final TimeUnit defaultExpirationUnit;
 
-    public ExpiringMap(long defaultExpiration)
-    {
-        this(defaultExpiration, null);
-    }
+    private final BiConsumer<K, CacheableObject<V>> onExpired;
 
     /**
      *
      * @param defaultExpiration the TTL for objects in the cache in milliseconds
      */
-    public ExpiringMap(long defaultExpiration, final Function<Pair<K,CacheableObject<V>>, ?> postExpireHook)
+    public ExpiringMap(long defaultExpiration, TimeUnit defaultExpirationUnit, BiConsumer<K, CacheableObject<V>> onExpired)
     {
+        assert onExpired != null;
+
         this.defaultExpiration = defaultExpiration;
+        this.defaultExpirationUnit = defaultExpirationUnit;
+        this.onExpired = onExpired;
 
         if (defaultExpiration <= 0)
-        {
             throw new IllegalArgumentException("Argument specified must be a positive number");
-        }
 
-        Runnable runnable = new Runnable()
+        Runnable runnable = () ->
         {
-            public void run()
+            long start = Clock.instance.nanoTime();
+            int n = 0;
+            for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
             {
-                long start = Clock.instance.nanoTime();
-                int n = 0;
-                for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
+                if (entry.getValue().isReadyToDieAt(start))
                 {
-                    if (entry.getValue().isReadyToDieAt(start))
+                    if (cache.remove(entry.getKey()) != null)
                     {
-                        if (cache.remove(entry.getKey()) != null)
-                        {
-                            n++;
-                            if (postExpireHook != null)
-                                postExpireHook.apply(Pair.create(entry.getKey(), entry.getValue()));
-                        }
+                        n++;
+                        onExpired.accept(entry.getKey(), entry.getValue());
                     }
                 }
-                logger.trace("Expired {} entries", n);
             }
+            logger.trace("Expired {} entries", n);
         };
+
         service.scheduleWithFixedDelay(runnable, defaultExpiration / 2, defaultExpiration / 2, TimeUnit.MILLISECONDS);
     }
 
@@ -110,7 +120,7 @@ public class ExpiringMap<K, V>
         service.shutdown();
         try
         {
-            return service.awaitTermination(defaultExpiration * 2, TimeUnit.MILLISECONDS);
+            return service.awaitTermination(defaultExpiration * 2, defaultExpirationUnit);
         }
         catch (InterruptedException e)
         {
@@ -126,10 +136,10 @@ public class ExpiringMap<K, V>
 
     public V put(K key, V value)
     {
-        return put(key, value, this.defaultExpiration);
+        return putWithTimeout(key, value, defaultExpiration, defaultExpirationUnit);
     }
 
-    public V put(K key, V value, long timeout)
+    public V putWithTimeout(K key, V value, long timeout, TimeUnit unit)
     {
         if (shutdown)
         {
@@ -139,7 +149,21 @@ public class ExpiringMap<K, V>
             // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
             Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
         }
-        CacheableObject<V> previous = cache.put(key, new CacheableObject<V>(value, timeout));
+        CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, timeout, unit));
+        return (previous == null) ? null : previous.value;
+    }
+
+    public V putWithExpiration(K key, V value, long expiresAtNanos)
+    {
+        if (shutdown)
+        {
+            // StorageProxy isn't equipped to deal with "I'm nominally alive, but I can't send any messages out."
+            // So we'll just sit on this thread until the rest of the server shutdown completes.
+            //
+            // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
+            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+        }
+        CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, expiresAtNanos));
         return (previous == null) ? null : previous.value;
     }
 
@@ -155,10 +179,20 @@ public class ExpiringMap<K, V>
         return co == null ? null : co.value;
     }
 
+    public V removeAndExpire(K key)
+    {
+        CacheableObject<V> co = cache.remove(key);
+        if (null == co)
+            return null;
+
+        onExpired.accept(key, co);
+        return co.value;
+    }
+
     /**
      * @return System.nanoTime() when key was put into the map.
      */
-    public long getAge(K key)
+    public long getCreationTimeNanos(K key)
     {
         CacheableObject<V> co = cache.get(key);
         return co == null ? 0 : co.createdAt;

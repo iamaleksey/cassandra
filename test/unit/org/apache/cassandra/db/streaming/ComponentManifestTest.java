@@ -27,11 +27,9 @@ import org.junit.Test;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.cassandra.io.sstable.Component;
-import org.apache.cassandra.io.util.DataInputPlus;
-import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.DataInputBuffer;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.ByteBufDataInputPlus;
-import org.apache.cassandra.net.async.ByteBufDataOutputPlus;
 import org.apache.cassandra.serializers.SerializationUtils;
 
 import static org.junit.Assert.assertNotEquals;
@@ -51,14 +49,15 @@ public class ComponentManifestTest
         ByteBuf buf = Unpooled.buffer(512);
         ComponentManifest expected = new ComponentManifest(new LinkedHashMap<Component, Long>() {{ put(Component.DATA, 100L); }});
 
-        DataOutputPlus output = new ByteBufDataOutputPlus(buf);
-        ComponentManifest.serializer.serialize(expected, output, MessagingService.VERSION_40);
+        try (DataOutputBuffer out = new DataOutputBuffer())
+        {
+            ComponentManifest.serializer.serialize(expected, out, MessagingService.VERSION_40);
 
-        buf.setInt(0, -100);
+            buf.setInt(0, -100);
 
-        DataInputPlus input = new ByteBufDataInputPlus(buf);
-        ComponentManifest actual = ComponentManifest.serializer.deserialize(input, MessagingService.VERSION_40);
-
-        assertNotEquals(expected, actual);
+            DataInputBuffer in = new DataInputBuffer(out.buffer(), false);
+            ComponentManifest actual = ComponentManifest.serializer.deserialize(in, MessagingService.VERSION_40);
+            assertNotEquals(expected, actual);
+        }
     }
 }

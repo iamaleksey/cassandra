@@ -23,6 +23,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
+import com.google.common.primitives.Ints;
+
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -37,23 +39,52 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
 
     public void serialize(ForwardToContainer forwardToContainer, DataOutputPlus out, int version) throws IOException
     {
-        out.writeInt(forwardToContainer.targets.size());
-        Iterator<InetAddressAndPort> iter = forwardToContainer.targets.iterator();
-        for (int ii = 0; ii < forwardToContainer.messageIds.length; ii++)
+        List<InetAddressAndPort> targets = forwardToContainer.targets;
+        if (version >= MessagingService.VERSION_40)
         {
-            CompactEndpointSerializationHelper.instance.serialize(iter.next(), out, version);
-            out.writeInt(forwardToContainer.messageIds[ii]);
+            out.writeVInt(targets.size());
+            for (int i = 0; i < forwardToContainer.messageIds.length; i++)
+            {
+                CompactEndpointSerializationHelper.instance.serialize(targets.get(i), out, version);
+                out.writeUnsignedVInt(forwardToContainer.messageIds[i]);
+            }
+        }
+        else
+        {
+            out.writeInt(targets.size());
+            for (int i = 0; i < forwardToContainer.messageIds.length; i++)
+            {
+                CompactEndpointSerializationHelper.instance.serialize(targets.get(i), out, version);
+                out.writeInt(Ints.checkedCast(forwardToContainer.messageIds[i]));
+            }
         }
     }
 
     public ForwardToContainer deserialize(DataInputPlus in, int version) throws IOException
     {
-        int[] ids = new int[in.readInt()];
-        List<InetAddressAndPort> hosts = new ArrayList<>(ids.length);
-        for (int ii = 0; ii < ids.length; ii++)
+        long[] ids;
+        List<InetAddressAndPort> hosts;
+        if (version >= MessagingService.VERSION_40)
         {
-           hosts.add(CompactEndpointSerializationHelper.instance.deserialize(in, version));
-           ids[ii] = in.readInt();
+            int count = Ints.checkedCast(in.readUnsignedVInt());
+            ids = new long[count];
+            hosts = new ArrayList<>(ids.length);
+            for (int ii = 0; ii < ids.length; ii++)
+            {
+                hosts.add(CompactEndpointSerializationHelper.instance.deserialize(in, version));
+                ids[ii] = in.readVInt();
+            }
+        }
+        else
+        {
+            int count = in.readInt();
+            ids = new long[count];
+            hosts = new ArrayList<>(ids.length);
+            for (int ii = 0; ii < ids.length; ii++)
+            {
+                hosts.add(CompactEndpointSerializationHelper.instance.deserialize(in, version));
+                ids[ii] = in.readInt();
+            }
         }
         return new ForwardToContainer(hosts, ids);
     }

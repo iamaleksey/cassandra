@@ -35,29 +35,9 @@ import org.apache.cassandra.streaming.messages.StreamMessage;
  */
 public class CompactEndpointSerializationHelper implements IVersionedSerializer<InetAddressAndPort>
 {
+    public static final int MAXIMUM_SIZE = 19;
+
     public static final IVersionedSerializer<InetAddressAndPort> instance = new CompactEndpointSerializationHelper();
-
-    /**
-     * Streaming uses its own version numbering so we need to ignore it and always use currrent version.
-     * There is no cross version streaming so it will always use the latest address serialization.
-     **/
-    public static final IVersionedSerializer<InetAddressAndPort> streamingInstance = new IVersionedSerializer<InetAddressAndPort>()
-    {
-        public void serialize(InetAddressAndPort inetAddressAndPort, DataOutputPlus out, int version) throws IOException
-        {
-            instance.serialize(inetAddressAndPort, out, MessagingService.current_version);
-        }
-
-        public InetAddressAndPort deserialize(DataInputPlus in, int version) throws IOException
-        {
-            return instance.deserialize(in, MessagingService.current_version);
-        }
-
-        public long serializedSize(InetAddressAndPort inetAddressAndPort, int version)
-        {
-            return instance.serializedSize(inetAddressAndPort, MessagingService.current_version);
-        }
-    };
 
     private CompactEndpointSerializationHelper() {}
 

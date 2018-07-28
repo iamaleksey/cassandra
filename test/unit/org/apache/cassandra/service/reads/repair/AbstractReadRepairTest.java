@@ -44,7 +44,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaUtils;
-import org.apache.cassandra.net.MessageIn;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -55,6 +55,7 @@ import org.apache.cassandra.utils.ByteBufferUtil;
 
 import static org.apache.cassandra.locator.Replica.fullReplica;
 import static org.apache.cassandra.locator.ReplicaUtils.FULL_RANGE;
+import static org.apache.cassandra.net.Verb.INTERNAL_RSP;
 
 @Ignore
 public abstract  class AbstractReadRepairTest
@@ -163,14 +164,12 @@ public abstract  class AbstractReadRepairTest
     }
 
     @SuppressWarnings("resource")
-    static MessageIn<ReadResponse> msg(InetAddressAndPort from, Cell... cells)
+    static Message<ReadResponse> msg(InetAddressAndPort from, Cell... cells)
     {
         UnfilteredPartitionIterator iter = new SingletonUnfilteredPartitionIterator(update(cells).unfilteredIterator());
-        return MessageIn.create(from,
-                                ReadResponse.createDataResponse(iter, command),
-                                Collections.emptyMap(),
-                                MessagingService.Verb.INTERNAL_RESPONSE,
-                                MessagingService.current_version);
+        return Message.builder(INTERNAL_RSP, ReadResponse.createDataResponse(iter, command))
+                      .from(from)
+                      .build();
     }
 
     static class ResultConsumer implements Consumer<PartitionIterator>

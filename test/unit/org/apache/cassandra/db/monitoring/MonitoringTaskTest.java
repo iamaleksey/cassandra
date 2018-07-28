@@ -32,6 +32,8 @@ import org.junit.After;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.apache.cassandra.utils.ApproximateTime;
+
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -90,8 +92,8 @@ public class MonitoringTaskTest
 
     private static void waitForOperationsToComplete(List<Monitorable> operations) throws InterruptedException
     {
-        long timeout = operations.stream().map(Monitorable::timeout).reduce(0L, Long::max);
-        Thread.sleep(timeout * 2 + ApproximateTime.precision());
+        long timeout = operations.stream().map(Monitorable::timeoutNanos).reduce(0L, Long::max);
+        Thread.sleep(timeout * 2 + ApproximateTime.currentTimeMillisPrecision());
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -109,8 +111,8 @@ public class MonitoringTaskTest
 
     private static void waitForOperationsToBeReportedAsSlow(List<Monitorable> operations) throws InterruptedException
     {
-        long timeout = operations.stream().map(Monitorable::slowTimeout).reduce(0L, Long::max);
-        Thread.sleep(timeout * 2 + ApproximateTime.precision());
+        long timeout = operations.stream().map(Monitorable::slowTimeoutNanos).reduce(0L, Long::max);
+        Thread.sleep(timeout * 2 + ApproximateTime.currentTimeMillisPrecision());
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -246,7 +248,7 @@ public class MonitoringTaskTest
             assertFalse(operation2.isAborted());
             assertTrue(operation2.isCompleted());
 
-            Thread.sleep(ApproximateTime.precision() + 500);
+            Thread.sleep(ApproximateTime.currentTimeMillisPrecision() + 500);
             assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
             assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
         }

@@ -19,7 +19,6 @@
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -38,7 +37,8 @@ import org.apache.cassandra.gms.HeartBeatState;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.net.async.OutboundConnectionIdentifier.ConnectionType.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.OutboundConnections.connectionTypeFor;
 
 public class StartupClusterConnectivityCheckerTest
 {
@@ -108,14 +108,14 @@ public class StartupClusterConnectivityCheckerTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().messageSink.clear();
     }
 
     @Test
     public void execute_HappyPath()
     {
         Sink sink = new Sink(true, true, peers);
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().messageSink.add(sink);
         Assert.assertTrue(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
         Assert.assertTrue(checkAllConnectionTypesSeen(sink));
     }
@@ -124,7 +124,7 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_NotAlive()
     {
         Sink sink = new Sink(false, true, peers);
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().messageSink.add(sink);
         Assert.assertFalse(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
         Assert.assertTrue(checkAllConnectionTypesSeen(sink));
     }
@@ -133,7 +133,7 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_NoConnectionsAcks()
     {
         Sink sink = new Sink(true, false, peers);
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().messageSink.add(sink);
         Assert.assertFalse(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
     }
 
@@ -186,7 +186,7 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_ZeroWaitHasConnections() throws InterruptedException
     {
         Sink sink = new Sink(true, true, new HashSet<>());
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().messageSink.add(sink);
         Assert.assertFalse(zeroWaitChecker.execute(peers, this::getDatacenter));
         boolean hasConnections = false;
         for (int i = 0; i < TIMEOUT_NANOS; i+= 10)
@@ -196,7 +196,7 @@ public class StartupClusterConnectivityCheckerTest
                 break;
             Thread.sleep(0, 10);
         }
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().messageSink.clear();
         Assert.assertTrue(hasConnections);
     }
 
@@ -204,11 +204,11 @@ public class StartupClusterConnectivityCheckerTest
                                 boolean shouldPass, boolean checkConnections)
     {
         Sink sink = new Sink(true, true, available);
-        MessagingService.instance().addMessageSink(sink);
+        MessagingService.instance().messageSink.add(sink);
         Assert.assertEquals(shouldPass, checker.execute(peers, this::getDatacenter));
         if (checkConnections)
             Assert.assertTrue(checkAllConnectionTypesSeen(sink));
-        MessagingService.instance().clearMessageSinks();
+        MessagingService.instance().messageSink.clear();
     }
 
     private void copyCount(Set<InetAddressAndPort> source, Set<InetAddressAndPort> dest, int count)
@@ -241,7 +241,7 @@ public class StartupClusterConnectivityCheckerTest
         return result;
     }
 
-    private static class Sink implements IMessageSink
+    private static class Sink implements MessageSink.Sink
     {
         private final boolean markAliveInGossip;
         private final boolean processConnectAck;
@@ -257,10 +257,10 @@ public class StartupClusterConnectivityCheckerTest
         }
 
         @Override
-        public boolean allowOutgoingMessage(MessageOut message, int id, InetAddressAndPort to)
+        public boolean allowOutbound(Message message, InetAddressAndPort to)
         {
             ConnectionTypeRecorder recorder = seenConnectionRequests.computeIfAbsent(to, inetAddress ->  new ConnectionTypeRecorder());
-            if (message.connectionType == SMALL_MESSAGE)
+            if (connectionTypeFor(message, MessagingService.current_version, null) == SMALL_MESSAGE)
             {
                 Assert.assertFalse(recorder.seenSmallMessageRequest);
                 recorder.seenSmallMessageRequest = true;
@@ -276,8 +276,10 @@ public class StartupClusterConnectivityCheckerTest
 
             if (processConnectAck)
             {
-                MessageIn msgIn = MessageIn.create(to, message.payload, Collections.emptyMap(), MessagingService.Verb.REQUEST_RESPONSE, 1);
-                MessagingService.instance().getRegisteredCallback(id).callback.response(msgIn);
+                Message msgIn = Message.builder(Verb.REQUEST_RSP, message.payload)
+                                       .from(to)
+                                       .build();
+                MessagingService.instance().callbacks.get(message.id).callback.response(msgIn);
             }
 
             if (markAliveInGossip)
@@ -286,7 +288,7 @@ public class StartupClusterConnectivityCheckerTest
         }
 
         @Override
-        public boolean allowIncomingMessage(MessageIn message, int id)
+        public boolean allowInbound(Message message)
         {
             return false;
         }

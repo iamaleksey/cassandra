@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
 import java.util.function.LongPredicate;
 
@@ -35,7 +36,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.filter.*;
-import org.apache.cassandra.db.monitoring.ApproximateTime;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
 import org.apache.cassandra.db.transform.RTBoundCloser;
@@ -52,9 +53,8 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.metrics.TableMetrics;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -164,6 +164,8 @@ public abstract class ReadCommand extends AbstractReadQuery
 
     public abstract boolean isLimitedToOnePartition();
 
+    public abstract boolean isRangeRequest();
+
     /**
      * Creates a new <code>ReadCommand</code> instance with new limits.
      *
@@ -177,7 +179,7 @@ public abstract class ReadCommand extends AbstractReadQuery
      *
      * @return the configured timeout for this command.
      */
-    public abstract long getTimeout();
+    public abstract long getTimeout(TimeUnit unit);
 
     /**
      * Whether this query is a digest one or not.
@@ -661,7 +663,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     /**
      * Creates a message for this command.
      */
-    public abstract MessageOut<ReadCommand> createMessage();
+    public abstract Message<ReadCommand> createMessage();
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 

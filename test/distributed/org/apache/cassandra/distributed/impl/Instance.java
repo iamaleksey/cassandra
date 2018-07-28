@@ -53,6 +53,7 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.distributed.api.ICoordinator;
+import org.apache.cassandra.distributed.api.IInstance;
 import org.apache.cassandra.distributed.api.IInstanceConfig;
 import org.apache.cassandra.distributed.api.IListen;
 import org.apache.cassandra.distributed.api.IMessage;
@@ -66,12 +67,12 @@ import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.IMessageSink;
-import org.apache.cassandra.net.MessageDeliveryTask;
-import org.apache.cassandra.net.MessageIn;
-import org.apache.cassandra.net.MessageOut;
+import org.apache.cassandra.locator.SimpleSeedProvider;
+import org.apache.cassandra.locator.SimpleSnitch;
+import org.apache.cassandra.net.ProcessMessageTask;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.MessageInHandler;
 import org.apache.cassandra.net.async.NettyFactory;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -173,12 +174,20 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     private void registerMockMessaging(ICluster cluster)
     {
         BiConsumer<InetAddressAndPort, IMessage> deliverToInstance = (to, message) -> cluster.get(to).receiveMessage(message);
-        BiConsumer<InetAddressAndPort, IMessage> deliverToInstanceIfNotFiltered = cluster.filters().filter(deliverToInstance);
+        BiConsumer<InetAddressAndPort, IMessage> deliverToInstanceIfNotFiltered = (to, message) -> {
+            if (cluster.filters().permit(this, cluster.get(to), message.verb()))
+                deliverToInstance.accept(to, message);
+        };
 
-        MessagingService.instance().addMessageSink(new MessageDeliverySink(deliverToInstanceIfNotFiltered));
+        MessagingService.instance().messageSink.addOutbound(new MessageDeliverySink(deliverToInstanceIfNotFiltered));
     }
 
-    private class MessageDeliverySink implements IMessageSink
+    private void registerFilter(ICluster cluster)
+    {
+        MessagingService.instance().messageSink.addOutbound((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb.id));
+    }
+
+    private class MessageDeliverySink implements MessageSink.OutboundSink
     {
         private final BiConsumer<InetAddressAndPort, IMessage> deliver;
         MessageDeliverySink(BiConsumer<InetAddressAndPort, IMessage> deliver)
@@ -187,26 +196,19 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         }
 
         @Override
-        public boolean allowOutgoingMessage(MessageOut messageOut, int id, InetAddressAndPort to)
+        public boolean allowOutbound(Message<?> messageOut, InetAddressAndPort to)
         {
             try (DataOutputBuffer out = new DataOutputBuffer(1024))
             {
                 InetAddressAndPort from = broadcastAddressAndPort();
-                messageOut.serialize(out, MessagingService.current_version);
-                deliver.accept(to, new Message(messageOut.verb.getId(), out.toByteArray(), id, MessagingService.current_version, from));
+                Message.serializer.serialize(messageOut, out, MessagingService.current_version);
+                deliver.accept(to, new MessageImpl(messageOut.verb.id, out.toByteArray(), messageOut.id, MessagingService.current_version, from));
             }
             catch (IOException e)
             {
                 throw new RuntimeException(e);
             }
             return false;
-        }
-
-        @Override
-        public boolean allowIncomingMessage(MessageIn message, int id)
-        {
-            // we can filter to our heart's content on the outgoing message; no need to worry about incoming
-            return true;
         }
     }
 
@@ -216,8 +218,8 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         sync(() -> {
             try (DataInputBuffer in = new DataInputBuffer(message.bytes()))
             {
-                MessageIn<?> messageIn = MessageInHandler.deserialize(in, message.id(), message.version(), message.from());
-                Runnable deliver = new MessageDeliveryTask(messageIn, message.id());
+                Message<?> messageIn = Message.serializer.deserialize(in, message.from(), message.version());
+                Runnable deliver = new ProcessMessageTask(messageIn);
                 deliver.run();
             }
             catch (Throwable t)
@@ -272,8 +274,9 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 // once we actually use the MessagingService to communicate between nodes
                 NettyFactory.instance.getClass();
                 initializeRing(cluster);
-                registerMockMessaging(cluster);
-
+//                registerMockMessaging(cluster);
+                registerFilter(cluster);
+                MessagingService.instance().listen();
                 SystemKeyspace.finishStartup();
 
                 if (!FBUtilities.getBroadcastAddressAndPort().equals(broadcastAddressAndPort()))
@@ -341,7 +344,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                         ApplicationState.STATUS,
                         new VersionedValue.VersionedValueFactory(partitioner).normal(Collections.singleton(tokens.get(i))));
                 Gossiper.instance.realMarkAlive(ep, Gossiper.instance.getEndpointStateForEndpoint(ep));
-                MessagingService.instance().setVersion(ep, MessagingService.current_version);
+                MessagingService.instance().versions.set(ep, MessagingService.current_version);
             }
 
             // check that all nodes are in token metadata
