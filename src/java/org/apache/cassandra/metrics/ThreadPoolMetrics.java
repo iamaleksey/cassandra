@@ -79,12 +79,12 @@ public class ThreadPoolMetrics
     {
         this.factory = newMetricNameFactory(path, poolName);
 
-        activeTasks = register(ACTIVE_TASKS, () -> executor.getActiveCount());
+        activeTasks = register(ACTIVE_TASKS, executor::getActiveCount);
         totalBlocked = counter(TOTAL_BLOCKED_TASKS);
         currentBlocked = counter(CURRENTLY_BLOCKED_TASKS);
-        completedTasks = register(COMPLETED_TASKS, () -> executor.getCompletedTaskCount());
-        pendingTasks = register(PENDING_TASKS, () -> executor.getPendingTaskCount());
-        maxPoolSize = register(MAX_POOL_SIZE, () -> executor.getMaximumPoolSize());
+        completedTasks = register(COMPLETED_TASKS, executor::getCompletedTaskCount);
+        pendingTasks = register(PENDING_TASKS, executor::getPendingTaskCount);
+        maxPoolSize = register(MAX_POOL_SIZE, executor::getMaximumPoolSize);
     }
 
     public void release()
@@ -160,17 +160,10 @@ public class ThreadPoolMetrics
 
     private MetricNameFactory newMetricNameFactory(String path, String poolName)
     {
-        return new MetricNameFactory()
-        {
-            public CassandraMetricsRegistry.MetricName createMetricName(String metricName)
-            {
-                String mbeanName = mbeanName(path, poolName, metricName);
-                return new CassandraMetricsRegistry.MetricName("org.apache.cassandra.metrics", 
-                                                               "ThreadPools",
-                                                               metricName, path + "." + poolName,
-                                                               mbeanName);
-            }
-        };
+        return metricName -> new CassandraMetricsRegistry.MetricName("org.apache.cassandra.metrics",
+                                                                     "ThreadPools",
+                                                                     metricName, path + '.' + poolName,
+                                                                     mbeanName(path, poolName, metricName));
     }
 
     protected final Counter counter(String name)

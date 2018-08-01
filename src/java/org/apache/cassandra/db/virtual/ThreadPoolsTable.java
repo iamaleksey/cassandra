@@ -17,12 +17,8 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import static com.google.common.base.CaseFormat.LOWER_UNDERSCORE;
-import static com.google.common.base.CaseFormat.UPPER_CAMEL;
-
 import java.lang.management.ManagementFactory;
 import java.util.Map;
-
 import javax.management.MBeanServer;
 
 import org.apache.cassandra.db.marshal.LongType;
@@ -30,27 +26,27 @@ import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
-final class ThreadPoolTable extends AbstractVirtualTable
+final class ThreadPoolsTable extends AbstractVirtualTable
 {
-    private final static String POOL = "thread_pool";
+    private final static String THREAD_POOL = "thread_pool";
     private final static String ACTIVE = "active";
     private final static String ACTIVE_MAX = "active_max";
     private final static String PENDING = "pending";
     private final static String COMPLETED = "completed";
-    private final static String BLOCKED = "tasks_blocked";
+    private final static String TASKS_BLOCKED = "tasks_blocked";
     private final static String TOTAL_BLOCKED = "total_blocked";
 
-    ThreadPoolTable(String keyspace)
+    ThreadPoolsTable(String keyspace)
     {
         super(TableMetadata.builder(keyspace, "thread_pools")
                            .comment("metrics of internal thread pools")
                            .kind(TableMetadata.Kind.VIRTUAL)
-                           .addPartitionKeyColumn(POOL, UTF8Type.instance)
+                           .addPartitionKeyColumn(THREAD_POOL, UTF8Type.instance)
                            .addRegularColumn(ACTIVE, LongType.instance)
                            .addRegularColumn(ACTIVE_MAX, LongType.instance)
                            .addRegularColumn(PENDING, LongType.instance)
                            .addRegularColumn(COMPLETED, LongType.instance)
-                           .addRegularColumn(BLOCKED, LongType.instance)
+                           .addRegularColumn(TASKS_BLOCKED, LongType.instance)
                            .addRegularColumn(TOTAL_BLOCKED, LongType.instance)
                            .build());
     }
@@ -60,7 +56,7 @@ final class ThreadPoolTable extends AbstractVirtualTable
         MBeanServer server = ManagementFactory.getPlatformMBeanServer();
         Object value = ThreadPoolMetrics.getJmxMetric(server, tpool.getKey(), tpool.getValue(), key);
         if (value instanceof Long)
-            return ((Long) value).longValue();
+            return (Long) value;
         else if (value instanceof Integer)
             return ((Integer) value).longValue();
         throw new IllegalArgumentException(value + " of unexpected type " + value.getClass());
@@ -74,13 +70,14 @@ final class ThreadPoolTable extends AbstractVirtualTable
         for (Map.Entry<String, String> tpool : ThreadPoolMetrics.getJmxThreadPools(server).entries())
         {
             result.row(tpool.getValue())
-                .column(ACTIVE, getJmxMetric(tpool, ThreadPoolMetrics.ACTIVE_TASKS))
-                .column(ACTIVE_MAX, getJmxMetric(tpool, ThreadPoolMetrics.MAX_POOL_SIZE))
-                .column(PENDING, getJmxMetric(tpool, ThreadPoolMetrics.PENDING_TASKS))
-                .column(COMPLETED, getJmxMetric(tpool, ThreadPoolMetrics.COMPLETED_TASKS))
-                .column(BLOCKED, getJmxMetric(tpool, ThreadPoolMetrics.CURRENTLY_BLOCKED_TASKS))
-                .column(TOTAL_BLOCKED, getJmxMetric(tpool, ThreadPoolMetrics.TOTAL_BLOCKED_TASKS));
+                  .column(ACTIVE, getJmxMetric(tpool, ThreadPoolMetrics.ACTIVE_TASKS))
+                  .column(ACTIVE_MAX, getJmxMetric(tpool, ThreadPoolMetrics.MAX_POOL_SIZE))
+                  .column(PENDING, getJmxMetric(tpool, ThreadPoolMetrics.PENDING_TASKS))
+                  .column(COMPLETED, getJmxMetric(tpool, ThreadPoolMetrics.COMPLETED_TASKS))
+                  .column(TASKS_BLOCKED, getJmxMetric(tpool, ThreadPoolMetrics.CURRENTLY_BLOCKED_TASKS))
+                  .column(TOTAL_BLOCKED, getJmxMetric(tpool, ThreadPoolMetrics.TOTAL_BLOCKED_TASKS));
         }
+
         return result;
     }
 }
