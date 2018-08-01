@@ -23,6 +23,7 @@ import javax.management.MBeanServer;
 
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
+import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.schema.TableMetadata;
 
@@ -41,6 +42,7 @@ final class ThreadPoolsTable extends AbstractVirtualTable
         super(TableMetadata.builder(keyspace, "thread_pools")
                            .comment("metrics of internal thread pools")
                            .kind(TableMetadata.Kind.VIRTUAL)
+                           .partitioner(new LocalPartitioner(UTF8Type.instance))
                            .addPartitionKeyColumn(THREAD_POOL, UTF8Type.instance)
                            .addRegularColumn(ACTIVE, LongType.instance)
                            .addRegularColumn(ACTIVE_MAX, LongType.instance)
