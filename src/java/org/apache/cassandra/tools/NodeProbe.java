@@ -1351,7 +1351,7 @@ public class NodeProbe implements AutoCloseable
         }
     }
 
-    public static Multimap<String, String> getJmxThreadPools(MBeanServerConnection mbeanServerConn)
+    private static Multimap<String, String> getJmxThreadPools(MBeanServerConnection mbeanServerConn)
     {
         try
         {

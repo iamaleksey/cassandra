@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 import javax.management.MBeanServer;
 import javax.management.ObjectName;
 
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 
 /**
@@ -80,8 +79,7 @@ public class JMXEnabledThreadPoolExecutor extends DebuggableThreadPoolExecutor i
     {
         super(corePoolSize, maxPoolSize, keepAliveTime, unit, workQueue, threadFactory);
         super.prestartAllCoreThreads();
-        metrics = new ThreadPoolMetrics(this, jmxPath, threadFactory.id);
-        CassandraMetricsRegistry.Metrics.register(metrics);
+        metrics = new ThreadPoolMetrics(this, jmxPath, threadFactory.id).register();
 
         MBeanServer mbs = ManagementFactory.getPlatformMBeanServer();
         mbeanName = "org.apache.cassandra." + jmxPath + ":type=" + threadFactory.id;
@@ -125,7 +123,8 @@ public class JMXEnabledThreadPoolExecutor extends DebuggableThreadPoolExecutor i
             throw new RuntimeException(e);
         }
 
-        CassandraMetricsRegistry.Metrics.release(metrics);
+        // release metrics
+        metrics.release();
     }
 
     @Override

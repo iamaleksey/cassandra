@@ -38,7 +38,7 @@ public interface LocalAwareExecutorService extends ExecutorService
      *
      * @return the number of threads
      */
-    int getActiveCount();
+    int getActiveTaskCount();
 
     /**
      * Returns the approximate total number of tasks that have
@@ -60,7 +60,7 @@ public interface LocalAwareExecutorService extends ExecutorService
      *
      * @return the number of tasks
      */
-    long getPendingTaskCount();
+    int getPendingTaskCount();
 
     /**
      * Returns the maximum allowed number of threads.
@@ -68,4 +68,9 @@ public interface LocalAwareExecutorService extends ExecutorService
      * @return the maximum allowed number of threads
      */
     int getMaximumPoolSize();
+
+    default int getMaxTasksQueued()
+    {
+        return -1;
+    }
 }

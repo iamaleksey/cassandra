@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.utils;
 
-import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.cache.*;
@@ -65,15 +64,15 @@ public class StatusLogger
         // everything from o.a.c.concurrent
         logger.info(String.format("%-28s%10s%10s%15s%10s%18s", "Pool Name", "Active", "Pending", "Completed", "Blocked", "All Time Blocked"));
 
-        for (Map.Entry<String, ThreadPoolMetrics> tpool : CassandraMetricsRegistry.Metrics.getThreadPoolMetrics().entrySet())
+        for (ThreadPoolMetrics tpool : CassandraMetricsRegistry.Metrics.allThreadPoolMetrics())
         {
             logger.info(String.format("%-28s%10s%10s%15s%10s%18s",
-                    tpool.getKey(),
-                    tpool.getValue().activeTasks.getValue(),
-                    tpool.getValue().pendingTasks.getValue(),
-                    tpool.getValue().completedTasks.getValue(),
-                    tpool.getValue().currentBlocked.getCount(),
-                    tpool.getValue().totalBlocked.getCount()));
+                                      tpool.poolName,
+                                      tpool.activeTasks.getValue(),
+                                      tpool.pendingTasks.getValue(),
+                                      tpool.completedTasks.getValue(),
+                                      tpool.currentBlocked.getCount(),
+                                      tpool.totalBlocked.getCount()));
         }
 
         // one offs

@@ -408,7 +408,7 @@ public class ViewLongTest extends CQLTester
     {
         executeNet(protocolVersion, query, params);
         while (!(((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getPendingTaskCount() == 0
-                && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveCount() == 0))
+                && ((SEPExecutor) StageManager.getStage(Stage.VIEW_MUTATION)).getActiveTaskCount() == 0))
         {
             Thread.sleep(1);
         }

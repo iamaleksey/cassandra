@@ -17,59 +17,70 @@
  */
 package org.apache.cassandra.db.virtual;
 
-import java.util.Map;
-
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
 import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.LocalPartitioner;
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.StatusLogger;
+
+import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 final class ThreadPoolsTable extends AbstractVirtualTable
 {
-    private final static String THREAD_POOL = "thread_pool";
-    private final static String ACTIVE = "active_tasks";
-    private final static String ACTIVE_MAX = "max_pool_size";
-    private final static String PENDING = "pending_tasks";
-    private final static String COMPLETED = "completed_tasks";
-    private final static String BLOCKED = "blocked_tasks";
-    private final static String TOTAL_BLOCKED = "blocked_tasks_all_time";
+    private static final String NAME = "name";
+    private static final String ACTIVE_TASKS = "active_tasks";
+    private static final String ACTIVE_TASKS_LIMIT = "active_tasks_limit";
+    private static final String PENDING_TASKS = "pending_tasks";
+    private static final String COMPLETED_TASKS = "completed_tasks";
+    private static final String BLOCKED_TASKS = "blocked_tasks";
+    private static final String BLOCKED_TASKS_ALL_TIME = "blocked_tasks_all_time";
 
     ThreadPoolsTable(String keyspace)
     {
         super(TableMetadata.builder(keyspace, "thread_pools")
-                           .comment("metrics of internal thread pools")
+                           .comment("thread pools")
                            .kind(TableMetadata.Kind.VIRTUAL)
                            .partitioner(new LocalPartitioner(UTF8Type.instance))
-                           .addPartitionKeyColumn(THREAD_POOL, UTF8Type.instance)
-                           .addRegularColumn(ACTIVE, Int32Type.instance)
-                           .addRegularColumn(ACTIVE_MAX, Int32Type.instance)
-                           .addRegularColumn(PENDING, LongType.instance)
-                           .addRegularColumn(COMPLETED, LongType.instance)
-                           .addRegularColumn(BLOCKED, LongType.instance)
-                           .addRegularColumn(TOTAL_BLOCKED, LongType.instance)
+                           .addPartitionKeyColumn(NAME, UTF8Type.instance)
+                           .addRegularColumn(ACTIVE_TASKS, Int32Type.instance)
+                           .addRegularColumn(ACTIVE_TASKS_LIMIT, Int32Type.instance)
+                           .addRegularColumn(PENDING_TASKS, Int32Type.instance)
+                           .addRegularColumn(COMPLETED_TASKS, LongType.instance)
+                           .addRegularColumn(BLOCKED_TASKS, LongType.instance)
+                           .addRegularColumn(BLOCKED_TASKS_ALL_TIME, LongType.instance)
                            .build());
     }
 
+    @Override
+    public DataSet data(DecoratedKey partitionKey)
+    {
+        String poolName = UTF8Type.instance.compose(partitionKey.getKey());
+
+        SimpleDataSet result = new SimpleDataSet(metadata());
+        Metrics.getThreadPoolMetrics(poolName)
+               .ifPresent(metrics -> addRow(result, metrics));
+        return result;
+    }
+
+    @Override
     public DataSet data()
     {
         SimpleDataSet result = new SimpleDataSet(metadata());
-
-        for (Map.Entry<String, ThreadPoolMetrics> tpool : CassandraMetricsRegistry.Metrics.getThreadPoolMetrics().entrySet())
-        {
-            ThreadPoolMetrics metrics = tpool.getValue();
-            result.row(tpool.getKey())
-                  .column(ACTIVE, metrics.activeTasks.getValue())
-                  .column(ACTIVE_MAX, metrics.maxPoolSize.getValue())
-                  .column(PENDING, metrics.pendingTasks.getValue())
-                  .column(COMPLETED, metrics.completedTasks.getValue())
-                  .column(BLOCKED, metrics.currentBlocked.getCount())
-                  .column(TOTAL_BLOCKED, metrics.totalBlocked.getCount());
-        }
-        StatusLogger.log();
+        Metrics.allThreadPoolMetrics()
+               .forEach(metrics -> addRow(result, metrics));
         return result;
+    }
+
+    private void addRow(SimpleDataSet dataSet, ThreadPoolMetrics metrics)
+    {
+        dataSet.row(metrics.poolName)
+               .column(ACTIVE_TASKS, metrics.activeTasks.getValue())
+               .column(ACTIVE_TASKS_LIMIT, metrics.maxPoolSize.getValue())
+               .column(PENDING_TASKS, metrics.pendingTasks.getValue())
+               .column(COMPLETED_TASKS, metrics.completedTasks.getValue())
+               .column(BLOCKED_TASKS, metrics.currentBlocked.getCount())
+               .column(BLOCKED_TASKS_ALL_TIME, metrics.totalBlocked.getCount());
     }
 }

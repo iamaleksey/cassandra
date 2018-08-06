@@ -23,7 +23,6 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.apache.cassandra.metrics.CassandraMetricsRegistry;
 import org.apache.cassandra.metrics.ThreadPoolMetrics;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
@@ -61,8 +60,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
         this.maxWorkers = maxWorkers;
         this.maxTasksQueued = maxTasksQueued;
         this.permits.set(combine(0, maxWorkers));
-        this.metrics = new ThreadPoolMetrics(this, jmxPath, name);
-        CassandraMetricsRegistry.Metrics.register(metrics);
+        this.metrics = new ThreadPoolMetrics(this, jmxPath, name).register();
     }
 
     protected void onCompletion()
@@ -70,6 +68,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
         completedTasks.incrementAndGet();
     }
 
+    @Override
     public int getMaxTasksQueued()
     {
         return maxTasksQueued;
@@ -215,10 +214,11 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
     {
         shuttingDown = true;
         pool.executors.remove(this);
-        if (getActiveCount() == 0)
+        if (getActiveTaskCount() == 0)
             shutdown.signalAll();
 
-        CassandraMetricsRegistry.Metrics.release(metrics);
+        // release metrics
+        metrics.release();
     }
 
     public synchronized List<Runnable> shutdownNow()
@@ -247,7 +247,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
     }
 
     @Override
-    public long getPendingTaskCount()
+    public int getPendingTaskCount()
     {
         return taskPermits(permits.get());
     }
@@ -258,7 +258,7 @@ public class SEPExecutor extends AbstractLocalAwareExecutorService
         return completedTasks.get();
     }
 
-    public int getActiveCount()
+    public int getActiveTaskCount()
     {
         return maxWorkers - workPermits(permits.get());
     }

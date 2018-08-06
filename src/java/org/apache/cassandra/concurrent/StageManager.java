@@ -134,7 +134,13 @@ public class StageManager
         }
 
         @Override
-        public long getPendingTaskCount()
+        public int getActiveTaskCount()
+        {
+            return getActiveCount();
+        }
+
+        @Override
+        public int getPendingTaskCount()
         {
             return getQueue().size();
         }
