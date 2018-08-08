@@ -59,6 +59,8 @@ public class InstrumentingCache<K, V>
         metrics.requests.mark();
         if (v != null)
             metrics.hits.mark();
+        else
+            metrics.misses.mark();
         return v;
     }
 
