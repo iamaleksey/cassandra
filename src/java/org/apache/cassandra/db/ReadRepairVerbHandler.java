@@ -17,15 +17,25 @@
  */
 package org.apache.cassandra.db;
 
+import com.google.common.collect.Iterables;
+
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.MessageIn;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.schema.Schema;
+import org.apache.cassandra.schema.TableId;
+import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.reads.repair.ReadRepairStrategy;
 
 public class ReadRepairVerbHandler implements IVerbHandler<Mutation>
 {
     public void doVerb(MessageIn<Mutation> message, int id)
     {
         message.payload.apply();
-        MessagingService.instance().sendReply(WriteResponse.createMessage(), id, message.from);
+
+        TableId tableId = Iterables.getOnlyElement(message.payload.getTableIds());
+        TableMetadata metadata = Schema.instance.getTableMetadata(tableId);
+        if (metadata.params.readRepair == ReadRepairStrategy.BLOCKING)
+            MessagingService.instance().sendReply(WriteResponse.createMessage(), id, message.from);
     }
 }
