@@ -17,15 +17,11 @@
  */
 package org.apache.cassandra.metrics;
 
-import com.codahale.metrics.Gauge;
-import com.codahale.metrics.Meter;
-import com.codahale.metrics.Metered;
-import com.codahale.metrics.RatioGauge;
+import java.util.function.DoubleSupplier;
+
+import com.codahale.metrics.*;
 import org.apache.cassandra.cache.CacheSize;
 
-import java.util.function.Supplier;
-
-import static com.codahale.metrics.RatioGauge.*;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -74,38 +70,66 @@ public class CacheMetrics
 
         hits = Metrics.meter(factory.createMetricName("Hits"));
         misses = Metrics.meter(factory.createMetricName("Misses"));
-        requests = Metrics.register(factory.createMetricName("Requests"), sumMetered(hits, misses));
+        requests = Metrics.register(factory.createMetricName("Requests"), sumMeters(hits, misses));
 
-        hitRate = Metrics.register(factory.createMetricName("HitRate"), ratioGauge(() -> Ratio.of(hits.getCount(), requests.getCount())));
-        oneMinuteHitRate = Metrics.register(factory.createMetricName("OneMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getOneMinuteRate(), requests.getOneMinuteRate())));
-        fiveMinuteHitRate = Metrics.register(factory.createMetricName("FiveMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getFiveMinuteRate(), requests.getFiveMinuteRate())));
-        fifteenMinuteHitRate = Metrics.register(factory.createMetricName("FifteenMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getFifteenMinuteRate(), requests.getFifteenMinuteRate())));
+        hitRate =
+            Metrics.register(factory.createMetricName("HitRate"),
+                             ratioGauge(hits::getCount, requests::getCount));
+        oneMinuteHitRate =
+            Metrics.register(factory.createMetricName("OneMinuteHitRate"),
+                             ratioGauge(hits::getOneMinuteRate, requests::getOneMinuteRate));
+        fiveMinuteHitRate =
+            Metrics.register(factory.createMetricName("FiveMinuteHitRate"),
+                             ratioGauge(hits::getFiveMinuteRate, requests::getFiveMinuteRate));
+        fifteenMinuteHitRate =
+            Metrics.register(factory.createMetricName("FifteenMinuteHitRate"),
+                             ratioGauge(hits::getFifteenMinuteRate, requests::getFifteenMinuteRate));
     }
 
-    private static Metered sumMetered(Metered hits, Metered misses)
+    private static Metered sumMeters(Metered hits, Metered misses)
     {
         return new Metered()
         {
             @Override
-            public long getCount() { return hits.getCount() + misses.getCount(); }
+            public long getCount()
+            {
+                return hits.getCount() + misses.getCount();
+            }
+
             @Override
-            public double getMeanRate() { return hits.getMeanRate() + misses.getMeanRate(); }
+            public double getMeanRate()
+            {
+                return hits.getMeanRate() + misses.getMeanRate();
+            }
+
             @Override
-            public double getOneMinuteRate() { return hits.getOneMinuteRate() + misses.getOneMinuteRate(); }
+            public double getOneMinuteRate()
+            {
+                return hits.getOneMinuteRate() + misses.getOneMinuteRate();
+            }
+
             @Override
-            public double getFiveMinuteRate() { return hits.getFiveMinuteRate() + misses.getFiveMinuteRate(); }
+            public double getFiveMinuteRate()
+            {
+                return hits.getFiveMinuteRate() + misses.getFiveMinuteRate();
+            }
+
             @Override
-            public double getFifteenMinuteRate() { return hits.getFifteenMinuteRate() + misses.getFifteenMinuteRate(); }
+            public double getFifteenMinuteRate()
+            {
+                return hits.getFifteenMinuteRate() + misses.getFifteenMinuteRate();
+            }
         };
     }
-    private static RatioGauge ratioGauge(Supplier<Ratio> supplier)
+
+    private static RatioGauge ratioGauge(DoubleSupplier numeratorSupplier, DoubleSupplier denominatorSupplier)
     {
         return new RatioGauge()
         {
             @Override
-            protected Ratio getRatio()
+            public Ratio getRatio()
             {
-                return supplier.get();
+                return Ratio.of(numeratorSupplier.getAsDouble(), denominatorSupplier.getAsDouble());
             }
         };
     }
