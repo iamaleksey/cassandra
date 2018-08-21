@@ -19,9 +19,13 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Gauge;
 import com.codahale.metrics.Meter;
+import com.codahale.metrics.Metered;
 import com.codahale.metrics.RatioGauge;
 import org.apache.cassandra.cache.CacheSize;
 
+import java.util.function.Supplier;
+
+import static com.codahale.metrics.RatioGauge.*;
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
@@ -41,7 +45,7 @@ public class CacheMetrics
     /** Total number of cache misses */
     public final Meter misses;
     /** Total number of cache requests */
-    public final Meter requests;
+    public final Metered requests;
 
     /** all time cache hit rate */
     public final Gauge<Double> hitRate;
@@ -70,39 +74,39 @@ public class CacheMetrics
 
         hits = Metrics.meter(factory.createMetricName("Hits"));
         misses = Metrics.meter(factory.createMetricName("Misses"));
-        requests = Metrics.meter(factory.createMetricName("Requests"));
+        requests = Metrics.register(factory.createMetricName("Requests"), sumMetered(hits, misses));
 
-        hitRate = Metrics.register(factory.createMetricName("HitRate"), new RatioGauge()
+        hitRate = Metrics.register(factory.createMetricName("HitRate"), ratioGauge(() -> Ratio.of(hits.getCount(), requests.getCount())));
+        oneMinuteHitRate = Metrics.register(factory.createMetricName("OneMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getOneMinuteRate(), requests.getOneMinuteRate())));
+        fiveMinuteHitRate = Metrics.register(factory.createMetricName("FiveMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getFiveMinuteRate(), requests.getFiveMinuteRate())));
+        fifteenMinuteHitRate = Metrics.register(factory.createMetricName("FifteenMinuteHitRate"), ratioGauge(() -> Ratio.of(hits.getFifteenMinuteRate(), requests.getFifteenMinuteRate())));
+    }
+
+    private static Metered sumMetered(Metered hits, Metered misses)
+    {
+        return new Metered()
         {
             @Override
-            public Ratio getRatio()
-            {
-                return Ratio.of(hits.getCount(), requests.getCount());
-            }
-        });
-        oneMinuteHitRate = Metrics.register(factory.createMetricName("OneMinuteHitRate"), new RatioGauge()
+            public long getCount() { return hits.getCount() + misses.getCount(); }
+            @Override
+            public double getMeanRate() { return hits.getMeanRate() + misses.getMeanRate(); }
+            @Override
+            public double getOneMinuteRate() { return hits.getOneMinuteRate() + misses.getOneMinuteRate(); }
+            @Override
+            public double getFiveMinuteRate() { return hits.getFiveMinuteRate() + misses.getFiveMinuteRate(); }
+            @Override
+            public double getFifteenMinuteRate() { return hits.getFifteenMinuteRate() + misses.getFifteenMinuteRate(); }
+        };
+    }
+    private static RatioGauge ratioGauge(Supplier<Ratio> supplier)
+    {
+        return new RatioGauge()
         {
             @Override
-            public Ratio getRatio()
+            protected Ratio getRatio()
             {
-                return Ratio.of(hits.getOneMinuteRate(), requests.getOneMinuteRate());
+                return supplier.get();
             }
-        });
-        fiveMinuteHitRate = Metrics.register(factory.createMetricName("FiveMinuteHitRate"), new RatioGauge()
-        {
-            @Override
-            public Ratio getRatio()
-            {
-                return Ratio.of(hits.getFiveMinuteRate(), requests.getFiveMinuteRate());
-            }
-        });
-        fifteenMinuteHitRate = Metrics.register(factory.createMetricName("FifteenMinuteHitRate"), new RatioGauge()
-        {
-            @Override
-            public Ratio getRatio()
-            {
-                return Ratio.of(hits.getFifteenMinuteRate(), requests.getFifteenMinuteRate());
-            }
-        });
+        };
     }
 }
