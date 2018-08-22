@@ -82,16 +82,13 @@ public class AsyncReadRepair extends AbstractReadRepair
     @Override
     public void repairPartition(DecoratedKey key, Map<InetAddressAndPort, Mutation> mutations, InetAddressAndPort[] destinations)
     {
-        for (Map.Entry<InetAddressAndPort, Mutation> entry: mutations.entrySet())
+        mutations.forEach((destination, mutation) ->
         {
-            InetAddressAndPort destination = entry.getKey();
-            Mutation mutation = entry.getValue();
-            TableId tableId = Iterables.getOnlyElement(mutation.getTableIds());
-
             Tracing.trace("Sending read-repair-mutation to {}", destination);
             // use a separate verb here to avoid writing hints on timeouts
             sendRR(mutation.createMessage(MessagingService.Verb.READ_REPAIR), destination);
+            TableId tableId = Iterables.getOnlyElement(mutation.getTableIds());
             ColumnFamilyStore.metricsFor(tableId).readRepairRequests.mark();
-        }
+        });
     }
 }

@@ -354,9 +354,9 @@ public final class TableParams
             return this;
         }
 
-        public Builder readRepair(ReadRepairStrategy readRepair)
+        public Builder readRepair(ReadRepairStrategy val)
         {
-            this.readRepair = readRepair;
+            readRepair = val;
             return this;
         }
 

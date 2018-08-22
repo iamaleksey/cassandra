@@ -79,12 +79,8 @@ public class BlockingReadRepair extends AbstractReadRepair
     {
         boolean timedOut = false;
         for (BlockingPartitionRepair repair: repairs)
-        {
-            if (!repair.awaitRepairs(DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS))
-            {
-                timedOut = true;
-            }
-        }
+            timedOut |= !repair.awaitRepairs(DatabaseDescriptor.getWriteRpcTimeout(), TimeUnit.MILLISECONDS);
+
         if (timedOut)
         {
             // We got all responses, but timed out while repairing
@@ -101,7 +97,8 @@ public class BlockingReadRepair extends AbstractReadRepair
     @Override
     public void repairPartition(DecoratedKey key, Map<InetAddressAndPort, Mutation> mutations, InetAddressAndPort[] destinations)
     {
-        BlockingPartitionRepair blockingRepair = new BlockingPartitionRepair(cfs.keyspace, key, consistency, mutations, consistency.blockFor(cfs.keyspace), destinations);
+        BlockingPartitionRepair blockingRepair =
+            new BlockingPartitionRepair(cfs.keyspace, key, consistency, mutations, consistency.blockFor(cfs.keyspace), destinations);
         blockingRepair.sendInitialRepairs();
         repairs.add(blockingRepair);
     }

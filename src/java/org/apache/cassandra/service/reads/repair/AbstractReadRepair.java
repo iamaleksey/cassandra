@@ -159,17 +159,14 @@ public abstract class AbstractReadRepair implements ReadRepair
             Set<InetAddressAndPort> contacted = Sets.newHashSet(repair.initialContacts);
             Token replicaToken = ((SinglePartitionReadCommand) command).partitionKey().getToken();
             Iterable<InetAddressAndPort> candidates = getCandidatesForToken(replicaToken);
-            boolean speculated = false;
-            for (InetAddressAndPort endpoint: Iterables.filter(candidates, e -> !contacted.contains(e)))
+
+            InetAddressAndPort endpoint = Iterables.find(candidates, e -> !contacted.contains(e), null);
+            if (null != endpoint)
             {
-                speculated = true;
                 Tracing.trace("Enqueuing speculative full data read to {}", endpoint);
                 sendReadCommand(endpoint, repair.readCallback);
-                break;
-            }
-
-            if (speculated)
                 ReadRepairMetrics.speculatedRead.mark();
+            }
         }
     }
 }
