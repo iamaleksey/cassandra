@@ -58,6 +58,7 @@ public class UpdateParameters
                             RegularAndStaticColumns updatedColumns,
                             QueryOptions options,
                             long timestamp,
+                            int nowInSec,
                             int ttl,
                             Map<DecoratedKey, Partition> prefetchedRows)
     throws InvalidRequestException
@@ -66,7 +67,7 @@ public class UpdateParameters
         this.updatedColumns = updatedColumns;
         this.options = options;
 
-        this.nowInSec = options.getNowInSeconds();
+        this.nowInSec = nowInSec;
         this.timestamp = timestamp;
         this.ttl = ttl;
 

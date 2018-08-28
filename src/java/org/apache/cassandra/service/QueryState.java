@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Represents the state related to a given query.
@@ -32,6 +33,7 @@ public class QueryState
 {
     private final ClientState clientState;
     private volatile UUID preparedTracingSession;
+    private int nowInSeconds = Integer.MIN_VALUE;
 
     public QueryState(ClientState clientState)
     {
@@ -58,6 +60,13 @@ public class QueryState
     public long getTimestamp()
     {
         return clientState.getTimestamp();
+    }
+
+    public int getNowInSeconds()
+    {
+        if (nowInSeconds == Integer.MIN_VALUE)
+            nowInSeconds = FBUtilities.nowInSeconds();
+        return nowInSeconds;
     }
 
     public boolean traceNextQuery()

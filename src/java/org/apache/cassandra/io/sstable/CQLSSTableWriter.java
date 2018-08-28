@@ -64,6 +64,7 @@ import org.apache.cassandra.schema.Types;
 import org.apache.cassandra.schema.Views;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.FBUtilities;
 
 /**
  * Utility to write SSTables.
@@ -257,8 +258,9 @@ public class CQLSSTableWriter implements Closeable
                                                        insert.updatedColumns(),
                                                        options,
                                                        insert.getTimestamp(now, options),
+                                                       FBUtilities.nowInSeconds(),
                                                        insert.getTimeToLive(options),
-                                                       Collections.<DecoratedKey, Partition>emptyMap());
+                                                       Collections.emptyMap());
 
         try
         {
