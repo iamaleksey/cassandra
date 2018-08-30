@@ -484,6 +484,7 @@ public abstract class ModificationStatement implements CQLStatement
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
                                                    queryState.getClientState(),
+                                                   options.getNowInSeconds(),
                                                    queryStartNanoTime))
         {
             return new ResultMessage.Rows(buildCasResultSet(result, options));

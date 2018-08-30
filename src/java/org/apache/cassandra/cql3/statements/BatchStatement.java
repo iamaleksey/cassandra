@@ -443,6 +443,7 @@ public class BatchStatement implements CQLStatement
                                                    options.getSerialConsistency(),
                                                    options.getConsistency(),
                                                    state.getClientState(),
+                                                   options.getNowInSeconds(),
                                                    queryStartNanoTime))
         {
 
