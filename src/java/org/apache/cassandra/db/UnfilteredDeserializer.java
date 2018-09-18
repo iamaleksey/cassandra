@@ -245,8 +245,12 @@ public abstract class UnfilteredDeserializer
 
         // The next Unfiltered to return, computed by hasNext()
         private Unfiltered next;
-        // A temporary storage for an unfiltered that isn't returned next but should be looked at just afterwards
-        private Unfiltered saved;
+
+        // Saved position in the input after the next Unfiltered that will be consumed
+        private long nextConsumedPosition;
+
+        // A temporary storage for an Unfiltered that isn't returned next but should be looked at just afterwards
+        private Stash stash;
 
         private boolean isFirst = true;
 
@@ -258,7 +262,15 @@ public abstract class UnfilteredDeserializer
 
         // Tracks the size of the last LegacyAtom read from disk, because this needs to be accounted
         // for when marking lastConsumedPosition after readNext/skipNext
-        private long bytesReadForNextAtom;
+        // Reading/skipping an Unfiltered consumes LegacyAtoms from the underlying legacy atom iterator
+        // e.g. hasNext() -> iterator.hasNext() -> iterator.readRow() -> atoms.next()
+        // The stop condition of the loop which groups legacy atoms into rows causes that AtomIterator
+        // to read in the first atom which doesn't belong in the row. So by that point, our position
+        // is actually past the end of the next Unfiltered. To compensate, we record the size of
+        // the last LegacyAtom read and subtract it from the current position when we calculate lastConsumedPosition.
+        // If we don't, then when reading an indexed block, we can over correct and may think that we've
+        // exhausted the block before we actually have.
+        private long bytesReadForNextAtom = 0L;
 
         private OldFormatDeserializer(CFMetaData metadata,
                                       DataInputPlus in,
@@ -313,27 +325,51 @@ public abstract class UnfilteredDeserializer
             {
                 while (next == null)
                 {
-                    if (saved == null && !iterator.hasNext())
-                        return false;
-
-                    next = saved == null ? iterator.next() : saved;
-                    saved = null;
+                    if (null != stash)
+                    {
+                        next = stash.unfiltered;
+                        nextConsumedPosition = stash.consumedPosition;
+                        stash = null;
+                    }
+                    else
+                    {
+                        if (!iterator.hasNext())
+                            return false;
+                        next = iterator.next();
+                        nextConsumedPosition = currentPosition() - bytesReadForNextAtom;
+                    }
 
                     // The sstable iterators assume that if there is one, the static row is the first thing this deserializer will return.
                     // However, in the old format, a range tombstone with an empty start would sort before any static cell. So we should
                     // detect that case and return the static parts first if necessary.
-                    if (isFirst && iterator.hasNext() && isStatic(iterator.peek()))
+                    if (isFirst)
                     {
-                        saved = next;
-                        next = iterator.next();
+                        if (iterator.hasNext())
+                        {
+                            stash = new Stash(iterator.next(), currentPosition() - bytesReadForNextAtom);
+
+                            // reorder next and stash (see the comment above that explains why)
+                            if (isStatic(stash.unfiltered))
+                            {
+                                Unfiltered unfiltered = stash.unfiltered;
+                                stash.unfiltered = next;
+                                next = unfiltered;
+
+                                long consumedPosition = stash.consumedPosition;
+                                stash.consumedPosition = nextConsumedPosition;
+                                nextConsumedPosition = consumedPosition;
+                            }
+                        }
+
+                        isFirst = false;
                     }
-                    isFirst = false;
 
                     // When reading old tables, we sometimes want to skip static data (due to how staticly defined column of compact
                     // tables are handled).
                     if (skipStatic && isStatic(next))
                         next = null;
                 }
+
                 return true;
             }
             catch (IOError e)
@@ -376,16 +412,13 @@ public abstract class UnfilteredDeserializer
                 throw new IllegalStateException();
             Unfiltered toReturn = next;
             next = null;
-            lastConsumedPosition = currentPosition() - bytesReadForNextAtom();
+            lastConsumedPosition = nextConsumedPosition;
             return toReturn;
         }
 
         public void skipNext() throws IOException
         {
-            if (!hasNext())
-                throw new UnsupportedOperationException();
-            next = null;
-            lastConsumedPosition = currentPosition() - bytesReadForNextAtom();
+            readNext();
         }
 
         public long bytesReadForUnconsumedData()
@@ -396,28 +429,26 @@ public abstract class UnfilteredDeserializer
             return currentPosition() - lastConsumedPosition;
         }
 
-        // Reading/skipping an Unfiltered consumes LegacyAtoms from the underlying legacy atom iterator
-        // e.g. hasNext() -> iterator.hasNext() -> iterator.readRow() -> atoms.next()
-        // The stop condition of the loop which groups legacy atoms into rows causes that AtomIterator
-        // to read in the first atom which doesn't belong in the row. So by that point, our position
-        // is actually past the end of the next Unfiltered. To compensate, we record the size of
-        // the last LegacyAtom read and subtract it from the current position when we calculate lastConsumedPosition.
-        // If we don't, then when reading an indexed block, we can over correct and may think that we've
-        // exhausted the block before we actually have.
-        private long bytesReadForNextAtom()
-        {
-            // If we've read anything at all then we will have recorded this in bytesReadForNextAtom,
-            // but being extra careful here just incase this method is called before any reads happen.
-            return iterator.atoms.next == null ? 0 : bytesReadForNextAtom;
-        }
-
         public void clearState()
         {
             next = null;
-            saved = null;
+            stash = null;
+            isFirst = true;
             iterator.clearState();
             lastConsumedPosition = currentPosition();
             bytesReadForNextAtom = 0;
+        }
+
+        private static final class Stash
+        {
+            private Unfiltered unfiltered;
+            long consumedPosition;
+
+            private Stash(Unfiltered unfiltered, long consumedPosition)
+            {
+                this.unfiltered = unfiltered;
+                this.consumedPosition = consumedPosition;
+            }
         }
 
         // Groups atoms from the input into proper Unfiltered.
@@ -543,7 +574,7 @@ public abstract class UnfilteredDeserializer
             // Wraps the input of the deserializer to provide an iterator (and skip shadowed atoms).
             // Note: this could use guava AbstractIterator except that we want to be able to clear
             // the internal state of the iterator so it's cleaner to do it ourselves.
-            private class AtomIterator implements PeekingIterator<LegacyLayout.LegacyAtom>
+            private static class AtomIterator implements PeekingIterator<LegacyLayout.LegacyAtom>
             {
                 private final Supplier<LegacyLayout.LegacyAtom> atomReader;
                 private boolean isDone;
