@@ -369,8 +369,8 @@ public abstract class UnfilteredDeserializer
                             }
                         }
 
-                        couldBeStartOfPartition = false;
                     }
+                    couldBeStartOfPartition = false;
 
                     // When reading old tables, we sometimes want to skip static data (due to how staticly defined column of compact
                     // tables are handled).
