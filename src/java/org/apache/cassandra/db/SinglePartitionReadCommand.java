@@ -36,6 +36,7 @@ import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableReadsListener;
@@ -686,12 +687,19 @@ public class SinglePartitionReadCommand extends ReadCommand
                 if (partition == null)
                     continue;
 
-                @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
+                // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
+                @SuppressWarnings("resource")
                 UnfilteredRowIterator iter = filter.getUnfilteredRowIterator(columnFilter(), partition);
-                @SuppressWarnings("resource") // same as above
-                UnfilteredRowIterator maybeCopied = copyOnHeap ? UnfilteredRowIterators.cloningIterator(iter, HeapAllocator.instance) : iter;
+
+                if (copyOnHeap)
+                    iter = UnfilteredRowIterators.cloningIterator(iter, HeapAllocator.instance);
+
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
-                iterators.add(isForThrift() ? ThriftResultsMerger.maybeWrap(maybeCopied, nowInSec()) : maybeCopied);
+
+                if (isForThrift())
+                    iter = ThriftResultsMerger.maybeWrap(iter, nowInSec());
+
+                iterators.add(RTBoundValidator.validate(iter, RTBoundValidator.Stage.MEMTABLE, false));
             }
             /*
              * We can't eliminate full sstables based on the timestamp of what we've already read like
@@ -733,16 +741,24 @@ public class SinglePartitionReadCommand extends ReadCommand
                     continue;
                 }
 
-                @SuppressWarnings("resource") // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
-                UnfilteredRowIterator iter = filter.filter(sstable.iterator(partitionKey(),
-                                                                            columnFilter(),
-                                                                            filter.isReversed(),
-                                                                            isForThrift(),
-                                                                            metricsCollector));
                 if (!sstable.isRepaired())
                     oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, sstable.getMinLocalDeletionTime());
 
-                iterators.add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter);
+                // 'iter' is added to iterators which is closed on exception, or through the closing of the final merged iterator
+                @SuppressWarnings("resource")
+                UnfilteredRowIterator iter = filter.filter(
+                    sstable.iterator(partitionKey(),
+                                     columnFilter(),
+                                     filter.isReversed(),
+                                     isForThrift(),
+                                     metricsCollector)
+                );
+
+                if (isForThrift())
+                    iter = ThriftResultsMerger.maybeWrap(iter, nowInSec());
+
+                iterators.add(RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false));
+
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone, iter.partitionLevelDeletion().markedForDeleteAt());
             }
 
@@ -793,7 +809,6 @@ public class SinglePartitionReadCommand extends ReadCommand
                 DecoratedKey key = merged.partitionKey();
                 cfs.metric.samplers.get(TableMetrics.Sampler.READS).addSample(key.getKey(), key.hashCode(), 1);
             }
-
             return merged;
         }
         catch (RuntimeException | Error e)
