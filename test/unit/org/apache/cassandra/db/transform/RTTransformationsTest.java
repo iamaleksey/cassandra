@@ -197,7 +197,7 @@ public final class RTTransformationsTest
         , row(1, "a", "2", "")
         , bound(Kind.INCL_END_BOUND, 0, "a", "2")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         drain(iterator);
     }
 
@@ -213,7 +213,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         drain(iterator);
     }
 
@@ -237,7 +237,7 @@ public final class RTTransformationsTest
 
         , bound(Kind.INCL_END_BOUND, 0, "a")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         drain(iterator);
     }
 
@@ -261,7 +261,7 @@ public final class RTTransformationsTest
 
         , bound(Kind.INCL_START_BOUND, 0, "a")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         drain(iterator);
     }
 
@@ -273,7 +273,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_END_BOUND, 1, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
     }
 
@@ -285,7 +285,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_START_BOUND, 1, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
     }
 
@@ -299,7 +299,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_END_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // duplicated end bound
@@ -309,7 +309,7 @@ public final class RTTransformationsTest
         , bound(Kind.INCL_END_BOUND, 0, "a", "1")
         , bound(Kind.INCL_END_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // absent open bound
@@ -317,7 +317,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_END_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // absent end bound
@@ -325,7 +325,7 @@ public final class RTTransformationsTest
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         , row(1, "a", "1", "")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
     }
 
@@ -339,7 +339,7 @@ public final class RTTransformationsTest
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // duplicated end bound
@@ -349,7 +349,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // absent open bound
@@ -357,7 +357,7 @@ public final class RTTransformationsTest
         , bound(Kind.INCL_END_BOUND, 0, "a", "1")
         , row(1, "a", "1", "")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
 
         // absent end bound
@@ -365,7 +365,7 @@ public final class RTTransformationsTest
         , row(1, "a", "1", "")
         , bound(Kind.INCL_START_BOUND, 0, "a", "1")
         );
-        iterator = validate(iterator, Stage.OTHER, true);
+        iterator = validate(iterator, Stage.PROCESSED, true);
         assertThrowsISEIterated(iterator);
     }
 

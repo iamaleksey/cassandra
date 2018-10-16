@@ -877,7 +877,12 @@ public class SinglePartitionReadCommand extends ReadCommand
                 UnfilteredRowIterator clonedFilter = copyOnHeap
                                                    ? UnfilteredRowIterators.cloningIterator(iter, HeapAllocator.instance)
                                                    : iter;
-                result = add(isForThrift() ? ThriftResultsMerger.maybeWrap(clonedFilter, nowInSec()) : clonedFilter, result, filter, false);
+                result = add(
+                    RTBoundValidator.validate(isForThrift() ? ThriftResultsMerger.maybeWrap(clonedFilter, nowInSec()) : clonedFilter, RTBoundValidator.Stage.MEMTABLE, false),
+                    result,
+                    filter,
+                    false
+                );
             }
         }
 
@@ -935,7 +940,13 @@ public class SinglePartitionReadCommand extends ReadCommand
 
                 if (sstable.isRepaired())
                     onlyUnrepaired = false;
-                result = add(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter, result, filter, sstable.isRepaired());
+
+                result = add(
+                    RTBoundValidator.validate(isForThrift() ? ThriftResultsMerger.maybeWrap(iter, nowInSec()) : iter, RTBoundValidator.Stage.SSTABLE, false),
+                    result,
+                    filter,
+                    sstable.isRepaired()
+                );
             }
         }
 

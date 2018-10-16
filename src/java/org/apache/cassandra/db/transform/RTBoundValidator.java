@@ -33,7 +33,7 @@ import org.apache.cassandra.db.rows.UnfilteredRowIterator;
  */
 public final class RTBoundValidator extends Transformation<UnfilteredRowIterator>
 {
-    public enum Stage { MEMTABLE, SSTABLE, MERGED, PURGED, PROCESSED, OTHER }
+    public enum Stage { MEMTABLE, SSTABLE, MERGED, PURGED, PROCESSED }
 
     private final Stage stage;
     private final boolean enforceIsClosed;
