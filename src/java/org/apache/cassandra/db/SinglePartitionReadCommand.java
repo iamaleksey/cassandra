@@ -36,6 +36,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.lifecycle.*;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
+import org.apache.cassandra.db.transform.RTBoundValidator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.exceptions.RequestExecutionException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
@@ -608,7 +609,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
                 // Memtable data is always considered unrepaired
                 oldestUnrepairedTombstone = Math.min(oldestUnrepairedTombstone, partition.stats().minLocalDeletionTime);
-                inputCollector.addMemtableIterator(iter);
+                inputCollector.addMemtableIterator(RTBoundValidator.validate(iter, RTBoundValidator.Stage.MEMTABLE, false));
 
                 mostRecentPartitionTombstone = Math.max(mostRecentPartitionTombstone,
                                                         iter.partitionLevelDeletion().markedForDeleteAt());
@@ -809,7 +810,12 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                 if (iter.isEmpty())
                     continue;
 
-                result = add(iter, result, filter, false);
+                result = add(
+                    RTBoundValidator.validate(iter, RTBoundValidator.Stage.MEMTABLE, false),
+                    result,
+                    filter,
+                    false
+                );
             }
         }
 
@@ -870,7 +876,13 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
 
                 if (sstable.isRepaired())
                     onlyUnrepaired = false;
-                result = add(iter, result, filter, sstable.isRepaired());
+
+                result = add(
+                    RTBoundValidator.validate(iter, RTBoundValidator.Stage.SSTABLE, false),
+                    result,
+                    filter,
+                    sstable.isRepaired()
+                );
             }
         }
 

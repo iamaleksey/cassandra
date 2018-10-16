@@ -325,18 +325,18 @@ public class SSTableReversedIterator extends AbstractSSTableIterator
             if (super.hasNextInternal())
                 return true;
 
-            // We have nothing more for our current block, move the next one (so the one before on disk).
-            int nextBlockIdx = indexState.currentBlockIdx() - 1;
-            if (nextBlockIdx < 0 || nextBlockIdx < lastBlockIdx)
-                return false;
+             // We have nothing more for our current block, move the next one (so the one before on disk).
+             int nextBlockIdx = indexState.currentBlockIdx() - 1;
+             if (nextBlockIdx < 0 || nextBlockIdx < lastBlockIdx)
+                 return false;
 
-            // The slice start can be in
-            indexState.setToBlock(nextBlockIdx);
-            readCurrentBlock(true, nextBlockIdx != lastBlockIdx);
-            // since that new block is within the bounds we've computed in setToSlice(), we know there will
-            // always be something matching the slice unless we're on the lastBlockIdx (in which case there
-            // may or may not be results, but if there isn't, we're done for the slice).
-            return iterator.hasNext();
+             // The slice start can be in
+             indexState.setToBlock(nextBlockIdx);
+             readCurrentBlock(true, nextBlockIdx != lastBlockIdx);
+             // since that new block is within the bounds we've computed in setToSlice(), we know there will
+             // always be something matching the slice unless we're on the lastBlockIdx (in which case there
+             // may or may not be results, but if there isn't, we're done for the slice).
+             return iterator.hasNext();
         }
 
         /**
