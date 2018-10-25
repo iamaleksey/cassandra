@@ -159,7 +159,23 @@ public class Slice
     public static boolean isEmpty(ClusteringComparator comparator, ClusteringBound start, ClusteringBound end)
     {
         assert start.isStart() && end.isEnd();
-        return comparator.compare(end, start) <= 0;
+
+        if (comparator.compare(end, start) <= 0)
+            return true;
+
+        // the comparator check doesn't catch slices from statements like
+        // 'c >= 0 AND c < 0' which also won't return results
+        if (start.size() == end.size() && (start.isExclusive() || end.isExclusive()))
+        {
+            for (int i=0; i<start.size(); i++)
+            {
+                if (comparator.compareComponent(i, start.get(i), end.get(i)) != 0)
+                    return false;
+            }
+            return true;
+        }
+
+        return false;
     }
 
     /**
