@@ -160,22 +160,14 @@ public class Slice
     {
         assert start.isStart() && end.isEnd();
 
-        if (comparator.compare(end, start) <= 0)
-            return true;
+        int cmp = comparator.compare(start, end);
 
-        // the comparator check doesn't catch slices from statements like
-        // 'c >= 0 AND c < 0' which also won't return results
-        if (start.size() == end.size() && (start.isExclusive() || end.isExclusive()))
-        {
-            for (int i=0; i<start.size(); i++)
-            {
-                if (comparator.compareComponent(i, start.get(i), end.get(i)) != 0)
-                    return false;
-            }
+        if (cmp < 0)
+            return false;
+        else if (cmp > 0)
             return true;
-        }
-
-        return false;
+        else
+            return start.isExclusive() || end.isExclusive();
     }
 
     /**
