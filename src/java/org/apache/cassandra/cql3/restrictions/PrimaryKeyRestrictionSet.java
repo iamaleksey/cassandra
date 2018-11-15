@@ -20,8 +20,6 @@ package org.apache.cassandra.cql3.restrictions;
 import java.nio.ByteBuffer;
 import java.util.*;
 
-import com.google.common.collect.Lists;
-
 import org.apache.cassandra.config.CFMetaData;
 import org.apache.cassandra.config.ColumnDefinition;
 import org.apache.cassandra.cql3.QueryOptions;
@@ -195,14 +193,18 @@ final class PrimaryKeyRestrictionSet extends AbstractPrimaryKeyRestrictions impl
                 // It is clearly a hack but it does not make a lot of sense to refactor 2.2 for that as the problem is
                 // already solved in 3.0.
                 List<Composite> composites = filterAndSort(setEocs(r, bound, builder.build()));
-                return Lists.transform(composites, new com.google.common.base.Function<Composite, Composite>()
-                {
-                    @Override
-                    public Composite apply(Composite composite)
-                    {
-                        return composite.isEmpty() ? Composites.EMPTY: composite;
-                    }
-                });
+
+                boolean hasEmptyComposites = false;
+                for (Composite c : composites)
+                    hasEmptyComposites |= c.isEmpty();
+
+                if (!hasEmptyComposites)
+                    return composites;
+
+                ArrayList<Composite> transformed = new ArrayList<>(composites.size());
+                for (Composite c : composites)
+                    transformed.add(c.isEmpty() ? Composites.EMPTY : c);
+                return transformed;
             }
 
             r.appendBoundTo(cfm, builder, bound, options);
