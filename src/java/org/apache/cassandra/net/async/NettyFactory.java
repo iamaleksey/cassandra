@@ -94,13 +94,12 @@ public final class NettyFactory
     // Provides hamming distance of 8 for messages up to length 105 bits;
     // we only support 8-64 bits at present, with an expected range of 40-48.
     static final int CRC24_POLY = 0x1974F0B;
-    private static final int[] CRC24_LOOKUP = Crc24Lookup.compute();
 
     /**
      * NOTE: the order of bytes must reach the wire in the same order the CRC is computed, with the CRC
      * immediately following in a trailer.  Since we read in least significant byte order, if you
      * write to a buffer using putInt or putLong, the byte order will be reversed and
-     * you will lose the guarantee of protection from bit storm corruptions of 24 bits in length.
+     * you will lose the guarantee of protection from burst corruptions of 24 bits in length.
      *
      * Make sure either to write byte-by-byte to the wire, or to use Integer/Long.reverseBytes if you
      * write to a BIG_ENDIAN buffer.
@@ -108,6 +107,10 @@ public final class NettyFactory
      * See http://users.ece.cmu.edu/~koopman/pubs/ray06_crcalgorithms.pdf
      *
      * Complain to the ethernet spec writers, for having inverse bit to byte significance order.
+     *
+     * Note we use the most naive algorithm here.  We support at most 8 bytes, and typically supply
+     * 5 or fewer, so any efficiency of a table approach is swallowed by the time to hit L3, even
+     * for a tiny (4bit) table.
      *
      * @param bytes an up to 8-byte register containing bytes to compute the CRC over
      *              the bytes AND bits will be read least-significant to most significant.
@@ -120,31 +123,16 @@ public final class NettyFactory
         while (len-- > 0)
         {
             crc ^= (bytes & 0xff) << 16;
-            crc = (crc << 8) ^ CRC24_LOOKUP[(crc >> 16) & 0xff];
             bytes >>= 8;
-        }
-        return crc & 0xffffff;
-    }
 
-    private static class Crc24Lookup
-    {
-        // https://en.wikipedia.org/wiki/Computation_of_cyclic_redundancy_checks#Generating_the_tables
-        private static int[] compute()
-        {
-            int[] lookup = new int[256];
-            int crc = 0x800000;
-            for (int i = 1 ; i < 256 ; i <<= 1)
+            for (int i = 0; i < 8; i++)
             {
-                if ((crc & 0x800000) != 0)
-                    crc = (crc << 1) ^ CRC24_POLY;
-                else
-                    crc <<= 1;
-
-                for (int j = 0 ; j < i ; ++j)
-                    lookup[i + j] = crc ^ lookup[j];
+                crc <<= 1;
+                if ((crc & 0x1000000) != 0)
+                    crc ^= CRC24_POLY;
             }
-            return lookup;
         }
+        return crc;
     }
 
     /**
