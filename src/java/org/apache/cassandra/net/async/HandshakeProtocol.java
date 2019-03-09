@@ -353,6 +353,7 @@ public class HandshakeProtocol
             }
         }
 
+        @SuppressWarnings("resource")
         static ConfirmOutboundPre40 maybeDecode(ByteBuf in)
         {
             in.markReaderIndex();

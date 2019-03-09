@@ -371,6 +371,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
              : processLargeMessage(buf, messageSize);
     }
 
+    @SuppressWarnings("resource")
     private boolean processSmallMessage(ByteBuf buf, int messageSize)
     {
         if (buf.readableBytes() < messageSize)

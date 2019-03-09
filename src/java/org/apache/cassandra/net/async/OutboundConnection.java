@@ -615,6 +615,7 @@ public class OutboundConnection
          *
          * If there is more work to be done, we submit ourselves for execution once the eventLoop has time.
          */
+        @SuppressWarnings("resource")
         boolean doRun()
         {
             if (!isWritable)
@@ -820,6 +821,7 @@ public class OutboundConnection
             }
         }
 
+        @SuppressWarnings("resource")
         boolean doRun()
         {
             Message<?> send = queue.tryPoll(System.nanoTime(), this::schedule);
