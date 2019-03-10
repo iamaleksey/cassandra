@@ -23,6 +23,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.WritableByteChannel;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelOutboundBuffer;
 import io.netty.channel.DefaultFileRegion;
 import io.netty.channel.FileRegion;
@@ -93,6 +94,10 @@ public class TestChannel extends EmbeddedChannel
             else if (msg instanceof ByteBuf)
             {
                 buf = ((ByteBuf)msg).copy();
+            }
+            else if (msg instanceof FrameEncoder.Payload)
+            {
+                buf = Unpooled.wrappedBuffer(((FrameEncoder.Payload)msg).buffer).copy();
             }
             else
             {

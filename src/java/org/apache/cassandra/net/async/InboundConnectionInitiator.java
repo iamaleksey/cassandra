@@ -81,6 +81,12 @@ public class InboundConnectionInitiator
         public void initChannel(SocketChannel channel) throws Exception
         {
             channelGroup.add(channel);
+
+            channel.config().setOption(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance);
+            channel.config().setOption(ChannelOption.SO_KEEPALIVE, true);
+            channel.config().setOption(ChannelOption.SO_REUSEADDR, true);
+            channel.config().setOption(ChannelOption.TCP_NODELAY, true); // we only send handshake messages; no point ever delaying
+
             ChannelPipeline pipeline = channel.pipeline();
 
             // order of handlers: ssl -> logger -> handshakeHandler
@@ -401,8 +407,18 @@ public class InboundConnectionInitiator
             
             // record the "true" endpoint, i.e. the one the peer is identified with, as opposed to the socket it connected over
             instance().versions.set(from, maxMessagingVersion);
-            if (initiate.withCompression)
-                pipeline.addLast("lz4", NettyFactory.getLZ4Decoder(useMessagingVersion));
+
+            FrameDecoder frameDecoder;
+            if (initiate.withCompression && useMessagingVersion >= VERSION_40)
+                frameDecoder = FrameDecoderLZ4.fast();
+            else if (initiate.withCompression)
+                frameDecoder = FrameDecoderLegacyLZ4.instance;
+            else if (initiate.withCrc)
+                frameDecoder = FrameDecoderCrc.create();
+            else
+                frameDecoder = FrameDecoderNone.instance;
+
+            frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =
                 instance().getInbound(from).createHandler(pipeline.channel(), useMessagingVersion);

@@ -45,7 +45,7 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
-import static org.apache.cassandra.net.async.NettyFactory.crc24;
+import static org.apache.cassandra.net.async.Crc.crc24;
 
 /*
  * * @param <T> The type of the message payload.

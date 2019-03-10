@@ -19,7 +19,6 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -31,7 +30,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
@@ -41,7 +39,6 @@ import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -51,7 +48,6 @@ import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -159,6 +155,7 @@ public class OutboundConnection
     private volatile OutboundConnectionSettings template;
     private volatile OutboundConnectionSettings settings;
     private volatile int messagingVersion;
+    private volatile FrameEncoder.PayloadAllocator payloadAllocator;
 
     /*
      * All of the volatile fields may only be updated by the eventLoop.
@@ -620,12 +617,11 @@ public class OutboundConnection
             if (!isWritable)
                 return false;
 
-            // TODO: this is inaccurate if old messaging version - will still send eventually, just maybe not all in this visit, so probably ok?
             int maxSendBytes = (int) min(queueSizeInBytes - flushingBytes, LARGE_MESSAGE_THRESHOLD);
             if (maxSendBytes == 0)
                 return false;
 
-            ByteBuffer sending = null;
+            FrameEncoder.Payload sending = null;
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
             int sendingBytes = 0;
             int sendingCount = 0;
@@ -634,8 +630,8 @@ public class OutboundConnection
                 if (withLock == null)
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
 
-                sending = BufferPool.get(maxSendBytes, BufferType.OFF_HEAP);
-                DataOutputBufferFixed out = new DataOutputBufferFixed(sending);
+                sending = payloadAllocator.allocate(true, maxSendBytes);
+                DataOutputBufferFixed out = new DataOutputBufferFixed(sending.buffer);
 
                 Message<?> next;
                 while ( null != (next = withLock.peek()) )
@@ -652,65 +648,54 @@ public class OutboundConnection
                             //     size was calculated for the wrong messaging version when enqueued.
                             //     In this case we want to write it anyway, so simply allocate a large enough buffer.
 
-                            if (sending.position() > 0)
+                            if (sendingBytes > 0)
                                 break;
 
-                            BufferPool.put(sending);
+                            sending.release();
                             sending = null; // set to null to prevent double-release if we fail to allocate our new buffer
-                            sending = BufferPool.get(messageSize, BufferType.OFF_HEAP);
-                            out = new DataOutputBufferFixed(sending);
+                            sending = payloadAllocator.allocate(true, messageSize);
+                            out = new DataOutputBufferFixed(sending.buffer);
                         }
 
                         Tracing.instance.traceOutgoingMessage(next, settings.connectTo);
                         Message.serializer.serialize(next, out, messagingVersion);
 
-                        if (sending.position() != sendingBytes + messageSize)
-                            throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.position() - sendingBytes));
+                        if (sending.length() != sendingBytes + messageSize)
+                            throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
 
                         canonicalSize += canonicalSize(next);
-                        ++sendingCount;
-                        sendingBytes = sending.position();
+                        sendingCount += 1;
+                        sendingBytes += messageSize;
                     }
                     catch (Throwable t)
                     {
                         onDroppedDueToError(next, t);
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
-                        sending.position(sendingBytes);
+                        sending.trim(sendingBytes);
                     }
                     withLock.removeHead(next);
                 }
+                if (0 == sendingBytes)
+                    return false;
 
-                sending.flip();
-                // if we failed to use the entire buffer, free whatever remains for other allocations
-                BufferPool.putUnusedPortion(sending);
-
-                // wrap the buffer ready to send
-                ByteBuf buf = BufferPoolAllocator.wrapUnshared(sending);
-                ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, buf);
+                sending.finish();
+                ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, sending);
                 sending = null;
 
                 if (result.isSuccess())
                 {
-                    releaseCapacity(canonicalSize);
                     sent += sendingCount;
                     sentBytes += sendingBytes;
-                    if (queueSizeInBytes > 0)
-                    {
-                        canonicalSize = 0;
-                        sendingBytes = 0;
-                        sendingCount = 0;
-                        schedule();
-                    }
                 }
                 else
                 {
                     flushingBytes += sendingBytes;
+                    setInProgress(true);
 
                     boolean hasOverflowed = flushingBytes >= settings.flushHighWaterMark;
                     if (hasOverflowed)
                         isWritable = false;
-                    setInProgress(true);
 
                     int releaseBytesFinal = canonicalSize;
                     int sendingBytesFinal = sendingBytes;
@@ -741,24 +726,25 @@ public class OutboundConnection
                             invalidateChannel(closeChannelOnFailure, future.cause());
                         }
                     });
-
-                    if (queueSizeInBytes > 0 && !hasOverflowed)
-                    {
-                        canonicalSize = 0;
-                        sendingBytes = 0;
-                        sendingCount = 0;
-                        schedule();
-                    }
+                    canonicalSize = 0;
                 }
             }
             catch (Throwable t)
             {
-                if (sending != null)
-                    BufferPool.put(sending);
-                releaseCapacity(canonicalSize);
                 droppedDueToError += sendingCount;
                 droppedBytesDueToError += sendingBytes;
                 invalidateChannel(channel, t);
+            }
+            finally
+            {
+                if (canonicalSize > 0)
+                    releaseCapacity(canonicalSize);
+
+                if (sending != null)
+                    sending.release();
+
+                if (!queue.isEmpty() && isWritable)
+                    schedule();
             }
 
             return false;
@@ -823,7 +809,7 @@ public class OutboundConnection
             if (send == null)
                 return false;
 
-            AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, DEFAULT_BUFFER_SIZE);
+            MessageOutputPlus out = new MessageOutputPlus(channel, DEFAULT_BUFFER_SIZE, payloadAllocator);
             try
             {
                 Tracing.instance.traceOutgoingMessage(send, settings.connectTo);
@@ -916,12 +902,14 @@ public class OutboundConnection
                     assert !isClosed;
                     whileDisconnected.cancel(false);
                     whileDisconnected = null;
-                    if (messagingVersion != result.success().messagingVersion)
+                    Result.Success success = result.success();
+                    if (messagingVersion != success.messagingVersion)
                     {
-                        messagingVersion = result.success().messagingVersion;
+                        messagingVersion = success.messagingVersion;
                         settings = template.withDefaults(type, messagingVersion);
                     }
-                    channel = result.success().channel;
+                    payloadAllocator = success.allocator;
+                    channel = success.channel;
                     isFailingToConnect = false;
                     isConnected = true;
                     ++successfulConnections;
@@ -1074,6 +1062,7 @@ public class OutboundConnection
                 // no need to wait until the channel is closed to set ourselves as disconnected (and potentially open a new channel)
                 Channel close = channel;
                 isConnected = false;
+                payloadAllocator = null;
                 channel = null;
                 scheduleMaintenanceWhileDisconnected();
                 close.close().addListener(future -> {

@@ -49,12 +49,9 @@ import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
 import org.apache.cassandra.net.async.AsyncChannelPromise;
-import org.apache.cassandra.net.async.NettyFactory;
-import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
+import org.apache.cassandra.net.async.StreamMessageOutputPlus;
 import org.apache.cassandra.streaming.StreamConnectionFactory;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.StreamingMessageSender;
@@ -64,8 +61,6 @@ import org.apache.cassandra.streaming.messages.OutgoingStreamMessage;
 import org.apache.cassandra.streaming.messages.StreamInitMessage;
 import org.apache.cassandra.streaming.messages.StreamMessage;
 import org.apache.cassandra.utils.FBUtilities;
-
-import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 
 /**
  * Responsible for sending {@link StreamMessage}s to a given peer. We manage an array of netty {@link Channel}s
@@ -328,7 +323,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
                     throw new IllegalStateException("channel's transferring state is currently set to true. refusing to start new stream");
 
                 // close the DataOutputStreamPlus as we're done with it - but don't close the channel
-                try (DataOutputStreamPlus outPlus = new AsyncChannelOutputPlus(channel, 1 << 20))
+                try (DataOutputStreamPlus outPlus = new StreamMessageOutputPlus(channel))
                 {
                     StreamMessage.serialize(msg, outPlus, streamingVersion, session);
                     channel.flush();

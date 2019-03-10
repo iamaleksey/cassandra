@@ -20,31 +20,28 @@ package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.List;
 import java.util.zip.CRC32;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.handler.codec.MessageToMessageEncoder;
+import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.net.async.NettyFactory.crc24;
-import static org.apache.cassandra.net.async.NettyFactory.crc32;
+import static org.apache.cassandra.net.async.Crc.crc24;
+import static org.apache.cassandra.net.async.Crc.crc32;
 
 @ChannelHandler.Sharable
-public class LZ4Encoder extends MessageToMessageEncoder<ByteBuf>
+class FrameEncoderLZ4 extends FrameEncoder
 {
-    public static final LZ4Encoder fastInstance = new LZ4Encoder(LZ4Factory.fastestInstance().fastCompressor());
+    public static final FrameEncoderLZ4 fastInstance = new FrameEncoderLZ4(LZ4Factory.fastestInstance().fastCompressor());
 
     private final LZ4Compressor compressor;
 
-    public LZ4Encoder(LZ4Compressor compressor)
+    public FrameEncoderLZ4(LZ4Compressor compressor)
     {
         this.compressor = compressor;
     }
@@ -52,24 +49,26 @@ public class LZ4Encoder extends MessageToMessageEncoder<ByteBuf>
     private static final int HEADER_LENGTH = 8;
     private static final int HEADER_AND_TRAILER_LENGTH = 12;
 
-    private static long encodeHeaderWithoutCrc(long compressedLength, long uncompressedLength)
+    private static void writeHeader(ByteBuffer frame, boolean isSelfContained, long compressedLength, long uncompressedLength)
     {
-        return compressedLength | (uncompressedLength << 20);
-    }
+        long header5b = compressedLength | (uncompressedLength << 17);
+        if (isSelfContained)
+            header5b |= 1L << 34;
 
-    private static void writeHeaderWithCrc(ByteBuffer frame, long header5b, long crc)
-    {
-        long header8b = header5b | (crc << 40);;
+        long crc = crc24(header5b, 5);
+
+        long header8b = header5b | (crc << 40);
         if (frame.order() == ByteOrder.BIG_ENDIAN)
             header8b = Long.reverseBytes(header8b);
+
         frame.putLong(0, header8b);
     }
 
-    public ByteBuffer encode(ByteBuffer in)
+    public ByteBuf encode(boolean isSelfContained, ByteBuffer in)
     {
         int uncompressedLength = in.remaining();
-        if (uncompressedLength >= 1 << 20)
-            throw new IllegalArgumentException("Maximum uncompressed payload size is 1MiB");
+        if (uncompressedLength >= 1 << 17)
+            throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
 
         int maxOutputLength = compressor.maxCompressedLength(uncompressedLength);
         ByteBuffer frame = BufferPool.get(HEADER_AND_TRAILER_LENGTH + maxOutputLength, BufferType.OFF_HEAP);
@@ -84,8 +83,7 @@ public class LZ4Encoder extends MessageToMessageEncoder<ByteBuf>
                 uncompressedLength = 0;
             }
 
-            long header5b = encodeHeaderWithoutCrc(compressedLength, uncompressedLength);
-            writeHeaderWithCrc(frame, header5b, crc24(header5b, 5));
+            writeHeader(frame, isSelfContained, compressedLength, uncompressedLength);
 
             CRC32 crc = crc32();
             frame.position(HEADER_LENGTH);
@@ -102,25 +100,21 @@ public class LZ4Encoder extends MessageToMessageEncoder<ByteBuf>
             frame.position(0);
 
             BufferPool.putUnusedPortion(frame);
-            return frame;
+            return BufferPoolAllocator.wrapUnshared(frame);
         }
         catch (Throwable t)
         {
             BufferPool.put(frame);
             throw t;
         }
+        finally
+        {
+            BufferPool.put(in);
+        }
     }
 
-    protected void encode(ChannelHandlerContext ctx, ByteBuf input, List<Object> output)
+    void addLastTo(ChannelPipeline pipeline)
     {
-        if (!input.isReadable())
-        {
-            output.add(Unpooled.EMPTY_BUFFER);
-            return;
-        }
-
-        ByteBuffer in = input.internalNioBuffer(input.readerIndex(), input.readableBytes());
-        ByteBuffer out = encode(in);
-        output.add(BufferPoolAllocator.wrapUnshared(out));
+        pipeline.addLast("frameEncoderLZ4", this);
     }
 }

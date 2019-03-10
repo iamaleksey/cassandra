@@ -34,8 +34,8 @@ import org.apache.cassandra.io.util.ChannelProxy;
 import org.apache.cassandra.io.util.DataIntegrityMetadata;
 import org.apache.cassandra.io.util.DataIntegrityMetadata.ChecksumValidator;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
+import org.apache.cassandra.net.async.StreamMessageOutputPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.streaming.StreamManager.StreamRateLimiter;
@@ -83,7 +83,7 @@ public class CassandraStreamWriter
         logger.debug("[Stream #{}] Start streaming file {} to {}, repairedAt = {}, totalSize = {}", session.planId(),
                      sstable.getFilename(), session.peer, sstable.getSSTableMetadata().repairedAt, totalSize);
 
-        AsyncChannelOutputPlus out = (AsyncChannelOutputPlus) output;
+        StreamMessageOutputPlus out = (StreamMessageOutputPlus) output;
         try(ChannelProxy proxy = sstable.getDataChannel().sharedCopy();
             ChecksumValidator validator = new File(sstable.descriptor.filenameFor(Component.CRC)).exists()
                                           ? DataIntegrityMetadata.checksumValidator(sstable.descriptor)
@@ -147,7 +147,7 @@ public class CassandraStreamWriter
      *
      * @throws java.io.IOException on any I/O error
      */
-    protected long write(ChannelProxy proxy, ChecksumValidator validator, AsyncChannelOutputPlus output, long start, int transferOffset, int toTransfer, int bufferSize) throws IOException
+    protected long write(ChannelProxy proxy, ChecksumValidator validator, StreamMessageOutputPlus output, long start, int transferOffset, int toTransfer, int bufferSize) throws IOException
     {
         // the count of bytes to read off disk
         int minReadable = (int) Math.min(bufferSize, proxy.size() - start);

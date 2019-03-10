@@ -40,7 +40,7 @@ import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.KeyIterator;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
+import org.apache.cassandra.net.async.StreamMessageOutputPlus;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.OutgoingStream;
 import org.apache.cassandra.streaming.StreamOperation;
@@ -163,10 +163,10 @@ public class CassandraOutgoingFile implements OutgoingStream
         CassandraStreamHeader.serializer.serialize(header, out, version);
         out.flush();
 
-        if (shouldStreamEntireSSTable() && out instanceof AsyncChannelOutputPlus)
+        if (shouldStreamEntireSSTable() && out instanceof StreamMessageOutputPlus)
         {
             CassandraEntireSSTableStreamWriter writer = new CassandraEntireSSTableStreamWriter(sstable, session, manifest);
-            writer.write((AsyncChannelOutputPlus) out);
+            writer.write((StreamMessageOutputPlus) out);
         }
         else
         {

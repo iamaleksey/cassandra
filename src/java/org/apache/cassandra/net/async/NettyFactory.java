@@ -19,7 +19,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOption;
-import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.ServerChannel;
@@ -31,7 +30,6 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.codec.compression.Lz4FrameDecoder;
-import io.netty.handler.codec.compression.Lz4FrameEncoder;
 import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
@@ -44,7 +42,6 @@ import net.jpountz.xxhash.XXHashFactory;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.EncryptionOptions;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -60,9 +57,6 @@ public final class NettyFactory
 
     private static final int EVENT_THREADS = Integer.getInteger(Config.PROPERTY_PREFIX + "internode-event-threads", FBUtilities.getAvailableProcessors());
 
-    private static final int LEGACY_COMPRESSION_BLOCK_SIZE = 1 << 16;
-    private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
-
     /** a useful addition for debugging; simply set to true to get more data in your logs */
     static final boolean WIRETRACE = false;
     static
@@ -72,68 +66,6 @@ public final class NettyFactory
     }
 
     public static final boolean USE_EPOLL = NativeTransportService.useEpoll();
-
-    private static final FastThreadLocal<CRC32> crc32 = new FastThreadLocal<CRC32>()
-    {
-        @Override
-        protected CRC32 initialValue()
-        {
-            return new CRC32();
-        }
-    };
-
-    static CRC32 crc32()
-    {
-        CRC32 crc = crc32.get();
-        crc.reset();
-        return crc;
-    }
-
-    static final int CRC24_INIT = 0x875060;
-    // Polynomial chosen from https://users.ece.cmu.edu/~koopman/crc/index.html
-    // Provides hamming distance of 8 for messages up to length 105 bits;
-    // we only support 8-64 bits at present, with an expected range of 40-48.
-    static final int CRC24_POLY = 0x1974F0B;
-
-    /**
-     * NOTE: the order of bytes must reach the wire in the same order the CRC is computed, with the CRC
-     * immediately following in a trailer.  Since we read in least significant byte order, if you
-     * write to a buffer using putInt or putLong, the byte order will be reversed and
-     * you will lose the guarantee of protection from burst corruptions of 24 bits in length.
-     *
-     * Make sure either to write byte-by-byte to the wire, or to use Integer/Long.reverseBytes if you
-     * write to a BIG_ENDIAN buffer.
-     *
-     * See http://users.ece.cmu.edu/~koopman/pubs/ray06_crcalgorithms.pdf
-     *
-     * Complain to the ethernet spec writers, for having inverse bit to byte significance order.
-     *
-     * Note we use the most naive algorithm here.  We support at most 8 bytes, and typically supply
-     * 5 or fewer, so any efficiency of a table approach is swallowed by the time to hit L3, even
-     * for a tiny (4bit) table.
-     *
-     * @param bytes an up to 8-byte register containing bytes to compute the CRC over
-     *              the bytes AND bits will be read least-significant to most significant.
-     * @param len   the number of bytes, greater than 0 and fewer than 9, to be read from bytes
-     * @return      the least-significant bit AND byte order crc24 using the CRC24_POLY polynomial
-     */
-    public static int crc24(long bytes, int len)
-    {
-        int crc = CRC24_INIT;
-        while (len-- > 0)
-        {
-            crc ^= (bytes & 0xff) << 16;
-            bytes >>= 8;
-
-            for (int i = 0; i < 8; i++)
-            {
-                crc <<= 1;
-                if ((crc & 0x1000000) != 0)
-                    crc ^= CRC24_POLY;
-            }
-        }
-        return crc;
-    }
 
     /**
      * A factory instance that all normal, runtime code should use. Separate instances should only be used for testing.
@@ -200,9 +132,7 @@ public final class NettyFactory
                .group(acceptGroup, defaultGroup)
                .channel(transport)
                .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
-               .option(ChannelOption.SO_KEEPALIVE, true)
-               .option(ChannelOption.SO_REUSEADDR, true)
-               .option(ChannelOption.TCP_NODELAY, true); // we only send handshake messages; no point ever delaying
+               .option(ChannelOption.SO_REUSEADDR, true);
     }
 
     /**
@@ -234,45 +164,6 @@ public final class NettyFactory
 
         String encryptionType = OpenSsl.isAvailable() ? "openssl" : "jdk";
         return "enabled (" + encryptionType + ')';
-    }
-
-    static int computeCrc32(ByteBuf buffer, int startReaderIndex, int endReaderIndex)
-    {
-        CRC32 crc = crc32();
-        crc.update(buffer.internalNioBuffer(startReaderIndex, endReaderIndex - startReaderIndex));
-        return (int) crc.getValue();
-    }
-
-    static int computeCrc32(ByteBuffer buffer, int start, int end)
-    {
-        CRC32 crc = crc32();
-        updateCrc32(crc, buffer, start, end);
-        return (int) crc.getValue();
-    }
-
-    static void updateCrc32(CRC32 crc, ByteBuffer buffer, int start, int end)
-    {
-        int savePosition = buffer.position();
-        int saveLimit = buffer.limit();
-        buffer.limit(end);
-        buffer.position(start);
-        crc.update(buffer);
-        buffer.limit(saveLimit);
-        buffer.position(savePosition);
-    }
-
-    static ChannelOutboundHandlerAdapter getLZ4Encoder(int messagingVersion)
-    {
-        if (messagingVersion < VERSION_40)
-            return new Lz4FrameEncoder(LZ4Factory.fastestInstance(), false, LEGACY_COMPRESSION_BLOCK_SIZE, XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum());
-        return LZ4Encoder.fastInstance;
-    }
-
-    static ChannelInboundHandlerAdapter getLZ4Decoder(int messagingVersion)
-    {
-        if (messagingVersion < VERSION_40)
-            return new Lz4FrameDecoder(LZ4Factory.fastestInstance(), XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum());
-        return LZ4Decoder.fast();
     }
 
     public EventLoopGroup defaultGroup()

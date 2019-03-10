@@ -29,6 +29,7 @@ import org.junit.Test;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -38,7 +39,7 @@ import static java.lang.Math.*;
 // TODO: test corruption
 // TODO: use a different random seed each time
 // TODO: use quick theories
-public class LZ4Test
+public class FramingTest
 {
     static
     {
@@ -47,32 +48,42 @@ public class LZ4Test
 
     private static class SequenceOfFrames
     {
-        final List<byte[]> uncompressed;
+        final List<byte[]> original;
         final int[] boundaries;
         final ByteBuffer frames;
 
-        private SequenceOfFrames(List<byte[]> uncompressed, int[] boundaries, ByteBuffer frames)
+        private SequenceOfFrames(List<byte[]> original, int[] boundaries, ByteBuffer frames)
         {
-            this.uncompressed = uncompressed;
+            this.original = original;
             this.boundaries = boundaries;
             this.frames = frames;
         }
     }
 
     @Test
-    public void testSome() throws Exception
+    public void testRandomLZ4() throws Exception
+    {
+        testSome(FrameEncoderLZ4.fastInstance, FrameDecoderLZ4.fast());
+    }
+
+    @Test
+    public void testRandomCrc() throws Exception
+    {
+        testSome(FrameEncoderCrc.instance, FrameDecoderCrc.create());
+    }
+
+    public void testSome(FrameEncoder encoder, FrameDecoder decoder) throws Exception
     {
         Random random = new Random(0);
         for (int i = 0 ; i < 1000 ; ++i)
-            testTwoRandom(random);
+            testTwoRandom(random, encoder, decoder);
     }
 
-    private void testTwoRandom(Random random) throws Exception
+    private void testTwoRandom(Random random, FrameEncoder encoder, FrameDecoder decoder) throws Exception
     {
-        SequenceOfFrames sequenceOfFrames = pairOfFrames(random);
-        LZ4Decoder decoder = LZ4Decoder.fast();
+        SequenceOfFrames sequenceOfFrames = pairOfFrames(random, encoder);
 
-        List<byte[]> uncompressed = sequenceOfFrames.uncompressed;
+        List<byte[]> uncompressed = sequenceOfFrames.original;
         ByteBuffer frames = sequenceOfFrames.frames;
         int[] boundaries = sequenceOfFrames.boundaries;
 
@@ -90,7 +101,7 @@ public class LZ4Test
             {
                 ++prevBoundary;
                 Assert.assertTrue(out.size() >= 1 + prevBoundary);
-                verify(uncompressed.get(prevBoundary), (ByteBuf) out.get(prevBoundary));
+                verify(uncompressed.get(prevBoundary), ((FrameDecoder.IntactFrame) out.get(prevBoundary)).contents);
             }
             i = limit;
         }
@@ -104,27 +115,31 @@ public class LZ4Test
         actual.release();
     }
 
-    private static SequenceOfFrames pairOfFrames(Random random)
+    private static SequenceOfFrames pairOfFrames(Random random, FrameEncoder encoder)
     {
         int frameCount = 1 + random.nextInt(8);
         List<byte[]> uncompressed = new ArrayList<>();
-        List<ByteBuffer> compressed = new ArrayList<>();
+        List<ByteBuf> compressed = new ArrayList<>();
         int[] cumulativeCompressedLength = new int[frameCount];
         for (int i = 0 ; i < frameCount ; ++i)
         {
             byte[] bytes = randomishBytes(random);
             uncompressed.add(bytes);
 
-            ByteBuffer buffer = LZ4Encoder.fastInstance.encode(ByteBuffer.wrap(bytes));
+            FrameEncoder.Payload payload = encoder.allocator().allocate(true, bytes.length);
+            payload.buffer.put(bytes);
+            payload.finish();
+
+            ByteBuf buffer = encoder.encode(true, payload.buffer);
             compressed.add(buffer);
-            cumulativeCompressedLength[i] = (i == 0 ? 0 : cumulativeCompressedLength[i - 1]) + buffer.limit();
+            cumulativeCompressedLength[i] = (i == 0 ? 0 : cumulativeCompressedLength[i - 1]) + buffer.readableBytes();
         }
 
         ByteBuffer frames = BufferPool.get(cumulativeCompressedLength[frameCount - 1], BufferType.OFF_HEAP);
-        for (ByteBuffer buffer : compressed)
+        for (ByteBuf buffer : compressed)
         {
-            frames.put(buffer);
-            BufferPool.put(buffer);
+            frames.put(buffer.internalNioBuffer(buffer.readerIndex(), buffer.readableBytes()));
+            buffer.release();
         }
         frames.flip();
         return new SequenceOfFrames(uncompressed, cumulativeCompressedLength, frames);

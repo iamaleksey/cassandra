@@ -245,20 +245,39 @@ public class OutboundConnectionInitiator
                 int peerMessagingVersion = msg.maxMessagingVersion;
                 logger.trace("received second handshake message from peer {}, msg = {}", settings.connectTo, msg);
 
+                FrameEncoder frameEncoder = null;
                 Result result;
                 if (useMessagingVersion > 0)
                 {
                     if (useMessagingVersion < settings.acceptVersions.min || useMessagingVersion > settings.acceptVersions.max)
+                    {
                         result = incompatible(useMessagingVersion, peerMessagingVersion);
+                    }
                     else
-                        result = success(ctx.channel(), useMessagingVersion);
+                    {
+                        if (settings.withCompression)
+                            frameEncoder = FrameEncoderLZ4.fastInstance;
+                        else if (settings.withCrc)
+                            frameEncoder = FrameEncoderCrc.instance;
+                        else
+                            frameEncoder = FrameEncoderNone.instance;
+
+                        result = success(ctx.channel(), useMessagingVersion, frameEncoder.allocator());
+                    }
                 }
                 else
                 {
                     assert type != Type.STREAM;
                     // pre40 responses only
                     if (peerMessagingVersion == requestMessagingVersion)
-                        result = success(ctx.channel(), requestMessagingVersion);
+                    {
+                        if (settings.withCompression)
+                            frameEncoder = FrameEncoderLegacyLZ4.instance;
+                        else
+                            frameEncoder = FrameEncoderNone.instance;
+
+                        result = success(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
+                    }
                     else if (peerMessagingVersion < settings.acceptVersions.min)
                         result = incompatible(-1, peerMessagingVersion);
                     else
@@ -272,9 +291,14 @@ public class OutboundConnectionInitiator
                 }
 
                 if (result.isSuccess())
-                    setupPipeline(ctx.channel(), peerMessagingVersion);
+                {
+                    frameEncoder.addLastTo(ctx.pipeline());
+                    ctx.pipeline().remove(this);
+                }
                 else
+                {
                     ctx.close();
+                }
 
                 resultPromise.trySuccess(result);
             }
@@ -282,16 +306,6 @@ public class OutboundConnectionInitiator
             {
                 exceptionCaught(ctx, t);
             }
-        }
-
-        @VisibleForTesting
-        void setupPipeline(Channel channel, int messagingVersion)
-        {
-            ChannelPipeline pipeline = channel.pipeline();
-            if (settings.withCompression)
-                pipeline.addLast("lz4", NettyFactory.getLZ4Encoder(messagingVersion));
-
-            pipeline.remove(this);
         }
 
         @Override
@@ -325,11 +339,13 @@ public class OutboundConnectionInitiator
         {
             public final Channel channel;
             public final int messagingVersion;
-            Success(Channel channel, int messagingVersion)
+            public final FrameEncoder.PayloadAllocator allocator;
+            Success(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator)
             {
                 super(Outcome.SUCCESS);
                 this.channel = channel;
                 this.messagingVersion = messagingVersion;
+                this.allocator = allocator;
             }
         }
 
@@ -364,7 +380,7 @@ public class OutboundConnectionInitiator
 
         boolean isSuccess() { return outcome == Outcome.SUCCESS; }
         public Success success() { return (Success) this; }
-        static Result success(Channel channel, int messagingVersion) { return new Success(channel, messagingVersion); }
+        static Result success(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator) { return new Success(channel, messagingVersion, allocator); }
 
         public Retry retry() { return (Retry) this; }
         static Result retry(int withMessagingVersion) { return new Retry(withMessagingVersion); }

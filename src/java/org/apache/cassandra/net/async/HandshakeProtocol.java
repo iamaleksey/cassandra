@@ -41,7 +41,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.getBits;
 import static org.apache.cassandra.net.Message.validateMagic;
-import static org.apache.cassandra.net.async.NettyFactory.computeCrc32;
+import static org.apache.cassandra.net.async.Crc.computeCrc32;
 
 /**
  * Messages for the handshake phase of the internode protocol.

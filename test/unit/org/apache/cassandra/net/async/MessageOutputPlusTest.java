@@ -20,17 +20,19 @@ package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+
 import org.junit.Test;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.net.async.FrameEncoder.PayloadAllocator;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class AsyncChannelOutputPlusTest
+public class MessageOutputPlusTest
 {
 
     static
@@ -43,7 +45,7 @@ public class AsyncChannelOutputPlusTest
     {
         EmbeddedChannel channel = new TestChannel(4);
         ByteBuf read;
-        try (AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, 8))
+        try (MessageOutputPlus out = new MessageOutputPlus(channel, 8, PayloadAllocator.simple))
         {
             out.writeInt(1);
             assertEquals(0, out.flushed());
@@ -94,22 +96,6 @@ public class AsyncChannelOutputPlusTest
             read = channel.readOutbound();
             assertEquals(8, read.readableBytes());
             assertEquals(0, read.getLong(0));
-
-            out.writeToChannel(alloc -> {
-                ByteBuffer buffer = alloc.get(16);
-                buffer.putLong(1);
-                buffer.putLong(2);
-                buffer.flip();
-            }, new StreamManager.StreamRateLimiter(FBUtilities.getBroadcastAddressAndPort()));
-
-            assertEquals(40, out.position());
-            assertEquals(40, out.flushed());
-            assertEquals(40, out.flushedToNetwork());
-
-            read = channel.readOutbound();
-            assertEquals(16, read.readableBytes());
-            assertEquals(1, read.getLong(0));
-            assertEquals(2, read.getLong(8));
         }
 
     }

@@ -46,12 +46,13 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.RecoverableCRCMismatch;
 import org.apache.cassandra.net.Message.UnrecoverableCRCMismatch;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.InboundCallbacks.MessageProcessor;
 import org.apache.cassandra.net.async.InboundCallbacks.OnHandlerClosed;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageError;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
-import org.apache.cassandra.net.async.LZ4Decoder.Corruption;
+import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
@@ -159,14 +160,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         if (isClosed())
             ReferenceCountUtil.release(msg);
-        else if (msg instanceof Corruption)
-            handleCorruption((Corruption) msg);
+        else if (msg instanceof CorruptFrame)
+            handleCorruption((CorruptFrame) msg);
         else
-            doChannelRead((ByteBuf) msg);
+            doChannelRead((IntactFrame) msg);
     }
 
-    private void doChannelRead(ByteBuf buf) throws UnrecoverableCRCMismatch
+    private void doChannelRead(IntactFrame frame) throws UnrecoverableCRCMismatch
     {
+        final ByteBuf buf = frame.contents;
         final int readableBytes = buf.readableBytes();
 
         // some bytes of an expired message in the stream to skip still
@@ -239,7 +241,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     /*
      * Handle a corrupted LZ4 frame.
      */
-    private void handleCorruption(Corruption corruption) throws UnrecoverableCRCMismatch
+    private void handleCorruption(CorruptFrame corruption) throws UnrecoverableCRCMismatch
     {
         if (!corruption.isRecoverable())
             throw new UnrecoverableCRCMismatch(corruption.readCRC, corruption.computedCRC);
