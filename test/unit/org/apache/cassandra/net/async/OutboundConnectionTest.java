@@ -38,6 +38,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.EmptyMessage;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -47,6 +48,7 @@ import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 public class OutboundConnectionTest
 {
@@ -93,6 +95,12 @@ public class OutboundConnectionTest
         {
             return new Settings(type, outbound, inbound);
         }
+        Settings override(Settings settings)
+        {
+            return new Settings(settings.type != null ? settings.type : type,
+                                outbound.andThen(settings.outbound),
+                                inbound.andThen(settings.inbound));
+        }
     }
 
     private static final List<Settings> SETTINGS = ImmutableList.of(
@@ -102,19 +110,22 @@ public class OutboundConnectionTest
         Settings.LARGE.outbound(outbound -> outbound.withCompression(true))
     );
 
+    private void test(Settings extraSettings, SendTest test) throws Throwable
+    {
+        for (Settings s : SETTINGS)
+            doTest(s.override(extraSettings), test);
+    }
     private void test(SendTest test) throws Throwable
     {
-        for (Settings settings : SETTINGS)
-            test(settings, test);
+        for (Settings s : SETTINGS)
+            doTest(s, test);
     }
-    private void test(Settings settings, SendTest test) throws Throwable
+    private void doTest(Settings settings, SendTest test) throws Throwable
     {
         InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
         InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
         MessagingService.instance().removeInbound(endpoint);
-        OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint)
-                                              .withApplicationReserveSendQueueCapacityInBytes(1 << 15, new ResourceLimits.Concurrent(1 << 16))
-                                              .withApplicationSendQueueCapacityInBytes(1 << 16))
+        OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
                                               .withDefaults(settings.type, current_version);
         ResourceLimits.Static reserveCapacityInBytes = new ResourceLimits.Static(new ResourceLimits.Concurrent(outboundSettings.applicationReserveSendQueueEndpointCapacityInBytes), outboundSettings.applicationReserveSendQueueGlobalCapacityInBytes);
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
@@ -131,7 +142,7 @@ public class OutboundConnectionTest
     }
 
     @Test
-    public void testSimpleSend() throws Throwable
+    public void testSendSmall() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
             int count = 10;
@@ -156,9 +167,54 @@ public class OutboundConnectionTest
     }
 
     @Test
-    public void testInsufficientSpace() throws Throwable
+    public void testSendLarge() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int count = 10;
+            CountDownLatch received = new CountDownLatch(count);
+            Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<EmptyMessage>()
+            {
+                public void serialize(EmptyMessage emptyMessage, DataOutputPlus out, int version) throws IOException
+                {
+                    for (int i = 0 ; i < LARGE_MESSAGE_THRESHOLD + 1 ; ++i)
+                        out.writeByte(i);
+                }
+                public EmptyMessage deserialize(DataInputPlus in, int version) throws IOException
+                {
+                    in.skipBytesFully(LARGE_MESSAGE_THRESHOLD + 1);
+                    return emptyMessage;
+                }
+                public long serializedSize(EmptyMessage emptyMessage, int version)
+                {
+                    return LARGE_MESSAGE_THRESHOLD + 1;
+                }
+            });
+            Verb._TEST_1.unsafeSetHandler(() -> msg -> received.countDown());
+            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+            for (int i = 0 ; i < count ; ++i)
+                outbound.enqueue(message);
+            received.await(10L, TimeUnit.SECONDS);
+            Assert.assertEquals(10, outbound.getSubmitted());
+            Assert.assertEquals(0, outbound.getPending());
+            Assert.assertEquals(10, outbound.getSent());
+            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.getSentBytes());
+            Assert.assertEquals(0, outbound.droppedDueToOverload());
+            Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
+            Assert.assertEquals(0, outbound.droppedBytesDueToError());
+            Assert.assertEquals(0, outbound.droppedDueToError());
+            Assert.assertEquals(0, outbound.droppedDueToTimeout());
+            Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
+            Verb._TEST_1.unsafeSetHandler(() -> null);
+        });
+    }
+
+    @Test
+    public void testInsufficientSpace() throws Throwable
+    {
+        test(new Settings(null).outbound(settings -> settings
+                                         .withApplicationReserveSendQueueCapacityInBytes(1 << 15, new ResourceLimits.Concurrent(1 << 16))
+                                         .withApplicationSendQueueCapacityInBytes(1 << 16)),
+             (inbound, outbound, endpoint) -> {
 
             CountDownLatch done = new CountDownLatch(1);
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
