@@ -30,6 +30,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 public class ForwardToSerializer implements IVersionedSerializer<ForwardToContainer>
 {
@@ -42,7 +43,7 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
         List<InetAddressAndPort> targets = forwardToContainer.targets;
         if (version >= MessagingService.VERSION_40)
         {
-            out.writeVInt(targets.size());
+            out.writeUnsignedVInt(targets.size());
             for (int i = 0; i < forwardToContainer.messageIds.length; i++)
             {
                 CompactEndpointSerializationHelper.instance.serialize(targets.get(i), out, version);
@@ -69,10 +70,10 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
             int count = Ints.checkedCast(in.readUnsignedVInt());
             ids = new long[count];
             hosts = new ArrayList<>(ids.length);
-            for (int ii = 0; ii < ids.length; ii++)
+            for (int i = 0; i < ids.length; i++)
             {
                 hosts.add(CompactEndpointSerializationHelper.instance.deserialize(in, version));
-                ids[ii] = in.readVInt();
+                ids[i] = in.readUnsignedVInt();
             }
         }
         else
@@ -80,10 +81,10 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
             int count = in.readInt();
             ids = new long[count];
             hosts = new ArrayList<>(ids.length);
-            for (int ii = 0; ii < ids.length; ii++)
+            for (int i = 0; i < ids.length; i++)
             {
                 hosts.add(CompactEndpointSerializationHelper.instance.deserialize(in, version));
-                ids[ii] = in.readInt();
+                ids[i] = in.readInt();
             }
         }
         return new ForwardToContainer(hosts, ids);
@@ -91,16 +92,35 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
 
     public long serializedSize(ForwardToContainer forwardToContainer, int version)
     {
-        //Number of forward addresses, 4 bytes per for each id
-        long size = 4 +
-                    (4 * forwardToContainer.targets.size());
-        //Depending on ipv6 or ipv4 the address size is different.
-        for (InetAddressAndPort forwardTo : forwardToContainer.targets)
+        if (version >= MessagingService.VERSION_40)
         {
-            size += CompactEndpointSerializationHelper.instance.serializedSize(forwardTo, version);
-        }
+            //Number of forward addresses, 4 bytes per for each id
+            long[] ids = forwardToContainer.messageIds;
+            List<InetAddressAndPort> hosts = forwardToContainer.targets;
+            long size = VIntCoding.computeUnsignedVIntSize(ids.length);
+            //Depending on ipv6 or ipv4 the address size is different.
+            for (int i = 0 ; i < ids.length ; ++i)
+            {
+                size += VIntCoding.computeUnsignedVIntSize(ids[i]);
+                size += CompactEndpointSerializationHelper.instance.serializedSize(hosts.get(i), version);
+            }
 
-        return size;
+            return size;
+
+        }
+        else
+        {
+            //Number of forward addresses, 4 bytes per for each id
+            long size = 4 +
+                        (4 * forwardToContainer.targets.size());
+            //Depending on ipv6 or ipv4 the address size is different.
+            for (InetAddressAndPort forwardTo : forwardToContainer.targets)
+            {
+                size += CompactEndpointSerializationHelper.instance.serializedSize(forwardTo, version);
+            }
+
+            return size;
+        }
     }
 
     public static ForwardToContainer fromBytes(byte[] bytes, int version)
