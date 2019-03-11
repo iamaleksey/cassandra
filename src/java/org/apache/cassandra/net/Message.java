@@ -162,11 +162,18 @@ public class Message<T>
 
         public Message<T> build()
         {
+            if (verb == null)
+                throw new IllegalArgumentException();
             if (from == null)
                 throw new IllegalArgumentException();
             if (payload == null)
                 throw new IllegalArgumentException();
 
+            return buildUnsafe();
+        }
+
+        public Message<T> buildUnsafe()
+        {
             return new Message<>(from, payload, parameters, verb, createdAtNanos, expiresAtNanos, id);
         }
     }
