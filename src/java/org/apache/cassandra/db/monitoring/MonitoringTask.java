@@ -40,6 +40,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.System.getProperty;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 /**
@@ -70,7 +71,7 @@ class MonitoringTask
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
     private final OperationsQueue slowOperationsQueue;
-    private long lastLogTime;
+    private long lastLogTimeNanos;
 
 
     @VisibleForTesting
@@ -90,10 +91,10 @@ class MonitoringTask
         this.failedOperationsQueue = new OperationsQueue(maxOperations);
         this.slowOperationsQueue = new OperationsQueue(maxOperations);
 
-        this.lastLogTime = ApproximateTime.currentTimeMillis();
+        this.lastLogTimeNanos = ApproximateTime.nanoTime();
 
         logger.info("Scheduling monitoring task with report interval of {} ms, max operations {}", reportIntervalMillis, maxOperations);
-        this.reportingTask = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(() -> logOperations(ApproximateTime.currentTimeMillis()),
+        this.reportingTask = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(() -> logOperations(ApproximateTime.nanoTime()),
                                                                                      reportIntervalMillis,
                                                                                      reportIntervalMillis,
                                                                                      TimeUnit.MILLISECONDS);
@@ -133,27 +134,27 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long now)
+    private void logOperations(long nowNanos)
     {
-        logSlowOperations(now);
-        logFailedOperations(now);
+        logSlowOperations(nowNanos);
+        logFailedOperations(nowNanos);
 
-        lastLogTime = now;
+        lastLogTimeNanos = nowNanos;
     }
 
     @VisibleForTesting
-    boolean logFailedOperations(long now)
+    boolean logFailedOperations(long nowNanos)
     {
         AggregatedOperations failedOperations = failedOperationsQueue.popOperations();
         if (!failedOperations.isEmpty())
         {
-            long elapsed = now - lastLogTime;
+            long elapsedNanos = nowNanos - lastLogTimeNanos;
             noSpamLogger.warn("Some operations timed out, details available at debug level (debug.log)");
 
             if (logger.isDebugEnabled())
                 logger.debug("{} operations timed out in the last {} msecs:{}{}",
                             failedOperations.num(),
-                            elapsed,
+                             NANOSECONDS.toMillis(elapsedNanos),
                             LINE_SEPARATOR,
                             failedOperations.getLogMessage());
             return true;
@@ -163,18 +164,18 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    boolean logSlowOperations(long now)
+    boolean logSlowOperations(long nowNanos)
     {
         AggregatedOperations slowOperations = slowOperationsQueue.popOperations();
         if (!slowOperations.isEmpty())
         {
-            long elapsed = now - lastLogTime;
+            long elapsedNanos = nowNanos - lastLogTimeNanos;
             noSpamLogger.info("Some operations were slow, details available at debug level (debug.log)");
 
             if (logger.isDebugEnabled())
                 logger.debug("{} operations were slow in the last {} msecs:{}{}",
                              slowOperations.num(),
-                             elapsed,
+                             NANOSECONDS.toMillis(elapsedNanos),
                              LINE_SEPARATOR,
                              slowOperations.getLogMessage());
             return true;

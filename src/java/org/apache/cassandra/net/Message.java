@@ -319,9 +319,9 @@ public class Message<T>
         return code != null ? RequestFailureReason.fromCode(code) : RequestFailureReason.UNKNOWN;
     }
 
-    public long getSlowQueryTimeout()
+    public long getSlowQueryTimeout(TimeUnit units)
     {
-        return DatabaseDescriptor.getSlowQueryTimeout();
+        return DatabaseDescriptor.getSlowQueryTimeout(units);
     }
 
     @SuppressWarnings("unchecked")

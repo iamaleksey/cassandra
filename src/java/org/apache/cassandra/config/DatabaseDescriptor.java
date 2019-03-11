@@ -1523,9 +1523,9 @@ public class DatabaseDescriptor
         return conf.cross_node_timeout;
     }
 
-    public static long getSlowQueryTimeout()
+    public static long getSlowQueryTimeout(TimeUnit units)
     {
-        return conf.slow_query_log_timeout_in_ms;
+        return units.convert(conf.slow_query_log_timeout_in_ms, MILLISECONDS);
     }
 
     /**

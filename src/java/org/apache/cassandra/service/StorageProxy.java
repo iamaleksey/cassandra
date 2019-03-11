@@ -1769,7 +1769,7 @@ public class StorageProxy implements StorageProxyMBean
             try
             {
                 long timeoutNanos = verb.expirationTimeNanos(constructionTimeNanos);
-                command.setMonitoringTime(constructionTimeNanos, false, timeoutNanos, DatabaseDescriptor.getSlowQueryTimeout());
+                command.setMonitoringTime(constructionTimeNanos, false, timeoutNanos, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController();

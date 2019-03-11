@@ -50,7 +50,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         long timeout = message.expiresAtNanos - message.createdAtNanos;
-        command.setMonitoringTime(message.createdAtNanos, message.isCrossNode(), timeout, message.getSlowQueryTimeout());
+        command.setMonitoringTime(message.createdAtNanos, message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
 
         if (message.parameters.containsKey(ParameterType.TRACK_REPAIRED_DATA))
             command.trackRepairedStatus();
