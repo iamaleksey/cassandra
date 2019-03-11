@@ -34,7 +34,7 @@ import net.openhft.chronicle.core.util.ThrowingBiConsumer;
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import net.openhft.chronicle.core.util.ThrowingFunction;
 
-public abstract class AbstractPromiseTest
+abstract class AbstractPromiseTest
 {
     private static final ExecutorService exec = Executors.newCachedThreadPool();
 

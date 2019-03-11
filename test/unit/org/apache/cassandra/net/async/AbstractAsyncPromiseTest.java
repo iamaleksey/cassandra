@@ -35,7 +35,7 @@ import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.netty.util.concurrent.Promise;
 
-public class AbstractAsyncPromiseTest extends AbstractPromiseTest
+abstract class AbstractAsyncPromiseTest extends AbstractPromiseTest
 {
     <V> void testOneSuccess(Promise<V> promise, boolean setUncancellable, boolean tryOrSet, V value, V otherValue)
     {
