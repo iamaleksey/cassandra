@@ -25,6 +25,7 @@ import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.distributed.Cluster;
 
 import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
+import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 public class DistributedReadWritePathTest extends DistributedTestBase
 {
@@ -46,6 +47,26 @@ public class DistributedReadWritePathTest extends DistributedTestBase
                        row(1, 1, 1),
                        row(1, 2, 2),
                        row(1, 3, 3));
+        }
+    }
+
+    @Test
+    public void largeMessageTest() throws Throwable
+    {
+        try (Cluster cluster = init(Cluster.create(2)))
+        {
+            cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v text, PRIMARY KEY (pk, ck))");
+            StringBuilder builder = new StringBuilder();
+            for (int i = 0; i < LARGE_MESSAGE_THRESHOLD ; i++)
+                builder.append('a');
+            String s = builder.toString();
+            cluster.coordinator(1).execute("INSERT INTO " + KEYSPACE + ".tbl (pk, ck, v) VALUES (1, 1, ?)",
+                                           ConsistencyLevel.ALL,
+                                           s);
+            assertRows(cluster.coordinator(1).execute("SELECT * FROM " + KEYSPACE + ".tbl WHERE pk = ?",
+                                                      ConsistencyLevel.ALL,
+                                                      1),
+                       row(1, 1, s));
         }
     }
 

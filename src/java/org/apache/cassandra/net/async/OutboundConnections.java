@@ -54,7 +54,7 @@ import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSA
 public class OutboundConnections
 {
     @VisibleForTesting
-    static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
+    public static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
 
     private final InternodeOutboundMetrics metrics;
     private final BackPressureState backPressureState;
