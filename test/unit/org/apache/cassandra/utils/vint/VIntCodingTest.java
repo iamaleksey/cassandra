@@ -93,7 +93,7 @@ public class VIntCodingTest
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
             VIntCoding.writeUnsignedVInt(i, out);
-            long result = VIntCoding.getUnsignedVInt(Unpooled.wrappedBuffer(out.buffer()), i);
+            long result = VIntCoding.getUnsignedVInt(Unpooled.wrappedBuffer(out.buffer()), 0);
             Assert.assertEquals(i, result);
         }
     }
