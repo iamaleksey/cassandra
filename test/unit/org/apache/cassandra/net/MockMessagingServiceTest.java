@@ -35,6 +35,7 @@ import static org.apache.cassandra.net.MockMessagingService.all;
 import static org.apache.cassandra.net.MockMessagingService.to;
 import static org.apache.cassandra.net.MockMessagingService.verb;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 public class MockMessagingServiceTest
@@ -84,7 +85,7 @@ public class MockMessagingServiceTest
         // we must have intercepted the outgoing message at this point
         Message<?> msg = spy.captureMessageOut().get();
         assertEquals(1, spy.messagesIntercepted);
-        assertTrue(msg == echoMessageOut);
+        assertSame(echoMessage.payload, msg.payload);
 
         // and return a mocked response
         assertEquals(1, spy.mockedMessageResponses);
