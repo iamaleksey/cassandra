@@ -120,42 +120,6 @@ public class VIntCoding
     }
 
     /**
-     * Note this method is the same as {@link #readUnsignedVInt(DataInput)},
-     * except that we do *not* block if there are not enough bytes in the buffer
-     * to reconstruct the value.
-     *
-     * WARNING: this method is only safe for vints we know to be representable by a positive long value.
-     *
-     * @return -1 if there are not enough bytes in the input to read the value; else, the vint unsigned value.
-     */
-    public static long getUnsignedVInt(ByteBuffer input, int readerIndex)
-    {
-        int readerLimit = input.limit();
-        if (readerIndex == readerLimit)
-            return -1;
-
-        int firstByte = input.get(readerIndex++);
-
-        //Bail out early if this is one byte, necessary or it fails later
-        if (firstByte >= 0)
-            return firstByte;
-
-        int size = numberOfExtraBytesToRead(firstByte);
-        if (readerIndex + size > readerLimit)
-            return -1;
-
-        long retval = firstByte & firstByteValueMask(size);
-        for (int ii = 0; ii < size; ii++)
-        {
-            byte b = input.get(readerIndex++);
-            retval <<= 8;
-            retval |= b & 0xff;
-        }
-
-        return retval;
-    }
-
-    /**
      * Computes size of an unsigned vint that starts at readerIndex of the provided ByteBuf.
      *
      * @return -1 if there are not enough bytes in the input to calculate the size; else, the vint unsigned value size in bytes.
@@ -303,17 +267,5 @@ public class VIntCoding
     {
         int magnitude = Long.numberOfLeadingZeros(value | 1); // | with 1 to ensure magntiude <= 63, so (63 - 1) / 7 <= 8
         return 9 - ((magnitude - 1) / 7);
-    }
-
-    /**
-     * Compute the number of bytes that would be needed to store the provided sizeInBytes plus the number of bytes
-     * needed to encode the vint.
-     */
-    public static int computeRecursiveUnsignedVIntSize(long sizeInBytes)
-    {
-        // our maximum size is 9, so we can only ever require 1 byte more if we include the size we compute;
-        // so the simplest approach is to recompute the size after adding the naive calculation to it
-        int size = computeUnsignedVIntSize(sizeInBytes);
-        return computeUnsignedVIntSize(sizeInBytes + size);
     }
 }

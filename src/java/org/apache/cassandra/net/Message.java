@@ -374,7 +374,7 @@ public class Message<T>
      *
      * Legacy Notes (see {@link Serializer#serialize(Message, DataOutputPlus, int)} for complete details):
      * - pre 4.0, the IP address was sent along in the header, before the verb. The IP address may be either IPv4 (4 bytes) or IPv6 (16 bytes).
-     * - pre-4.0, the message size was not included on the wire; in 4.0 and up it is an unsigned vint.
+     * - pre-4.0, the message size was not included on the wire; in 4.0 and up it is an int.
      * - pre-4.0, the verb was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
      * - pre-4.0, the payloadSize was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
      * - pre-4.0, the count of a parameter values was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
@@ -388,7 +388,7 @@ public class Message<T>
      *            1 1 1 1 1 2 2 2 2 2 3
      *  0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * | Message Size (vint)           |
+     * | Message Size (int)            |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * | Size CRC24 (3 bytes)          |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -417,6 +417,9 @@ public class Message<T>
      */
     public static final class Serializer
     {
+        private static final int SIZE_SIZE = 4;
+        private static final int CREATION_TIME_SIZE = 4;
+
         private Serializer()
         {
         }
@@ -479,8 +482,8 @@ public class Message<T>
         private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
             int size = message.serializedSize(version);
-            out.writeUnsignedVInt(size);
-            writeCRC24(out, crc24(size, 4));
+            out.writeInt(size);
+            writeCRC24(out, crc24(size, SIZE_SIZE));
             out.writeUnsignedVInt(message.id);
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
@@ -503,9 +506,9 @@ public class Message<T>
 
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            int size = Ints.checkedCast(in.readUnsignedVInt());
+            int size = in.readInt();
             int readCRC = readCRC24(in);
-            int computedCRC = crc24(size, 4);
+            int computedCRC = crc24(size, SIZE_SIZE);
             if (readCRC != computedCRC)
                 throw new UnrecoverableCRCMismatch(readCRC, computedCRC);
 
@@ -525,9 +528,10 @@ public class Message<T>
         {
             long size = 0;
 
+            size += SIZE_SIZE;
             size += CRC24_SIZE;
             size += TypeSizes.sizeofUnsignedVInt(message.id);
-            size += 4; // creation time
+            size += CREATION_TIME_SIZE;
             size += TypeSizes.sizeofUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             size += TypeSizes.sizeofUnsignedVInt(message.verb.id);
             size += paramsSerlializedSize(message.parameters, version);
@@ -536,26 +540,19 @@ public class Message<T>
             size += TypeSizes.sizeofUnsignedVInt(payloadSize);
             size += payloadSize;
 
-            size += VIntCoding.computeRecursiveUnsignedVIntSize(size);
             return Ints.checkedCast(size);
         }
 
         private int messageSizePost40(ByteBuf buf) throws UnrecoverableCRCMismatch
         {
             int index = buf.readerIndex();
-            final int limit = index + buf.readableBytes();
 
-            int size = Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index));
-            if (size < 0) // not enough bytes to read size yet
-                return size;
+            if (buf.readableBytes() < SIZE_SIZE + CRC24_SIZE)
+                return -1; // not enough bytes to read size + size CRC yet
 
-            index += VIntCoding.computeUnsignedVIntSize(size);
-            index += CRC24_SIZE;
-            if (index > limit) // not enough bytes to read size CRC yet
-                return -1;
-
-            int readCRC = getCRC24(buf, index - CRC24_SIZE);
-            int computedCRC = crc24(size, 4);
+            int size = buf.getInt(index);
+            int readCRC = getCRC24(buf, index + SIZE_SIZE);
+            int computedCRC = crc24(size, SIZE_SIZE);
             if (readCRC != computedCRC)
                 throw new UnrecoverableCRCMismatch(readCRC, computedCRC);
             return size;
@@ -566,19 +563,15 @@ public class Message<T>
             int index = buf.readerIndex();
             final int limit = index + buf.readableBytes();
 
-            int sizeSize = VIntCoding.computeUnsignedVIntSize(buf, index);
-            if (sizeSize < 0)
-                return false;
-            index += sizeSize;
-
-            index += CRC24_SIZE; // size CRC
+            index += SIZE_SIZE;
+            index += CRC24_SIZE;
 
             int messageIdSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (messageIdSize < 0)
                 return false;
             index += messageIdSize;
 
-            index += 4; // creation time
+            index += CREATION_TIME_SIZE;
 
             if (index > limit)
                 return false;
@@ -599,8 +592,8 @@ public class Message<T>
         private long getCreatedAtNanosPost40(ByteBuf buf, InetAddressAndPort peer)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
-            index += CRC24_SIZE;                                     // size CRC
+            index += SIZE_SIZE;
+            index += CRC24_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
             return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
         }
@@ -608,20 +601,20 @@ public class Message<T>
         private long getExpiresAtNanosPost40(ByteBuf buf, long createdAtNanos)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
-            index += CRC24_SIZE;                                     // size CRC
+            index += SIZE_SIZE;
+            index += CRC24_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
-            index += 4;                                              // creation time
+            index += CREATION_TIME_SIZE;
             return createdAtNanos + TimeUnit.MILLISECONDS.toNanos(VIntCoding.getUnsignedVInt(buf, index));
         }
 
         private Verb getVerbPost40(ByteBuf buf)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
-            index += CRC24_SIZE;                                     // size CRC
+            index += SIZE_SIZE;
+            index += CRC24_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
-            index += 4;                                              // creation time
+            index += CREATION_TIME_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
             return Verb.fromId(Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index)));
         }
