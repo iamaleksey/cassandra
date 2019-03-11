@@ -37,9 +37,6 @@ import org.apache.cassandra.gms.HeartBeatState;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnections.connectionTypeFor;
-
 public class StartupClusterConnectivityCheckerTest
 {
     private StartupClusterConnectivityChecker localQuorumConnectivityChecker;
@@ -117,7 +114,6 @@ public class StartupClusterConnectivityCheckerTest
         Sink sink = new Sink(true, true, peers);
         MessagingService.instance().messageSink.add(sink);
         Assert.assertTrue(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
-        Assert.assertTrue(checkAllConnectionTypesSeen(sink));
     }
 
     @Test
@@ -126,7 +122,6 @@ public class StartupClusterConnectivityCheckerTest
         Sink sink = new Sink(false, true, peers);
         MessagingService.instance().messageSink.add(sink);
         Assert.assertFalse(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
-        Assert.assertTrue(checkAllConnectionTypesSeen(sink));
     }
 
     @Test
@@ -143,12 +138,12 @@ public class StartupClusterConnectivityCheckerTest
         // local peer plus 3 peers from same dc shouldn't pass (4/6)
         Set<InetAddressAndPort> available = new HashSet<>();
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 3);
-        checkAvailable(localQuorumConnectivityChecker, available, false, true);
+        checkAvailable(localQuorumConnectivityChecker, available, false);
 
         // local peer plus 4 peers from same dc should pass (5/6)
         available.clear();
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
-        checkAvailable(localQuorumConnectivityChecker, available, true, true);
+        checkAvailable(localQuorumConnectivityChecker, available, true);
     }
 
     @Test
@@ -159,27 +154,27 @@ public class StartupClusterConnectivityCheckerTest
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
         copyCount(peersB, available, NUM_PER_DC - 2);
         copyCount(peersC, available, NUM_PER_DC - 1);
-        checkAvailable(globalQuorumConnectivityChecker, available, false, true);
+        checkAvailable(globalQuorumConnectivityChecker, available, false);
 
         // All three datacenters should be able to have a single node down
         available.clear();
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 2);
         copyCount(peersB, available, NUM_PER_DC - 1);
         copyCount(peersC, available, NUM_PER_DC - 1);
-        checkAvailable(globalQuorumConnectivityChecker, available, true, true);
+        checkAvailable(globalQuorumConnectivityChecker, available, true);
 
         // Everything being up should work of course
         available.clear();
         copyCount(peersAMinusLocal, available, NUM_PER_DC - 1);
         copyCount(peersB, available, NUM_PER_DC);
         copyCount(peersC, available, NUM_PER_DC);
-        checkAvailable(globalQuorumConnectivityChecker, available, true, true);
+        checkAvailable(globalQuorumConnectivityChecker, available, true);
     }
 
     @Test
     public void execute_Noop()
     {
-        checkAvailable(noopChecker, new HashSet<>(), true, false);
+        checkAvailable(noopChecker, new HashSet<>(), true);
     }
 
     @Test
@@ -188,26 +183,15 @@ public class StartupClusterConnectivityCheckerTest
         Sink sink = new Sink(true, true, new HashSet<>());
         MessagingService.instance().messageSink.add(sink);
         Assert.assertFalse(zeroWaitChecker.execute(peers, this::getDatacenter));
-        boolean hasConnections = false;
-        for (int i = 0; i < TIMEOUT_NANOS; i+= 10)
-        {
-            hasConnections = checkAllConnectionTypesSeen(sink);
-            if (hasConnections)
-                break;
-            Thread.sleep(0, 10);
-        }
         MessagingService.instance().messageSink.clear();
-        Assert.assertTrue(hasConnections);
     }
 
     private void checkAvailable(StartupClusterConnectivityChecker checker, Set<InetAddressAndPort> available,
-                                boolean shouldPass, boolean checkConnections)
+                                boolean shouldPass)
     {
         Sink sink = new Sink(true, true, available);
         MessagingService.instance().messageSink.add(sink);
         Assert.assertEquals(shouldPass, checker.execute(peers, this::getDatacenter));
-        if (checkConnections)
-            Assert.assertTrue(checkAllConnectionTypesSeen(sink));
         MessagingService.instance().messageSink.clear();
     }
 
@@ -221,24 +205,6 @@ public class StartupClusterConnectivityCheckerTest
             dest.add(peer);
             count -= 1;
         }
-    }
-
-    private boolean checkAllConnectionTypesSeen(Sink sink)
-    {
-        boolean result = true;
-        for (InetAddressAndPort peer : peers)
-        {
-            if (peer.equals(FBUtilities.getBroadcastAddressAndPort()))
-                continue;
-            ConnectionTypeRecorder recorder = sink.seenConnectionRequests.get(peer);
-            result = recorder != null;
-            if (!result)
-                break;
-
-            result = recorder.seenSmallMessageRequest;
-            result &= recorder.seenLargeMessageRequest;
-        }
-        return result;
     }
 
     private static class Sink implements MessageSink.Sink
@@ -260,16 +226,6 @@ public class StartupClusterConnectivityCheckerTest
         public boolean allowOutbound(Message message, InetAddressAndPort to)
         {
             ConnectionTypeRecorder recorder = seenConnectionRequests.computeIfAbsent(to, inetAddress ->  new ConnectionTypeRecorder());
-            if (connectionTypeFor(message, MessagingService.current_version, null) == SMALL_MESSAGE)
-            {
-                Assert.assertFalse(recorder.seenSmallMessageRequest);
-                recorder.seenSmallMessageRequest = true;
-            }
-            else
-            {
-                Assert.assertFalse(recorder.seenLargeMessageRequest);
-                recorder.seenLargeMessageRequest = true;
-            }
 
             if (!aliveHosts.contains(to))
                 return false;

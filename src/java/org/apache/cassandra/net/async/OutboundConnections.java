@@ -144,19 +144,19 @@ public class OutboundConnections
     @VisibleForTesting
     OutboundConnection connectionFor(Message msg, Type forceConnection)
     {
-        return connectionFor(connectionTypeFor(msg, current_version, forceConnection));
+        return connectionFor(connectionTypeFor(msg, forceConnection));
     }
 
     @VisibleForTesting
-    public static Type connectionTypeFor(Message<?> msg, int messagingVersion, Type forceConnection)
+    public static Type connectionTypeFor(Message<?> msg, Type specifyConnection)
     {
-        if (forceConnection != null)
-            return forceConnection;
+        if (specifyConnection != null)
+            return specifyConnection;
 
         if (msg.verb.priority == Verb.Priority.P0)
             return URGENT;
 
-        return msg.serializedSize(messagingVersion) <= LARGE_MESSAGE_THRESHOLD
+        return msg.serializedSize(current_version) <= LARGE_MESSAGE_THRESHOLD
                ? SMALL_MESSAGE
                : LARGE_MESSAGE;
     }
