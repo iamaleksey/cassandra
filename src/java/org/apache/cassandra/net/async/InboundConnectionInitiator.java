@@ -402,7 +402,7 @@ public class InboundConnectionInitiator
                 pipeline.addLast("lz4", NettyFactory.getLZ4Decoder(useMessagingVersion));
 
             InboundMessageHandler handler =
-                instance().getInbound(from).createHandler(pipeline.channel(), initiate.withCrc, useMessagingVersion);
+                instance().getInbound(from).createHandler(pipeline.channel(), useMessagingVersion);
             pipeline.addLast("deserialize", handler);
 
             pipeline.remove(this);

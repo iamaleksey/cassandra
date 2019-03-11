@@ -70,13 +70,12 @@ public final class InboundMessageHandlers
         this.metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(Channel channel, boolean useCRC, int version)
+    InboundMessageHandler createHandler(Channel channel, int version)
     {
         InboundMessageHandler handler =
             new InboundMessageHandler(channel,
                                       peer,
                                       version,
-                                      useCRC,
 
                                       OutboundConnections.LARGE_MESSAGE_THRESHOLD,
                                       NettyFactory.instance.synchronousWorkExecutor,

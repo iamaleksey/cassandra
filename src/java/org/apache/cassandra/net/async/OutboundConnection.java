@@ -26,7 +26,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -644,8 +643,7 @@ public class OutboundConnection
                     try
                     {
                         int messageSize = next.serializedSize(messagingVersion);
-                        int totalSize = settings.withCrc() ? messageSize + 4 : messageSize;
-                        if (totalSize > sending.remaining())
+                        if (messageSize > sending.remaining())
                         {
                             // if we don't have enough room to serialize the next message, we have either
                             //  1) run out of room after writing some messages successfully; this might mean that we are
@@ -659,7 +657,7 @@ public class OutboundConnection
 
                             BufferPool.put(sending);
                             sending = null; // set to null to prevent double-release if we fail to allocate our new buffer
-                            sending = BufferPool.get(totalSize, BufferType.OFF_HEAP);
+                            sending = BufferPool.get(messageSize, BufferType.OFF_HEAP);
                             out = new DataOutputBufferFixed(sending);
                         }
 
@@ -668,9 +666,6 @@ public class OutboundConnection
 
                         if (sending.position() != sendingBytes + messageSize)
                             throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.position() - sendingBytes));
-
-                        if (settings.withCrc()) // CRC must be written in LE order
-                            out.writeInt(Integer.reverseBytes(NettyFactory.computeCrc32(sending, sending.position() - messageSize, sending.position())));
 
                         canonicalSize += canonicalSize(next);
                         ++sendingCount;
@@ -828,8 +823,7 @@ public class OutboundConnection
             if (send == null)
                 return false;
 
-            CRC32 crc = settings.withCrc() ? NettyFactory.crc32() : null;
-            AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, DEFAULT_BUFFER_SIZE, crc);
+            AsyncChannelOutputPlus out = new AsyncChannelOutputPlus(channel, DEFAULT_BUFFER_SIZE);
             try
             {
                 Tracing.instance.traceOutgoingMessage(send, settings.connectTo);
@@ -838,12 +832,6 @@ public class OutboundConnection
                 int messageSize = send.serializedSize(messagingVersion);
                 if (out.position() != messageSize)
                     throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + out.position());
-
-                if (settings.withCrc())
-                {
-                    out.updateFinalCRC();
-                    out.writeInt(Integer.reverseBytes((int) crc.getValue())); // CRC must be written in LE order
-                }
 
                 out.close();
                 sent += 1;

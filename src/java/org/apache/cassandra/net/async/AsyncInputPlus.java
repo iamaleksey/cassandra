@@ -18,10 +18,8 @@
 package org.apache.cassandra.net.async;
 
 import java.io.EOFException;
-import java.nio.ByteBuffer;
 import java.util.Queue;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 import io.netty.buffer.ByteBuf;
@@ -44,7 +42,6 @@ class AsyncInputPlus extends RebufferingInputStream
     private final Queue<ByteBuf> queue;
 
     private final IntConsumer onReleased;
-    private final Consumer<ByteBuffer> onRebuffered;
 
     private ByteBuf buf;
     private int bufSize;
@@ -52,7 +49,7 @@ class AsyncInputPlus extends RebufferingInputStream
     private volatile boolean isClosed;
     private volatile Thread parkedThread;
 
-    AsyncInputPlus(IntConsumer onReleased, Consumer<ByteBuffer> onRebuffered)
+    AsyncInputPlus(IntConsumer onReleased)
     {
         super(Unpooled.EMPTY_BUFFER.nioBuffer());
         this.buf = Unpooled.EMPTY_BUFFER;
@@ -60,7 +57,6 @@ class AsyncInputPlus extends RebufferingInputStream
 
         this.queue = new SpscUnboundedArrayQueue<>(16);
         this.onReleased = onReleased;
-        this.onRebuffered = onRebuffered;
     }
 
     @Override
@@ -78,7 +74,6 @@ class AsyncInputPlus extends RebufferingInputStream
         buf = nextBuf;
         bufSize = nextBuf.readableBytes();
         buffer = nextBuf.nioBuffer();
-        onRebuffered.accept(buffer);
     }
 
     @Override

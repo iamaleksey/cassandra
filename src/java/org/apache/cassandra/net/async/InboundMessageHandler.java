@@ -70,8 +70,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final Logger logger = LoggerFactory.getLogger(InboundMessageHandler.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
 
-    private static final int CRC_LENGTH = 4;
-
     private static final Message.Serializer serializer = Message.serializer;
 
     private enum State { ACTIVE, AHEAD_OF_COPROCESSORS, OVER_RESERVE_CAPACITY, CLOSED }
@@ -80,7 +78,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final Channel channel;
     private final InetAddressAndPort peer;
     private final int version;
-    private final boolean useCRC;
 
     private final int largeThreshold;
     private final ExecutorService largeExecutor;
@@ -123,7 +120,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     InboundMessageHandler(Channel channel,
                           InetAddressAndPort peer,
                           int version,
-                          boolean useCRC,
 
                           int largeThreshold,
                           ExecutorService largeExecutor,
@@ -144,7 +140,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.channel = channel;
         this.peer = peer;
         this.version = version;
-        this.useCRC = useCRC;
 
         this.largeThreshold = largeThreshold;
         this.largeExecutor = largeExecutor;
@@ -331,13 +326,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (messageSize < 0) // not enough bytes to read size of the message
             return false;
 
-        /*
-         * Inflate message size by 4 if whole-message CRCs are enabled. Whole-message CRC isn't part of
-         * the message itself, and as such is not reflected in serializer's messageSize() return value.
-         */
-        if (useCRC)
-            messageSize += CRC_LENGTH;
-
         if (!serializer.canReadHeader(buf, version))
             return false;
 
@@ -387,15 +375,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         Message<?> message = null;
         try
         {
-            if (useCRC)
-            {
-                int readCRC = buf.getIntLE(writerIndex - CRC_LENGTH); // CRC must be written in LE order
-                int computedCRC = computeCRC(buf.internalNioBuffer(readerIndex, messageSize - CRC_LENGTH));
-
-                if (readCRC != computedCRC)
-                    throw new RecoverableCRCMismatch(readCRC, computedCRC);
-            }
-
             message = serializer.deserialize(new ByteBufDataInputPlus(buf), peer, version);
         }
         catch (UnknownTableException e)
@@ -727,19 +706,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private final int messageSize;
         private final AsyncInputPlus input;
 
-        private int crcBytesRemaining;
-        private final CRC32 crc32;
-
         private final int maxUnconsumedBytes;
 
         private LargeCoprocessor(int messageSize)
         {
             this.messageSize = messageSize;
 
-            this.input = new AsyncInputPlus(this::onBufConsumed, this::onRebuffered);
+            this.input = new AsyncInputPlus(this::onBufConsumed);
 
-            crcBytesRemaining = useCRC ? messageSize - CRC_LENGTH : 0;
-            crc32 = NettyFactory.crc32();
 
             /*
              * Allow up to 2x large message threshold bytes of ByteBufs in coprocessors' queues before pausing reads
@@ -771,18 +745,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             Message<?> message = null;
             try
             {
-                Message<?> msg = serializer.deserialize(input, peer, version);
-
-                if (useCRC)
-                {
-                    int readCRC = Integer.reverseBytes(input.readInt()); // CRC must be written in LE order
-                    int computedCRC = (int) crc32.getValue();
-
-                    if (readCRC != computedCRC)
-                        throw new RecoverableCRCMismatch(readCRC, computedCRC);
-                }
-
-                message = msg;
+                message = serializer.deserialize(input, peer, version);
             }
             catch (AsyncInputPlus.InputClosedException e)
             {
@@ -841,16 +804,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             if (unconsumed <= maxUnconsumedBytes && prevUnconsumed > maxUnconsumedBytes)
                 channel.eventLoop().submit(InboundMessageHandler.this::onCoprocessorCaughtUp);
-        }
-
-        private void onRebuffered(ByteBuffer buffer)
-        {
-            if (crcBytesRemaining > 0)
-            {
-                int toCRC = min(crcBytesRemaining, buffer.remaining());
-                crc32.update(toCRC == buffer.remaining() ? buffer : (ByteBuffer) buffer.duplicate().limit(toCRC));
-                crcBytesRemaining -= toCRC;
-            }
         }
     }
 

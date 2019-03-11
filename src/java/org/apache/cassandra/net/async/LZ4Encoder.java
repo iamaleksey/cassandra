@@ -31,7 +31,6 @@ import io.netty.handler.codec.MessageToMessageEncoder;
 import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 

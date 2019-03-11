@@ -91,21 +91,13 @@ public class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlus
     private volatile long signalWhenFlushed;
     private volatile Thread waiting;
 
-    private CRC32 crc32;
-
     public AsyncChannelOutputPlus(Channel channel, int bufferSize)
-    {
-        this(channel, bufferSize, null);
-    }
-
-    public AsyncChannelOutputPlus(Channel channel, int bufferSize, CRC32 crc32)
     {
         super(null, null);
         this.channel = channel;
         this.bufferSize = bufferSize;
         this.highWaterMark = channel.config().getWriteBufferHighWaterMark();
         this.lowWaterMark = channel.config().getWriteBufferLowWaterMark();
-        this.crc32 = crc32;
         allocateBuffer();
     }
 
@@ -253,28 +245,10 @@ public class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlus
         ByteBuffer flush = buffer;
         int byteCount = flush.position();
         flush.flip();
-        updateCRC(flush);
         BufferPool.putUnusedPortion(flush);
         ChannelPromise promise = beginFlush(byteCount);
         channel.writeAndFlush(BufferPoolAllocator.wrapUnshared(flush), promise);
         allocateBuffer();
-    }
-
-    private void updateCRC(ByteBuffer buffer)
-    {
-        if (null != crc32)
-            crc32.update(buffer);
-    }
-
-    /**
-     * CRC unflushed bytes in the current buffer, then disable CRC.
-     */
-    void updateFinalCRC()
-    {
-        if (null == crc32)
-            throw new IllegalStateException();
-        crc32.update((ByteBuffer) buffer.duplicate().flip());
-        crc32 = null;
     }
 
     public long position()
@@ -369,7 +343,6 @@ public class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlus
         BufferPool.putUnusedPortion(buffer);
 
         int length = buffer.limit();
-        updateCRC(buffer);
         channel.writeAndFlush(BufferPoolAllocator.wrapUnshared(buffer), holder.promise);
         return length;
     }
