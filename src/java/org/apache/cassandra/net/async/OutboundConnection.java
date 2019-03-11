@@ -869,7 +869,7 @@ public class OutboundConnection
      */
     private int canonicalSize(Message<?> message)
     {
-        return message.serializedSize(current_version) + (template.withCrc() ? 4 : 0);
+        return message.serializedSize(current_version);
     }
 
     /**
