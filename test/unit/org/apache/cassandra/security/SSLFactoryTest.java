@@ -21,7 +21,6 @@ package org.apache.cassandra.security;
 import java.io.File;
 import java.io.IOException;
 import java.security.cert.CertificateException;
-import java.util.Arrays;
 import javax.net.ssl.TrustManagerFactory;
 
 import org.apache.commons.io.FileUtils;
@@ -108,10 +107,10 @@ public class SSLFactoryTest
         SslContext sslContext = SSLFactory.getOrCreateSslContext(options, true, SSLFactory.SocketType.CLIENT, false);
         Assert.assertNotNull(sslContext);
         Assert.assertTrue(sslContext instanceof JdkSslContext);
-        Assert.assertEquals(Arrays.asList(encryptionOptions.cipher_suites), sslContext.cipherSuites());
+        Assert.assertEquals(encryptionOptions.cipher_suites, sslContext.cipherSuites());
     }
 
-    private EncryptionOptions addKeystoreOptions(EncryptionOptions options)
+    private ServerEncryptionOptions addKeystoreOptions(ServerEncryptionOptions options)
     {
         return options.withKeyStore("test/conf/cassandra_ssl_test.keystore")
                       .withKeyStorePassword("cassandra");
@@ -210,9 +209,7 @@ public class SSLFactoryTest
     {
         try
         {
-            addKeystoreOptions(encryptionOptions);
-
-            ServerEncryptionOptions options = new ServerEncryptionOptions(encryptionOptions)
+            ServerEncryptionOptions options = addKeystoreOptions(encryptionOptions)
                                               .withEnabled(true);
 
             SSLFactory.initHotReloading(options, options, true);
@@ -238,29 +235,28 @@ public class SSLFactoryTest
     }
 
     @Test
-    public void testSslFactoryHotReload_CorruptOrNonExistentFile_DoesNotClearExistingSslContext() throws IOException,
-                                                                                                         InterruptedException
+    public void testSslFactoryHotReload_CorruptOrNonExistentFile_DoesNotClearExistingSslContext() throws IOException
     {
         try
         {
-            addKeystoreOptions(encryptionOptions);
+            ServerEncryptionOptions options = addKeystoreOptions(encryptionOptions);
 
-            File testKeystoreFile = new File(encryptionOptions.keystore + ".test");
-            FileUtils.copyFile(new File(encryptionOptions.keystore),testKeystoreFile);
-            encryptionOptions = encryptionOptions.withKeyStore(testKeystoreFile.getPath());
+            File testKeystoreFile = new File(options.keystore + ".test");
+            FileUtils.copyFile(new File(options.keystore),testKeystoreFile);
+            options = options
+                      .withKeyStore(testKeystoreFile.getPath())
+                      .withEnabled(true);
 
-            EncryptionOptions options = new ServerEncryptionOptions(encryptionOptions)
-                                        .withEnabled(true);
 
-            SSLFactory.initHotReloading((ServerEncryptionOptions) options, options, true);
+            SSLFactory.initHotReloading(options, options, true);
             SslContext oldCtx = SSLFactory.getOrCreateSslContext(options, true, SSLFactory.SocketType.CLIENT, OpenSsl
                                                                                                           .isAvailable());
-            SSLFactory.checkCertFilesForHotReloading((ServerEncryptionOptions) options, options);
+            SSLFactory.checkCertFilesForHotReloading(options, options);
 
             testKeystoreFile.setLastModified(System.currentTimeMillis() + 15000);
             FileUtils.forceDelete(testKeystoreFile);
 
-            SSLFactory.checkCertFilesForHotReloading((ServerEncryptionOptions) options, options);;
+            SSLFactory.checkCertFilesForHotReloading(options, options);;
             SslContext newCtx = SSLFactory.getOrCreateSslContext(options, true, SSLFactory.SocketType.CLIENT, OpenSsl
                                                                                                           .isAvailable());
 
