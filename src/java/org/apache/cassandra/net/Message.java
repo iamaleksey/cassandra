@@ -547,7 +547,7 @@ public class Message<T>
             if (index > limit) // not enough bytes to read size CRC yet
                 return -1;
 
-            int readCRC = getRC24(buf, index);
+            int readCRC = getCRC24(buf, index - CRC24_SIZE);
             int computedCRC = crc24(size, 4);
             if (readCRC != computedCRC)
                 throw new UnrecoverableCRCMismatch(readCRC, computedCRC);
@@ -621,18 +621,18 @@ public class Message<T>
 
         private static int readCRC24(DataInputPlus in) throws IOException
         {
-            int b2 = in.readByte();
-            int b1 = in.readByte();
-            int b0 = in.readByte();
-            return b0 << 16 | b1 << 8 | b2;
+            int b0 = 0xff & in.readByte();
+            int b1 = 0xff & in.readByte();
+            int b2 = 0xff & in.readByte();
+            return b2 << 16 | b1 << 8 | b0;
         }
 
-        private static int getRC24(ByteBuf buf, int index)
+        private static int getCRC24(ByteBuf buf, int index)
         {
-            int b2 = buf.getByte(index);
-            int b1 = buf.getByte(index + 1);
-            int b0 = buf.getByte(index + 2);
-            return b0 << 16 | b1 << 8 | b2;
+            int b0 = 0xff & buf.getByte(index);
+            int b1 = 0xff & buf.getByte(index + 1);
+            int b2 = 0xff & buf.getByte(index + 2);
+            return b2 << 16 | b1 << 8 | b0;
         }
 
         private static void writeCRC24(DataOutputPlus out, int crc) throws IOException
