@@ -18,7 +18,6 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -114,8 +113,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private volatile int largeUnconsumedBytes; // unconsumed bytes in all ByteBufs queued up in all coprocessors
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandler.class, "largeUnconsumedBytes");
-
-    private final CRC32 crc32 = new CRC32();
 
     InboundMessageHandler(Channel channel,
                           InetAddressAndPort peer,
@@ -454,14 +451,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             aheadOfCoprocessors();
 
         return isKeepingUp && buf.isReadable();
-    }
-
-    private int computeCRC(ByteBuffer buffer)
-    {
-        CRC32 crc = crc32;
-        crc.reset();
-        crc.update(buffer);
-        return (int) crc.getValue();
     }
 
     // wrap parent callback to release capacity first
