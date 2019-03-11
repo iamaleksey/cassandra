@@ -35,6 +35,8 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.net.async.AsyncChannelInputPlus.InputTimeoutException;
 
+import static org.junit.Assert.assertFalse;
+
 public class AsyncChannelInputPlusTest
 {
     private EmbeddedChannel channel;
@@ -45,13 +47,11 @@ public class AsyncChannelInputPlusTest
     public void setUp()
     {
         channel = new EmbeddedChannel();
-        inputPlus = new AsyncChannelInputPlus(channel);
     }
 
     @After
     public void tearDown()
     {
-        inputPlus.close();
         channel.close();
 
         if (buf != null && buf.refCnt() > 0)
@@ -66,17 +66,20 @@ public class AsyncChannelInputPlusTest
 //        Assert.assertFalse(inputPlus.isOpen());
 //    }
 
-    @Test (expected = IllegalStateException.class)
+    @Test
     public void append_closed()
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         inputPlus.requestClosure();
+        inputPlus.close();
         buf = channel.alloc().buffer(4);
-        inputPlus.append(buf);
+        assertFalse(inputPlus.append(buf));
     }
 
     @Test
     public void append_normal()
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         int size = 4;
         buf = channel.alloc().buffer(size);
         buf.writerIndex(size);
@@ -87,6 +90,7 @@ public class AsyncChannelInputPlusTest
     @Test
     public void read() throws IOException
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         // put two buffers of 8 bytes each into the queue.
         // then read an int, then a long. the latter tests offset into the inputPlus, as well as spanning across queued buffers.
         // the values of those int/long will both be '42', but spread across both queue buffers.
@@ -126,6 +130,7 @@ public class AsyncChannelInputPlusTest
     @Test
     public void available_closed()
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         inputPlus.requestClosure();
         inputPlus.unsafeAvailable();
     }
@@ -133,6 +138,7 @@ public class AsyncChannelInputPlusTest
     @Test
     public void available_HappyPath()
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         int size = 4;
         buf = channel.alloc().heapBuffer(size);
         buf.writerIndex(size);
@@ -143,6 +149,7 @@ public class AsyncChannelInputPlusTest
     @Test
     public void available_ClosedButWithBytes()
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
         int size = 4;
         buf = channel.alloc().heapBuffer(size);
         buf.writerIndex(size);
@@ -189,6 +196,8 @@ public class AsyncChannelInputPlusTest
 
     private void consumeUntilTestCycle(int nBuffs, int buffSize, int startOffset, int len) throws IOException
     {
+        inputPlus = new AsyncChannelInputPlus(channel);
+
         byte[] expectedBytes = new byte[len];
         int count = 0;
         for (int j=0; j < nBuffs; j++)
@@ -204,13 +213,14 @@ public class AsyncChannelInputPlusTest
 
             inputPlus.append(buf);
         }
-        inputPlus.append(channel.alloc().buffer(0));
+        inputPlus.requestClosure();
 
         TestableWritableByteChannel wbc = new TestableWritableByteChannel(len);
 
         inputPlus.skipBytesFully(startOffset);
         BufferedDataOutputStreamPlus writer = new BufferedDataOutputStreamPlus(wbc);
         inputPlus.consume(writer, len);
+        writer.close();
 
         Assert.assertEquals(String.format("Test with %d buffers starting at %d consuming %d bytes", nBuffs, startOffset, len),
                             len, wbc.writtenBytes.readableBytes());

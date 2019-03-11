@@ -112,6 +112,10 @@ public class AsyncChannelInputPlus extends RebufferingInputStream
         if (queue.isEmpty())
             channel.read();
 
+        currentBuf.release();
+        currentBuf = null;
+        buffer = null;
+
         ByteBuf next = null;
         try
         {
@@ -127,8 +131,6 @@ public class AsyncChannelInputPlus extends RebufferingInputStream
 
         if (next == Unpooled.EMPTY_BUFFER) // Unpooled.EMPTY_BUFFER is the indicator that the input is closed
             throw new EOFException();
-
-        currentBuf.release();
 
         currentBuf = next;
         buffer = next.nioBuffer();
@@ -151,6 +153,7 @@ public class AsyncChannelInputPlus extends RebufferingInputStream
             try
             {
                 out.write(buffer);
+                buffer.position(buffer.position() + toCopy);
             }
             finally
             {
@@ -186,7 +189,7 @@ public class AsyncChannelInputPlus extends RebufferingInputStream
 
     public boolean isEmpty()
     {
-        return queue.isEmpty() && !buffer.hasRemaining();
+        return queue.isEmpty() && (buffer == null || !buffer.hasRemaining());
     }
 
     /**
@@ -197,17 +200,33 @@ public class AsyncChannelInputPlus extends RebufferingInputStream
     @Override
     public void close()
     {
-        isClosed = true;
+        if (isClosed)
+            return;
 
         if (currentBuf != null)
+        {
             currentBuf.release();
+            currentBuf = null;
+            buffer = null;
+        }
 
-        currentBuf = null;
-        buffer = null;
+        while (true)
+        {
+            try
+            {
+                ByteBuf buf = queue.poll(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+                if (buf == Unpooled.EMPTY_BUFFER)
+                    break;
+                else
+                    buf.release();
+            }
+            catch (InterruptedException e)
+            {
+                //
+            }
+        }
 
-        ByteBuf buf;
-        while ((buf = queue.poll()) != null)
-            buf.release();
+        isClosed = true;
     }
 
     /**
