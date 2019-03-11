@@ -45,9 +45,11 @@ import org.apache.cassandra.locator.ReplicaCollection;
 import org.apache.cassandra.locator.ReplicaUtils;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
+import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -243,7 +245,7 @@ public class WriteResponseHandlerTest
 
     private static Message createDummyMessage(int target)
     {
-        return Message.builder(null, null)
+        return Message.builder(Verb.ECHO_REQ, emptyMessage)
                       .from(targets.get(target).endpoint())
                       .build();
     }
