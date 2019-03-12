@@ -28,7 +28,7 @@ import io.netty.channel.DefaultFileRegion;
 import io.netty.channel.FileRegion;
 import io.netty.channel.embedded.EmbeddedChannel;
 
-class TestChannel extends EmbeddedChannel
+public class TestChannel extends EmbeddedChannel
 {
     final int inFlightLimit;
     int inFlight;
@@ -36,7 +36,7 @@ class TestChannel extends EmbeddedChannel
     ChannelOutboundBuffer flush;
     long flushBytes;
 
-    TestChannel(int inFlightLimit)
+    public TestChannel(int inFlightLimit)
     {
         this.inFlightLimit = inFlightLimit;
     }
