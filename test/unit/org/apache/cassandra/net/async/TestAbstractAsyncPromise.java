@@ -24,18 +24,15 @@ import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Supplier;
 
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
-import org.junit.Test;
 
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
-import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.netty.util.concurrent.Promise;
 
-abstract class AbstractAsyncPromiseTest extends AbstractPromiseTest
+abstract class TestAbstractAsyncPromise extends TestAbstractPromise
 {
     <V> void testOneSuccess(Promise<V> promise, boolean setUncancellable, boolean tryOrSet, V value, V otherValue)
     {

@@ -15,18 +15,22 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
+import org.junit.AfterClass;
 import org.junit.Test;
 
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.util.concurrent.ImmediateEventExecutor;
-import io.netty.util.concurrent.Promise;
 
-public class AsyncChannelPromiseTest extends AbstractAsyncPromiseTest
+public class AsyncChannelPromiseTest extends TestAbstractAsyncPromise
 {
+    @AfterClass
+    public static void shutdown()
+    {
+        exec.shutdownNow();
+    }
+
     private ChannelPromise newPromise()
     {
         return new AsyncChannelPromise(new EmbeddedChannel());

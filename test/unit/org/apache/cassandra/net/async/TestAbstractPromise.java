@@ -26,7 +26,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
-import org.junit.AfterClass;
 import org.junit.Assert;
 
 import io.netty.util.concurrent.Promise;
@@ -34,15 +33,9 @@ import net.openhft.chronicle.core.util.ThrowingBiConsumer;
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import net.openhft.chronicle.core.util.ThrowingFunction;
 
-abstract class AbstractPromiseTest
+abstract class TestAbstractPromise
 {
-    private static final ExecutorService exec = Executors.newCachedThreadPool();
-
-    @AfterClass
-    public static void shutdown()
-    {
-        exec.shutdownNow();
-    }
+    static final ExecutorService exec = Executors.newCachedThreadPool();
 
     static class Async
     {
@@ -63,31 +56,33 @@ abstract class AbstractPromiseTest
         }
         <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Throwable failsWith)
         {
-            waitingOn.add(exec.submit(() -> AbstractPromiseTest.failure(promise, action, failsWith))::get);
+            waitingOn.add(exec.submit(() -> TestAbstractPromise.failure(promise, action, failsWith))::get);
         }
         <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Class<? extends Throwable> failsWith)
         {
-            waitingOn.add(exec.submit(() -> AbstractPromiseTest.failure(promise, action, failsWith))::get);
+            waitingOn.add(exec.submit(() -> TestAbstractPromise.failure(promise, action, failsWith))::get);
         }
         <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Predicate<Throwable> failsWith)
         {
-            waitingOn.add(exec.submit(() -> AbstractPromiseTest.failure(promise, action, failsWith))::get);
+            waitingOn.add(exec.submit(() -> TestAbstractPromise.failure(promise, action, failsWith))::get);
         }
         <P extends Promise<?>, R> void success(P promise, ThrowingFunction<P, R, ?> action, R result)
         {
-            waitingOn.add(exec.submit(() -> AbstractPromiseTest.success(promise, action, result))::get);
+            waitingOn.add(exec.submit(() -> TestAbstractPromise.success(promise, action, result))::get);
         }
     }
 
-    static <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Throwable failsWith)
+    private static <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Throwable failsWith)
     {
         failure(promise, action, t -> Objects.equals(failsWith, t));
     }
+
     static <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Class<? extends Throwable> failsWith)
     {
         failure(promise, action, failsWith::isInstance);
     }
-    static <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Predicate<Throwable> failsWith)
+
+    private static <V> void failure(Promise<V> promise, ThrowingConsumer<Promise<V>, ?> action, Predicate<Throwable> failsWith)
     {
         Throwable fail = null;
         try

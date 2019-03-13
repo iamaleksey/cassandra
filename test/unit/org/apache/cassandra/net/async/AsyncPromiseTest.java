@@ -15,17 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
+import org.junit.AfterClass;
 import org.junit.Test;
 
 import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.netty.util.concurrent.Promise;
 
-public class AsyncPromiseTest extends AbstractAsyncPromiseTest
+public class AsyncPromiseTest extends TestAbstractAsyncPromise
 {
-    <V> Promise<V> newPromise()
+    @AfterClass
+    public static void shutdown()
+    {
+        exec.shutdownNow();
+    }
+
+    private <V> Promise<V> newPromise()
     {
         return new AsyncPromise<>(ImmediateEventExecutor.INSTANCE);
     }
