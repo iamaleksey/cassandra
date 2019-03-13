@@ -30,6 +30,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.net.MessagingService.*;
 
 public class InboundConnectionSettings
@@ -76,7 +77,7 @@ public class InboundConnectionSettings
 
     public String toString()
     {
-        return String.format("address: (%s), nic: %s, encryption: %s",
+        return format("address: (%s), nic: %s, encryption: %s",
                              bindAddress, FBUtilities.getNetworkInterface(bindAddress.address), encryption);
     }
 
@@ -147,9 +148,9 @@ public class InboundConnectionSettings
     public InboundConnectionSettings withDefaults()
     {
         // this is for the socket that can be plain, only ssl, or optional plain/ssl
-        if (bindAddress.port != DatabaseDescriptor.getStoragePort())
-            throw new ConfigurationException(String.format("Local endpoint port %d doesn't match YAML configured port %d%n",
-                                                           bindAddress.port, DatabaseDescriptor.getStoragePort()));
+        if (bindAddress.port != DatabaseDescriptor.getStoragePort() && bindAddress.port != DatabaseDescriptor.getSSLStoragePort())
+            throw new ConfigurationException(format("Local endpoint port %d doesn't match YAML configured port %d or legacy SSL port %d",
+                                                    bindAddress.port, DatabaseDescriptor.getStoragePort(), DatabaseDescriptor.getSSLStoragePort()));
 
         IInternodeAuthenticator authenticator = this.authenticator;
         ServerEncryptionOptions encryption = this.encryption;

@@ -581,8 +581,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         Gossiper.instance.register(this);
         Gossiper.instance.start((int) (System.currentTimeMillis() / 1000)); // needed for node-ring gathering.
         Gossiper.instance.addLocalApplicationState(ApplicationState.NET_VERSION, valueFactory.networkVersion());
-        if (!MessagingService.instance().isListening())
-            MessagingService.instance().listen();
+        MessagingService.instance().listen();
     }
 
     public void populateTokenMetadata()
@@ -764,8 +763,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             if (DatabaseDescriptor.getReplaceTokens().size() > 0 || DatabaseDescriptor.getReplaceNode() != null)
                 throw new RuntimeException("Replace method removed; use cassandra.replace_address instead");
 
-            if (!MessagingService.instance().isListening())
-                MessagingService.instance().listen();
+            MessagingService.instance().listen();
 
             UUID localHostId = SystemKeyspace.getLocalHostId();
 

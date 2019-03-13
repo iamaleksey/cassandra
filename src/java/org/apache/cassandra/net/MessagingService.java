@@ -524,11 +524,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         return pool.connectionFor(messageOut).isConnected();
     }
 
-    public boolean isListening()
-    {
-        return inbound.isOpen();
-    }
-
     public void listen()
     {
         inbound.open();
@@ -538,5 +533,4 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         inbound.open().await();
     }
-
 }

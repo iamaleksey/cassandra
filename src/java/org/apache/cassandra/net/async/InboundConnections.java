@@ -134,7 +134,7 @@ public class InboundConnections
 
         public boolean isOpen()
         {
-            return listen != null;
+            return listen != null && listen.isOpen();
         }
     }
 
@@ -179,12 +179,12 @@ public class InboundConnections
         return new FutureCombiner(opening);
     }
 
-    public boolean isOpen()
+    public boolean isListening()
     {
         for (InboundSocket socket : sockets)
-            if (!socket.isOpen())
-                return false;
-        return true;
+            if (socket.isOpen())
+                return true;
+        return false;
     }
 
     public Future<Void> close()
@@ -199,15 +199,6 @@ public class InboundConnections
     {
         return DatabaseDescriptor.shouldListenOnBroadcastAddress()
                && !FBUtilities.getLocalAddressAndPort().equals(FBUtilities.getBroadcastAddressAndPort());
-    }
-
-    @VisibleForTesting
-    public int connectionCount()
-    {
-        int count = 0;
-        for (InboundSocket socket : sockets)
-            count += socket.connections.size();
-        return count;
     }
 
     @VisibleForTesting

@@ -30,9 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.*;
 import java.util.regex.Matcher;
 
@@ -41,18 +39,15 @@ import com.google.common.net.InetAddresses;
 
 import com.codahale.metrics.Timer;
 
-import io.netty.channel.Channel;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
+import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundConnections;
-import org.apache.cassandra.net.async.OutboundConnectionInitiator;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.NettyFactory;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.utils.FBUtilities;
 import org.caffinitas.ohc.histo.EstimatedHistogram;
 import org.junit.After;
@@ -62,9 +57,6 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
-import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 import static org.junit.Assert.*;
 
 public class MessagingServiceTest
@@ -437,7 +429,7 @@ public class MessagingServiceTest
         InetAddressAndPort address = InetAddressAndPort.getByName("127.0.0.250");
 
         //Should return null
-        Message messageOut = Message.out(Verb.GOSSIP_DIGEST_ACK, emptyMessage);
+        Message messageOut = Message.out(Verb.ECHO_REQ, EchoMessage.instance);
         assertFalse(ms.isConnected(address, messageOut));
 
         //Should tolerate null
@@ -464,44 +456,6 @@ public class MessagingServiceTest
 //        // recreate the pool/conn, and make sure the preferred ip addr is used
 //        Assert.assertEquals(privateIp, messagingService.getCurrentEndpoint(publicIp));
 //    }
-
-    @Test
-    public void testCloseInboundConnections() throws UnknownHostException, InterruptedException
-    {
-        try
-        {
-            messagingService.listen();
-            Assert.assertTrue(messagingService.isListening());
-            Assert.assertEquals(0, messagingService.inbound.connectionCount());
-
-            // now, create a connection and make sure it's in a channel group
-            InetAddressAndPort server = FBUtilities.getBroadcastAddressAndPort();
-
-            CountDownLatch latch = new CountDownLatch(1);
-            OutboundConnectionSettings settings = new OutboundConnectionSettings(server)
-                                                  .withSocketSendBufferSizeInBytes(1 << 10)
-                                                  .withDefaults(SMALL_MESSAGE, current_version);
-//            Bootstrap bootstrap = OutboundConnectionInitiator.createBootstrap();
-            AtomicReference<Channel> channel = new AtomicReference<>();
-            OutboundConnectionInitiator.initiate(NettyFactory.instance.defaultGroup().next(), SMALL_MESSAGE, settings, current_version)
-                                       .addListener(future -> {
-                                           channel.set(((OutboundConnectionInitiator.Result)future.getNow()).success().channel);
-                                                        latch.countDown();
-                                       });
-            latch.await(1, TimeUnit.SECONDS); // allow the netty pipeline/c* handshake to get set up
-            Assert.assertNotNull(channel.get());
-
-            int connectCount = messagingService.inbound.connectionCount();
-            Assert.assertTrue(connectCount > 0);
-        }
-        finally
-        {
-            // last, shutdown the MS and make sure connections are removed
-            messagingService.shutdown(true);
-            int connectCount = messagingService.inbound.connectionCount();
-            Assert.assertTrue(connectCount == 0);
-        }
-    }
 
     @Test
     public void listenPlainConnection() throws InterruptedException
@@ -579,7 +533,7 @@ public class MessagingServiceTest
 
     private void listen(ServerEncryptionOptions serverEncryptionOptions, boolean listenOnBroadcastAddr) throws InterruptedException
     {
-        InetAddress listenAddress = null;
+        InetAddress listenAddress = FBUtilities.getJustLocalAddress();
         if (listenOnBroadcastAddr)
         {
             DatabaseDescriptor.setShouldListenOnBroadcastAddress(true);
@@ -594,7 +548,7 @@ public class MessagingServiceTest
         try
         {
             connections.open().await();
-            Assert.assertTrue(connections.isOpen());
+            Assert.assertTrue(connections.isListening());
 
             Set<InetAddressAndPort> expect = new HashSet<>();
             expect.add(InetAddressAndPort.getByAddressOverrideDefaults(listenAddress, DatabaseDescriptor.getStoragePort()));
@@ -607,7 +561,7 @@ public class MessagingServiceTest
                     expect.add(InetAddressAndPort.getByAddressOverrideDefaults(FBUtilities.getBroadcastAddressAndPort().address, DatabaseDescriptor.getSSLStoragePort()));
             }
 
-            Assert.assertEquals(expect.size(), connections.connectionCount());
+            Assert.assertEquals(expect.size(), connections.sockets().size());
 
             final int legacySslPort = DatabaseDescriptor.getSSLStoragePort();
             for (InboundConnections.InboundSocket socket : connections.sockets())
@@ -624,7 +578,7 @@ public class MessagingServiceTest
         finally
         {
             connections.close().await();
-            Assert.assertEquals(0, connections.connectionCount());
+            Assert.assertFalse(connections.isListening());
         }
     }
 
