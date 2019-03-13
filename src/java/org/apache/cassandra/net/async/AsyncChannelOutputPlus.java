@@ -58,7 +58,7 @@ public class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlus
     private final int bufferSize;
 
     /**
-     * the maximum {@link #highWaterMark} and minimum {€link #lowWaterMark} number of bytes we have flushing
+     * the maximum {@link #highWaterMark} and minimum {@link #lowWaterMark} number of bytes we have flushing
      * during which we should still be writing to the channel.
      *
      * i.e., if we are at or below the {@link #lowWaterMark} we should definitely start writing again;
