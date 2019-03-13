@@ -28,7 +28,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.Consumer;
-import java.util.zip.CRC32;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -781,9 +780,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
          */
         boolean supply(ByteBuf buf)
         {
-            int uncomsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, buf.readableBytes());
+            int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, buf.readableBytes());
             input.supply(buf);
-            return uncomsumed <= maxUnconsumedBytes;
+            return unconsumed <= maxUnconsumedBytes;
         }
 
         private void onBufConsumed(int size)
