@@ -23,6 +23,7 @@ import java.util.concurrent.TimeUnit;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.junit.Before;
@@ -216,7 +217,7 @@ public class ReadExecutorTest
         @Override
         public Message createMessage()
         {
-            return Message.out(Verb.ECHO_REQ, emptyMessage);
+            return Message.out(Verb.ECHO_REQ, EchoMessage.instance);
         }
 
     }
