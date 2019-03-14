@@ -234,25 +234,29 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public void unsafeSetHandler(Supplier<IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
+    public Supplier<IVerbHandler<?>> unsafeSetHandler(Supplier<IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
     {
+        Supplier<IVerbHandler<?>> original = this.handler;
         Field field = Verb.class.getDeclaredField("handler");
         field.setAccessible(true);
         Field modifiers = Field.class.getDeclaredField("modifiers");
         modifiers.setAccessible(true);
         modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
         field.set(this, handler);
+        return original;
     }
 
     @VisibleForTesting
-    public void unsafeSetSerializer(Supplier<IVersionedSerializer<?>> serializer) throws NoSuchFieldException, IllegalAccessException
+    public Supplier<IVersionedSerializer<?>> unsafeSetSerializer(Supplier<IVersionedSerializer<?>> serializer) throws NoSuchFieldException, IllegalAccessException
     {
+        Supplier<IVersionedSerializer<?>> original = this.serializer;
         Field field = Verb.class.getDeclaredField("serializer");
         field.setAccessible(true);
         Field modifiers = Field.class.getDeclaredField("modifiers");
         modifiers.setAccessible(true);
         modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
         field.set(this, serializer);
+        return original;
     }
 
     private static final Verb[] idToVerbMap;

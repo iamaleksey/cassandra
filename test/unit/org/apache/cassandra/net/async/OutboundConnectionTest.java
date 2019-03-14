@@ -19,14 +19,19 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Uninterruptibles;
+import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Assert;
 import org.junit.BeforeClass;
@@ -40,6 +45,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.EmptyMessage;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
@@ -53,6 +59,28 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 
 public class OutboundConnectionTest
 {
+    private final Map<Verb, Supplier<IVersionedSerializer<?>>> serializers = new HashMap<>();
+    private final Map<Verb, Supplier<IVerbHandler<?>>> handlers = new HashMap<>();
+
+    private void unsafeSetSerializer(Verb verb, Supplier<IVersionedSerializer<?>> supplier) throws Throwable
+    {
+        serializers.putIfAbsent(verb, verb.unsafeSetSerializer(supplier));
+    }
+
+    private void unsafeSetHandler(Verb verb, Supplier<IVerbHandler<?>> supplier) throws Throwable
+    {
+        handlers.putIfAbsent(verb, verb.unsafeSetHandler(supplier));
+    }
+
+    @After
+    public void resetVerbs() throws Throwable
+    {
+        for (Map.Entry<Verb, Supplier<IVersionedSerializer<?>>> e : serializers.entrySet())
+            e.getKey().unsafeSetSerializer(e.getValue());
+        for (Map.Entry<Verb, Supplier<IVerbHandler<?>>> e : handlers.entrySet())
+            e.getKey().unsafeSetHandler(e.getValue());
+    }
+
     @BeforeClass
     public static void startup()
     {
@@ -121,6 +149,7 @@ public class OutboundConnectionTest
         for (Settings s : SETTINGS)
             doTest(s, test);
     }
+
     private void doTest(Settings settings, SendTest test) throws Throwable
     {
         InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
@@ -148,7 +177,7 @@ public class OutboundConnectionTest
         test((inbound, outbound, endpoint) -> {
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
-            Verb._TEST_1.unsafeSetHandler(() -> msg -> received.countDown());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
@@ -163,7 +192,6 @@ public class OutboundConnectionTest
             Assert.assertEquals(0, outbound.droppedDueToError());
             Assert.assertEquals(0, outbound.droppedDueToTimeout());
             Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
-            Verb._TEST_1.unsafeSetHandler(() -> null);
         });
     }
 
@@ -173,7 +201,7 @@ public class OutboundConnectionTest
         test((inbound, outbound, endpoint) -> {
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
-            Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<EmptyMessage>()
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<EmptyMessage>()
             {
                 public void serialize(EmptyMessage emptyMessage, DataOutputPlus out, int version) throws IOException
                 {
@@ -190,7 +218,7 @@ public class OutboundConnectionTest
                     return LARGE_MESSAGE_THRESHOLD + 1;
                 }
             });
-            Verb._TEST_1.unsafeSetHandler(() -> msg -> received.countDown());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
@@ -205,7 +233,6 @@ public class OutboundConnectionTest
             Assert.assertEquals(0, outbound.droppedDueToError());
             Assert.assertEquals(0, outbound.droppedDueToTimeout());
             Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
-            Verb._TEST_1.unsafeSetHandler(() -> null);
         });
     }
 
@@ -238,7 +265,7 @@ public class OutboundConnectionTest
             }, message, endpoint, Long.MAX_VALUE);
             message = message.withId(id);
             AtomicInteger delivered = new AtomicInteger();
-            Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<Object>()
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object o, DataOutputPlus out, int version) throws IOException
                 {
@@ -257,7 +284,7 @@ public class OutboundConnectionTest
                     return 4 << 16;
                 }
             });
-            Verb._TEST_1.unsafeSetHandler(() -> msg -> delivered.incrementAndGet());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> delivered.incrementAndGet());
             outbound.enqueue(message);
             done.await(10L, TimeUnit.SECONDS);
             Assert.assertEquals(0, delivered.get());
@@ -282,7 +309,7 @@ public class OutboundConnectionTest
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
-            Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<Object>()
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object o, DataOutputPlus out, int version) throws IOException
                 {
@@ -311,7 +338,7 @@ public class OutboundConnectionTest
                     return 1;
                 }
             });
-            Verb._TEST_1.unsafeSetHandler(() -> msg -> done.countDown());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             done.await(30L, TimeUnit.SECONDS);
@@ -369,4 +396,113 @@ public class OutboundConnectionTest
         });
     }
 
+    @Test
+    public void testMessagePurging() throws Throwable
+    {
+        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
+        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+        MessagingService.instance().removeInbound(endpoint);
+
+        OutboundConnectionSettings settings = new OutboundConnectionSettings(endpoint);
+        settings = settings.withDefaults(SMALL_MESSAGE);
+
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(
+            new ResourceLimits.Concurrent(settings.applicationReserveSendQueueEndpointCapacityInBytes),
+                settings.applicationReserveSendQueueGlobalCapacityInBytes);
+
+        OutboundConnection outbound = new OutboundConnection(SMALL_MESSAGE,
+                                                             settings,
+                                                             reserveCapacityInBytes);
+
+        Runnable testWhileDisconnected = () -> {
+            try
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+                    outbound.enqueue(message);
+                    Assert.assertFalse(outbound.isConnected());
+                    Assert.assertEquals(outbound.queueSize(), 1);
+                    CompletableFuture.runAsync(() -> {
+                        while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
+                    }).get(10, TimeUnit.SECONDS);
+                    // Message should have been purged
+                    Assert.assertEquals(outbound.queueSize(), 0);
+                }
+            }
+            catch (Throwable t)
+            {
+                throw new RuntimeException(t);
+            }
+        };
+
+        testWhileDisconnected.run();
+
+        try
+        {
+            inbound.open();
+            CountDownLatch latch = new CountDownLatch(1);
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+            Assert.assertEquals(outbound.queueSize(), 1);
+            latch.await(10, TimeUnit.SECONDS);
+        }
+        finally
+        {
+            inbound.close().await(10, TimeUnit.SECONDS);
+            // Wait until disconnected
+            CompletableFuture.runAsync(() -> {
+                while (outbound.isConnected() && !Thread.interrupted()) {}
+            }).get(10, TimeUnit.SECONDS);
+        }
+
+        testWhileDisconnected.run();
+    }
+
+    @Test
+    public void testMessageDeliveryOnReconnect() throws Throwable
+    {
+        MessagingService.instance().messageHandlers.clear();
+        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
+        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+
+
+        OutboundConnectionSettings settings = new OutboundConnectionSettings(endpoint);
+        settings = settings.withDefaults(SMALL_MESSAGE);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(
+            new ResourceLimits.Concurrent(settings.applicationReserveSendQueueEndpointCapacityInBytes),
+                settings.applicationReserveSendQueueGlobalCapacityInBytes);
+
+        OutboundConnection outbound = new OutboundConnection(SMALL_MESSAGE,
+                                                             settings,
+                                                             reserveCapacityInBytes);
+
+        try
+        {
+            inbound.open();
+            CountDownLatch latch = new CountDownLatch(1);
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+            latch.await(10, TimeUnit.SECONDS);
+            Assert.assertEquals(latch.getCount(), 0);
+
+            // Simulate disconnect
+            inbound.close().await(10, TimeUnit.SECONDS);
+            MessagingService.instance().removeInbound(endpoint);
+            inbound = new InboundConnections(new InboundConnectionSettings());
+            inbound.open();
+
+            CountDownLatch latch2 = new CountDownLatch(1);
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
+            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+
+            latch2.await(10, TimeUnit.SECONDS);
+            Assert.assertEquals(latch2.getCount(), 0);
+        }
+        finally
+        {
+            inbound.close().await(10, TimeUnit.SECONDS);
+            outbound.close(false).await(10, TimeUnit.SECONDS);
+        }
+    }
 }

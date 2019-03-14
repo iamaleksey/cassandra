@@ -32,6 +32,8 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -869,7 +871,11 @@ public class OutboundConnection
 
             JVMStabilityInspector.inspectThrowable(cause);
             isFailingToConnect = true;
-            connecting = eventLoop.schedule(this::attempt, max(100, retryRateMillis), MILLISECONDS);
+            if (!queue.isEmpty())
+                connecting = eventLoop.schedule(this::attempt, max(100, retryRateMillis), MILLISECONDS);
+            else
+                assert connecting == null;
+
             retryRateMillis = min(1000, retryRateMillis * 2);
             ++failedConnections;
         }
@@ -895,6 +901,16 @@ public class OutboundConnection
                     }
                     payloadAllocator = success.allocator;
                     channel = success.channel;
+
+                    // Make sure
+                    channel.pipeline().addLast("handleUnregistered", new ChannelInboundHandlerAdapter() {
+                        @Override
+                        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+                            super.channelUnregistered(ctx);
+                            closeChannel(channel);
+                        }
+                    });
+
                     isFailingToConnect = false;
                     isConnected = true;
                     ++successfulConnections;
@@ -1013,7 +1029,7 @@ public class OutboundConnection
     private void scheduleMaintenanceWhileDisconnected()
     {
         assert whileDisconnected == null;
-        whileDisconnected = eventLoop.schedule(queue::maybePruneExpired, 100L, TimeUnit.MILLISECONDS);
+        whileDisconnected = eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS);
     }
 
     /**
@@ -1349,6 +1365,12 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
+    int queueSize()
+    {
+        return queue.size();
+    }
+
+    @VisibleForTesting
     void unsafeSetMessagingVersion(int messagingVersion)
     {
         this.messagingVersion = messagingVersion;
@@ -1360,6 +1382,13 @@ public class OutboundConnection
     {
         delivery.schedule();
     }
+
+    @VisibleForTesting
+    Future<?> unsafeGetWhileDisconnected()
+    {
+        return whileDisconnected;
+    }
+
 
     @VisibleForTesting
     void unsafeRunOnDelivery(Runnable run)
