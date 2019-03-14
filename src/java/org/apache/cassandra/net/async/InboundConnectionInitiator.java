@@ -327,9 +327,9 @@ public class InboundConnectionInitiator
                         });
 
                         if (version < VERSION_30)
-                        {
                             throw new IOException(String.format("Unable to read obsolete message version %s from %s; The earliest version supported is 3.0.0", version, ctx.channel().remoteAddress()));
-                        }
+
+                        // we don't setup the messaging pipeline here, as the legacy messaging handshake requires one more message to finish
                     }
                 }
             }
