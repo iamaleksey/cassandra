@@ -450,7 +450,7 @@ public class StorageProxy implements StorageProxyMBean
                 StageManager.getStage(PAXOS_PREPARE_REQ.stage).execute(() -> {
                     try
                     {
-                        Message<PrepareResponse> response = Message.out(PAXOS_PREPARE_RSP, doPrepare(toPrepare));
+                        Message<PrepareResponse> response = Message.respond(message, doPrepare(toPrepare));
                         callback.response(response);
                     }
                     catch (Exception ex)
@@ -480,7 +480,7 @@ public class StorageProxy implements StorageProxyMBean
                 StageManager.getStage(PAXOS_PROPOSE_REQ.stage).execute(() -> {
                     try
                     {
-                        Message<Boolean> response = Message.out(PAXOS_PROPOSE_RSP, doPropose(proposal));
+                        Message<Boolean> response = Message.respond(message, doPropose(proposal));
                         callback.response(response);
                     }
                     catch (Exception ex)
