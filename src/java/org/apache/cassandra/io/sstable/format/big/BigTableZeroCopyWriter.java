@@ -215,7 +215,7 @@ public class BigTableZeroCopyWriter extends SSTable implements SSTableMultiWrite
         try
         {
             in.consume(writer, size);
-            // throw new IOException(format("Failed to read correct number of bytes from channel %s", writer));
+            writer.sync();
         }
         // FIXME: handle ACIP exceptions properly
         catch (EOFException | AsyncChannelInputPlus.InputTimeoutException e)

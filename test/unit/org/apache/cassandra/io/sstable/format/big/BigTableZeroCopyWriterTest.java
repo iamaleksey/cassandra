@@ -130,12 +130,16 @@ public class BigTableZeroCopyWriterTest
     @Test
     public void writeDataFile_RebufferingByteBufDataInputPlus()
     {
-        writeDataTestCycle(buffer -> {
-            EmbeddedChannel channel = new EmbeddedChannel();
-            AsyncChannelInputPlus inputPlus = new AsyncChannelInputPlus(channel);
-            inputPlus.append(Unpooled.wrappedBuffer(buffer));
-            return inputPlus;
-        });
+        try (AsyncChannelInputPlus input = new AsyncChannelInputPlus(new EmbeddedChannel()))
+        {
+            writeDataTestCycle(buffer ->
+            {
+                input.append(Unpooled.wrappedBuffer(buffer));
+                return input;
+            });
+
+            input.requestClosure();
+        }
     }
 
 
