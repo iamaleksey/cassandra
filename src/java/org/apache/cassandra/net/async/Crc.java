@@ -35,10 +35,13 @@ public class Crc
         }
     };
 
+    private static final byte[] initialBytes = new byte[] { (byte) 0xFA, (byte) 0x2D, (byte) 0x55, (byte) 0xCA };
+
     static CRC32 crc32()
     {
         CRC32 crc = crc32.get();
         crc.reset();
+        crc.update(initialBytes);
         return crc;
     }
 
