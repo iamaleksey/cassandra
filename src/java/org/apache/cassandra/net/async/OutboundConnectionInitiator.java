@@ -58,6 +58,7 @@ import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
 import static java.util.concurrent.TimeUnit.*;
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.async.HandshakeProtocol.*;
 import static org.apache.cassandra.net.async.NettyFactory.newSslHandler;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.incompatible;
@@ -148,18 +149,6 @@ public class OutboundConnectionInitiator
     }
 
     /**
-     * For streaming.
-     *
-     * TODO we should better integrate creating an outbound streaming connection
-     */
-    public static Bootstrap createBootstrap(EventLoop eventLoop, Type type, OutboundConnectionSettings template, int requestMessagingVersion)
-    {
-        return new OutboundConnectionInitiator(type, template.withDefaults(type, requestMessagingVersion),
-                                               requestMessagingVersion, new AsyncPromise<>(eventLoop))
-               .createBootstrap(eventLoop);
-    }
-
-    /**
      * Create the {@link Bootstrap} for connecting to a remote peer. This method does <b>not</b> attempt to connect to the peer,
      * and thus does not block.
      */
@@ -227,7 +216,7 @@ public class OutboundConnectionInitiator
             ctx.writeAndFlush(msg.encode())
                .addListener(future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
 
-            if (type == Type.STREAM)
+            if (type == Type.STREAM && requestMessagingVersion < VERSION_40)
                 ctx.pipeline().remove(this);
 
             ctx.fireChannelActive();
@@ -265,7 +254,9 @@ public class OutboundConnectionInitiator
                         result = success(ctx.channel(), useMessagingVersion);
                 }
                 else
-                {   // pre40 responses only
+                {
+                    assert type != Type.STREAM;
+                    // pre40 responses only
                     if (peerMessagingVersion == requestMessagingVersion)
                         result = success(ctx.channel(), requestMessagingVersion);
                     else if (peerMessagingVersion < settings.acceptVersions.min)

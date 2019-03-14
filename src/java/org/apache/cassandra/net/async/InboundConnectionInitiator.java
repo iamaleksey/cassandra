@@ -257,12 +257,14 @@ public class InboundConnectionInitiator
                     default:
                         throw new IllegalStateException();
                 }
+
                 int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
-                ctx.writeAndFlush(new HandshakeProtocol.AcceptInbound(useMessagingVersion, accept.max).encode(ctx.alloc()))
-                   .addListener((ChannelFutureListener) future -> {
-                       if (!future.isSuccess())
-                           exceptionCaught(future.channel(), future.cause());
-                   });
+                ByteBuf flush = new HandshakeProtocol.AcceptInbound(useMessagingVersion, accept.max).encode(ctx.alloc());
+
+                ctx.writeAndFlush(flush, AsyncChannelPromise.withListener(ctx.channel(), (ChannelFutureListener) future -> {
+                    if (!future.isSuccess())
+                        exceptionCaught(future.channel(), future.cause());
+                }));
 
                 if (initiate.acceptVersions.min > current_version)
                 {

@@ -336,8 +336,10 @@ public class OutboundConnectionSettings
             connectTo = SystemKeyspace.getPreferredIP(endpoint);
         connectTo = maybeWithSecurePort(connectTo, messagingVersion, withEncryption());
 
+        // by default we do not compress streaming at the pipeline level,
+        // as the streams will (typically) handle compression themselves
         if (compress == null)
-            compress = shouldCompressConnection(snitch, self, endpoint);
+            compress = type != STREAM && shouldCompressConnection(snitch, self, endpoint);
 
         if (crc == null)
             crc = messagingVersion >= VERSION_40 && !compress;

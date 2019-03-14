@@ -19,31 +19,20 @@
 package org.apache.cassandra.streaming;
 
 import java.io.IOException;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.Uninterruptibles;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
-import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
-import org.apache.cassandra.config.DatabaseDescriptor;
+import io.netty.util.concurrent.Future;
 import org.apache.cassandra.net.async.NettyFactory;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.*;
 
 public class DefaultConnectionFactory implements StreamConnectionFactory
 {
-    private static final Logger logger = LoggerFactory.getLogger(DefaultConnectionFactory.class);
-
-    @VisibleForTesting
-    public static long MAX_WAIT_TIME_NANOS = TimeUnit.SECONDS.toNanos(30);
     @VisibleForTesting
     public static int MAX_CONNECT_ATTEMPTS = 3;
 
@@ -52,33 +41,16 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
     {
         EventLoop eventLoop = NettyFactory.instance.outboundStreamingGroup().next();
 
-        // TODO: why do we have our own connection logic here?  WHy not reuse that in OC?
-        Bootstrap bootstrap = OutboundConnectionInitiator.createBootstrap(eventLoop, STREAM, template, messagingVersion);
-
-        int connectionAttemptCount = 0;
-        long now = System.nanoTime();
-        final long end = now + MAX_WAIT_TIME_NANOS;
-        final Channel channel;
+        int attempts = 0;
         while (true)
         {
-            ChannelFuture channelFuture = bootstrap.connect();
-            channelFuture.awaitUninterruptibly(end - now, TimeUnit.MILLISECONDS);
-            if (channelFuture.isSuccess())
-            {
-                channel = channelFuture.channel();
-                break;
-            }
+            Future<OutboundConnectionInitiator.Result> result = OutboundConnectionInitiator.initiate(eventLoop, STREAM, template.withDefaults(STREAM, messagingVersion), messagingVersion);
+            result.awaitUninterruptibly(); // initiate has its own timeout, so this is "guaranteed" to return relatively promptly
+            if (result.isSuccess())
+                return result.getNow().success().channel;
 
-            connectionAttemptCount++;
-            now = System.nanoTime();
-            if (connectionAttemptCount == MAX_CONNECT_ATTEMPTS || end - now <= 0)
-                throw new IOException("failed to connect to " + template.endpoint + " for streaming data", channelFuture.cause());
-
-            long waitms = DatabaseDescriptor.getRpcTimeout(MILLISECONDS) * (long)Math.pow(2, connectionAttemptCount);
-            logger.warn("Failed attempt {} to connect to {}. Retrying in {} ms.", connectionAttemptCount, template.endpoint, waitms);
-            Uninterruptibles.sleepUninterruptibly(waitms, TimeUnit.MILLISECONDS);
+            if (++attempts == MAX_CONNECT_ATTEMPTS)
+                throw new IOException("failed to connect to " + template.endpoint + " for streaming data", result.cause());
         }
-
-        return channel;
     }
 }
