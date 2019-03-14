@@ -213,8 +213,8 @@ public class OutboundConnectionInitiator
             Mode mode = type == Type.STREAM ? Mode.STREAM : Mode.REGULAR;
             Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, mode, settings.withCompression(), settings.withCrc(), getBroadcastAddressAndPort());
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectTo, msg);
-            ctx.writeAndFlush(msg.encode())
-               .addListener(future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
+            AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
+                  future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
 
             if (type == Type.STREAM && requestMessagingVersion < VERSION_40)
                 ctx.pipeline().remove(this);
@@ -267,7 +267,7 @@ public class OutboundConnectionInitiator
                     if (result.isSuccess())
                     {
                         ConfirmOutboundPre40 message = new ConfirmOutboundPre40(settings.acceptVersions.max, getBroadcastAddressAndPort());
-                        ctx.writeAndFlush(message.encode());
+                        AsyncChannelPromise.writeAndFlush(ctx, message.encode());
                     }
                 }
 

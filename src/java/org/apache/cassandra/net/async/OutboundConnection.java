@@ -687,7 +687,7 @@ public class OutboundConnection
 
                 // wrap the buffer ready to send
                 ByteBuf buf = BufferPoolAllocator.wrapUnshared(sending);
-                ChannelFuture result = channel.writeAndFlush(buf, new AsyncChannelPromise(channel));
+                ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, buf);
                 sending = null;
 
                 if (result.isSuccess())

@@ -51,6 +51,7 @@ import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
+import org.apache.cassandra.net.async.AsyncChannelPromise;
 import org.apache.cassandra.net.async.NettyFactory;
 import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
@@ -260,8 +261,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
         assert nioBuf.position() == nioBuf.limit();
         buf.writerIndex(nioBuf.position());
 
-        ChannelFuture channelFuture = channel.writeAndFlush(buf);
-        channelFuture.addListener(future -> listener.operationComplete(future));
+        AsyncChannelPromise.writeAndFlush(channel, buf, listener);
     }
 
     /**

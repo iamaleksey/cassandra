@@ -19,6 +19,8 @@
 package org.apache.cassandra.net.async;
 
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -45,9 +47,34 @@ public class AsyncChannelPromise extends AsyncPromise<Void> implements ChannelPr
         this.channel = channel;
     }
 
+    public static AsyncChannelPromise withListener(ChannelHandlerContext context, GenericFutureListener<? extends Future<? super Void>> listener)
+    {
+        return withListener(context.channel(), listener);
+    }
+
     public static AsyncChannelPromise withListener(Channel channel, GenericFutureListener<? extends Future<? super Void>> listener)
     {
         return new AsyncChannelPromise(channel, listener);
+    }
+
+    public static ChannelFuture writeAndFlush(ChannelHandlerContext context, Object message, GenericFutureListener<? extends Future<? super Void>> listener)
+    {
+        return context.writeAndFlush(message, withListener(context.channel(), listener));
+    }
+
+    public static ChannelFuture writeAndFlush(Channel channel, Object message, GenericFutureListener<? extends Future<? super Void>> listener)
+    {
+        return channel.writeAndFlush(message, withListener(channel, listener));
+    }
+
+    public static ChannelFuture writeAndFlush(ChannelHandlerContext context, Object message)
+    {
+        return context.writeAndFlush(message, new AsyncChannelPromise(context.channel()));
+    }
+
+    public static ChannelFuture writeAndFlush(Channel channel, Object message)
+    {
+        return channel.writeAndFlush(message, new AsyncChannelPromise(channel));
     }
 
     public Channel channel()
