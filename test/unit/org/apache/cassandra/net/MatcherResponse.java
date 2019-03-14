@@ -25,7 +25,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.async.InboundCallbacks;
+
+import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -34,11 +40,13 @@ import org.apache.cassandra.locator.InetAddressAndPort;
  */
 public class MatcherResponse
 {
+    private static final Logger logger = LoggerFactory.getLogger(MatcherResponse.class);
+
     private final Matcher<?> matcher;
     private final Set<Long> sendResponses = new HashSet<>();
     private final MockMessagingSpy spy = new MockMessagingSpy();
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
-    private MessageSink.Sink sink;
+    private MessageSink.OutboundSink sink;
 
     MatcherResponse(Matcher<?> matcher)
     {
@@ -153,7 +161,7 @@ public class MatcherResponse
 
         assert sink == null: "destroy() must be called first to register new response";
 
-        sink = new MessageSink.Sink()
+        sink = new MessageSink.OutboundSink()
         {
             public boolean allowOutbound(Message message, InetAddressAndPort to)
             {
@@ -185,7 +193,9 @@ public class MatcherResponse
                             if (cb != null)
                                 cb.callback.response(response);
                             else
-                                MessagingService.instance().process(response);
+                                MessagingService.instance().process(response, 0, InboundCallbacks.OnMessageProcessed.NOOP,
+                                                                    (verb, messageSize, timeElapsed, unit) -> logger.warn("Expired message {} of size {} ({} {})", verb, prettyPrintMemory(messageSize), timeElapsed, unit.toString().toLowerCase()));
+
                             spy.matchingResponse(response);
                         }
                     }).start();
@@ -194,13 +204,8 @@ public class MatcherResponse
                 }
                 return true;
             }
-
-            public boolean allowInbound(Message message)
-            {
-                return true;
-            }
         };
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().messageSink.addOutbound(sink);
 
         return spy;
     }
@@ -210,6 +215,6 @@ public class MatcherResponse
      */
     public void destroy()
     {
-        MessagingService.instance().messageSink.remove(sink);
+        MessagingService.instance().messageSink.removeOutbound(sink);
     }
 }

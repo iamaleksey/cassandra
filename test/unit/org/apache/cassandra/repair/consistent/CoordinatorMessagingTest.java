@@ -281,7 +281,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         ).respond((msgOut, to) ->
                   {
                       if(timeout.contains(to)) return null;
-                      else return Message.respond(msgOut, new PrepareConsistentResponse(sessionIdFunc.apply((PrepareConsistentRequest) msgOut.payload), to, !failed.contains(to)));
+                      else return Message.out(Verb.REPAIR_REQ, new PrepareConsistentResponse(sessionIdFunc.apply((PrepareConsistentRequest) msgOut.payload), to, !failed.contains(to)));
                   });
     }
 
@@ -294,7 +294,7 @@ public class CoordinatorMessagingTest extends AbstractRepairTest
         ).respond((msgOut, to) ->
                   {
                       if(timeout.contains(to)) return null;
-                      else return Message.respond(msgOut,
+                      else return Message.out(Verb.REPAIR_REQ,
                                                   new FinalizePromise(((FinalizePropose) msgOut.payload).sessionID, to, !failed.contains(to)));
                   });
     }

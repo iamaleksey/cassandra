@@ -56,6 +56,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.async.InboundCallbacks;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -813,7 +814,7 @@ public class RepairJobTest
                 {
                     case SNAPSHOT:
                         Message<?> messageIn = Message.respond(message, emptyMessage);
-                        MessagingService.instance().process(messageIn);
+                        MessagingService.instance().process(messageIn, 0, InboundCallbacks.OnMessageProcessed.NOOP, InboundCallbacks.OnMessageExpired.NOOP);
                         break;
                     case VALIDATION_REQUEST:
                         session.validationComplete(sessionJobDesc, to, mockTrees.get(to));

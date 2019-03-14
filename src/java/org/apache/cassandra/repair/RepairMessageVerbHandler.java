@@ -33,7 +33,6 @@ import org.apache.cassandra.streaming.PreviewKind;
 
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.ParameterType.FAILURE_RESPONSE;
-import static org.apache.cassandra.net.Verb.REPAIR_RSP;
 
 /**
  * Handles all repair related message.

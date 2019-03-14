@@ -64,8 +64,9 @@ import org.apache.cassandra.utils.MBeanWrapper;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
+import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
-public final class MessagingService extends MessagingServiceMBeanImpl
+    public final class MessagingService extends MessagingServiceMBeanImpl
 {
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
@@ -424,11 +425,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         {
             throw new IOError(e);
         }
-    }
-
-    public void process(Message message)
-    {
-        process(message, 0, OnMessageProcessed.NOOP, OnMessageExpired.NOOP);
     }
 
     public void process(Message message, int messageSize, OnMessageProcessed onProcessed, OnMessageExpired onExpired)
