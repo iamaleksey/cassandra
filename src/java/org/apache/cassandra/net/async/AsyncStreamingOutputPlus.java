@@ -46,14 +46,14 @@ import static java.lang.Math.min;
  * The correctness of this class depends on the ChannelPromise we create against a Channel always being completed,
  * which appears to be a guarantee provided by Netty so long as the event loop is running.
  */
-public class StreamMessageOutputPlus extends AsyncChannelOutputPlus
+public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
 {
-    private static final Logger logger = LoggerFactory.getLogger(StreamMessageOutputPlus.class);
+    private static final Logger logger = LoggerFactory.getLogger(AsyncStreamingOutputPlus.class);
 
     final int defaultLowWaterMark;
     final int defaultHighWaterMark;
 
-    public StreamMessageOutputPlus(Channel channel)
+    public AsyncStreamingOutputPlus(Channel channel)
     {
         super(channel);
         WriteBufferWaterMark waterMark = channel.config().getWriteBufferWaterMark();

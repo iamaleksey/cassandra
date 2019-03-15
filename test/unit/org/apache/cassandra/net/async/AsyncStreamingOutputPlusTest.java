@@ -30,7 +30,7 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class StreamMessageOutputPlusTest
+public class AsyncStreamingOutputPlusTest
 {
 
     static
@@ -43,7 +43,7 @@ public class StreamMessageOutputPlusTest
     {
         EmbeddedChannel channel = new TestChannel(4);
         ByteBuf read;
-        try (StreamMessageOutputPlus out = new StreamMessageOutputPlus(channel))
+        try (AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel))
         {
             out.writeInt(1);
             assertEquals(0, out.flushed());

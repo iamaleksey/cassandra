@@ -52,7 +52,7 @@ import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.async.AsyncChannelInputPlus;
-import org.apache.cassandra.net.async.StreamMessageOutputPlus;
+import org.apache.cassandra.net.async.AsyncStreamingOutputPlus;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -122,7 +122,7 @@ public class ZeroCopyStreamingBenchmark
             blockStreamWriter = new CassandraEntireSSTableStreamWriter(sstable, session, CassandraOutgoingFile.getComponentManifest(sstable));
 
             CapturingNettyChannel blockStreamCaptureChannel = new CapturingNettyChannel(STREAM_SIZE);
-            StreamMessageOutputPlus out = new StreamMessageOutputPlus(blockStreamCaptureChannel);
+            AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(blockStreamCaptureChannel);
             blockStreamWriter.write(out);
             serializedBlockStream = blockStreamCaptureChannel.getSerializedStream();
             out.close();
@@ -152,7 +152,7 @@ public class ZeroCopyStreamingBenchmark
             partialStreamWriter = new CassandraStreamWriter(sstable, sstable.getPositionsForRanges(requestedRanges), session);
 
             CapturingNettyChannel partialStreamChannel = new CapturingNettyChannel(STREAM_SIZE);
-            partialStreamWriter.write(new StreamMessageOutputPlus(partialStreamChannel));
+            partialStreamWriter.write(new AsyncStreamingOutputPlus(partialStreamChannel));
             serializedPartialStream = partialStreamChannel.getSerializedStream();
 
             CassandraStreamHeader partialSSTableStreamHeader =
@@ -230,7 +230,7 @@ public class ZeroCopyStreamingBenchmark
     public void blockStreamWriter(BenchmarkState state) throws Exception
     {
         EmbeddedChannel channel = createMockNettyChannel();
-        StreamMessageOutputPlus out = new StreamMessageOutputPlus(channel);
+        AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel);
         state.blockStreamWriter.write(out);
         out.close();
         channel.finishAndReleaseAll();
@@ -254,7 +254,7 @@ public class ZeroCopyStreamingBenchmark
     public void partialStreamWriter(BenchmarkState state) throws Exception
     {
         EmbeddedChannel channel = createMockNettyChannel();
-        StreamMessageOutputPlus out = new StreamMessageOutputPlus(channel);
+        AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel);
         state.partialStreamWriter.write(out);
         out.close();
         channel.finishAndReleaseAll();

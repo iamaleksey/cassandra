@@ -810,7 +810,7 @@ public class OutboundConnection
             if (send == null)
                 return false;
 
-            MessageOutputPlus out = new MessageOutputPlus(channel, DEFAULT_BUFFER_SIZE, payloadAllocator);
+            AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, DEFAULT_BUFFER_SIZE, payloadAllocator);
             try
             {
                 Tracing.instance.traceOutgoingMessage(send, settings.connectTo);

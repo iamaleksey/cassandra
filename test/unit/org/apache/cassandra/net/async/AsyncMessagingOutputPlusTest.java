@@ -19,7 +19,6 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 
 import org.junit.Test;
 
@@ -27,12 +26,10 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.async.FrameEncoder.PayloadAllocator;
-import org.apache.cassandra.streaming.StreamManager;
-import org.apache.cassandra.utils.FBUtilities;
 
 import static org.junit.Assert.assertEquals;
 
-public class MessageOutputPlusTest
+public class AsyncMessagingOutputPlusTest
 {
 
     static
@@ -45,7 +42,7 @@ public class MessageOutputPlusTest
     {
         EmbeddedChannel channel = new TestChannel(4);
         ByteBuf read;
-        try (MessageOutputPlus out = new MessageOutputPlus(channel, 8, PayloadAllocator.simple))
+        try (AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, 8, PayloadAllocator.simple))
         {
             out.writeInt(1);
             assertEquals(0, out.flushed());

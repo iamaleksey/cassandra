@@ -40,7 +40,8 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.getBits;
-import static org.apache.cassandra.net.Message.validateMagic;
+import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
+import static org.apache.cassandra.net.async.Crc.*;
 import static org.apache.cassandra.net.async.Crc.computeCrc32;
 
 /**
@@ -169,7 +170,7 @@ public class HandshakeProtocol
 
             try (ByteBufDataInputPlus in = new ByteBufDataInputPlus(buf))
             {
-                validateMagic(in.readInt());
+                validateLegacyProtocolMagic(in.readInt());
                 int flags = in.readInt();
 
                 int requestedMessagingVersion = getBits(flags, 8, 8);
@@ -189,7 +190,7 @@ public class HandshakeProtocol
                     int computed = computeCrc32(buf, start, buf.readerIndex());
                     int read = in.readInt();
                     if (read != computed)
-                        throw new Message.UnrecoverableCRCMismatch(read, computed);
+                        throw new InvalidCrc(read, computed);
                 }
 
                 return new Initiate(requestedMessagingVersion,
@@ -272,7 +273,7 @@ public class HandshakeProtocol
             return buffer;
         }
 
-        static AcceptInbound maybeDecode(ByteBuf in) throws Message.UnrecoverableCRCMismatch
+        static AcceptInbound maybeDecode(ByteBuf in) throws InvalidCrc
         {
             int readerIndex = in.readerIndex();
             if (in.readableBytes() < 4)
@@ -291,7 +292,7 @@ public class HandshakeProtocol
                 int computed = computeCrc32(in, readerIndex, readerIndex + 8);
                 int read = in.readInt();
                 if (read != computed)
-                    throw new Message.UnrecoverableCRCMismatch(read, computed);
+                    throw new InvalidCrc(read, computed);
             }
             return new AcceptInbound(useMessagingVersion, maxMessagingVersion);
         }

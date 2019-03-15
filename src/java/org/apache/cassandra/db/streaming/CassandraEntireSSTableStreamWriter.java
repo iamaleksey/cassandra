@@ -27,7 +27,7 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.sstable.Component;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
-import org.apache.cassandra.net.async.StreamMessageOutputPlus;
+import org.apache.cassandra.net.async.AsyncStreamingOutputPlus;
 import org.apache.cassandra.streaming.ProgressInfo;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.streaming.StreamSession;
@@ -62,7 +62,7 @@ public class CassandraEntireSSTableStreamWriter
      * @param out where this writes data to
      * @throws IOException on any I/O error
      */
-    public void write(StreamMessageOutputPlus out) throws IOException
+    public void write(AsyncStreamingOutputPlus out) throws IOException
     {
         long totalSize = manifest.totalSize();
         logger.debug("[Stream #{}] Start streaming sstable {} to {}, repairedAt = {}, totalSize = {}",

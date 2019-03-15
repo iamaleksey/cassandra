@@ -43,9 +43,9 @@ import io.netty.util.concurrent.EventExecutorGroup;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Message.RecoverableCRCMismatch;
-import org.apache.cassandra.net.Message.UnrecoverableCRCMismatch;
+import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.async.Crc.InvalidCrc;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.InboundCallbacks.MessageProcessor;
 import org.apache.cassandra.net.async.InboundCallbacks.OnHandlerClosed;
@@ -156,7 +156,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws UnrecoverableCRCMismatch
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         if (isClosed())
             ReferenceCountUtil.release(msg);
@@ -166,7 +166,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             doChannelRead((IntactFrame) msg);
     }
 
-    private void doChannelRead(IntactFrame frame) throws UnrecoverableCRCMismatch
+    private void doChannelRead(IntactFrame frame) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         final ByteBuf buf = frame.contents;
         final int readableBytes = buf.readableBytes();
@@ -241,10 +241,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     /*
      * Handle a corrupted LZ4 frame.
      */
-    private void handleCorruption(CorruptFrame corruption) throws UnrecoverableCRCMismatch
+    private void handleCorruption(CorruptFrame corruption) throws InvalidCrc
     {
         if (!corruption.isRecoverable())
-            throw new UnrecoverableCRCMismatch(corruption.readCRC, corruption.computedCRC);
+            throw new InvalidCrc(corruption.readCRC, corruption.computedCRC);
 
         final int frameSize = corruption.frameSize;
         receivedBytes += frameSize;
@@ -292,7 +292,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void processMessages(ByteBuf buf) throws UnrecoverableCRCMismatch
+    private void processMessages(ByteBuf buf) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         processMessages(buf, Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
     }
@@ -301,7 +301,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
      * Process a stream of messages (potentially not ending with a completely read one). The buffer starts at a boundary
      * of a new message. Will process at most count messages.
      */
-    private void processMessages(ByteBuf buf, int count, Limit endpointReserve, Limit globalReserve) throws UnrecoverableCRCMismatch
+    private void processMessages(ByteBuf buf, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         try
         {
@@ -317,7 +317,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private boolean processMessage(ByteBuf buf, Limit endpointReserve, Limit globalReserve) throws UnrecoverableCRCMismatch
+    private boolean processMessage(ByteBuf buf, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         int messageSize = serializer.messageSize(buf, version);
 
@@ -378,11 +378,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         catch (UnknownTableException e)
         {
             noSpamLogger.info("UnknownTableException caught while reading a small message from {}: {}", peer, e);
-            onError.call(e, messageSize);
-        }
-        catch (RecoverableCRCMismatch e)
-        {
-            logger.error("Invalid, recoverable message CRC mismatch encountered while reading a small message from " + peer, e);
             onError.call(e, messageSize);
         }
         catch (IOException e)
@@ -544,7 +539,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (null != stash)
                 processMessages(stash, maxCount, endpointReserve, globalReserve);
         }
-        catch (UnrecoverableCRCMismatch e)
+        catch (InvalidLegacyProtocolMagic | InvalidCrc e)
         {
             exceptionCaught(e);
         }
@@ -567,7 +562,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (null != stash)
                 processMessages(stash);
         }
-        catch (UnrecoverableCRCMismatch e)
+        catch (InvalidLegacyProtocolMagic | InvalidCrc e)
         {
             exceptionCaught(e);
         }
@@ -634,7 +629,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         JVMStabilityInspector.inspectThrowable(cause);
 
-        if (cause instanceof UnrecoverableCRCMismatch)
+        if (cause instanceof Message.InvalidLegacyProtocolMagic)
             logger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} - closing the connection", peer);
         else
             logger.error("Unexpected exception caught while processing inbound messages from " + peer + "; terminating connection", cause);
@@ -743,11 +738,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                  * Closure was requested from the event loop, before we could deserialize the message fully;
                  * we are done here, and AIP will have closed itself.
                  */
-                onError.call(e, messageSize);
-            }
-            catch (RecoverableCRCMismatch e)
-            {
-                logger.error("Invalid, recoverable message CRC mismatch encountered while reading a large message from " + peer, e);
                 onError.call(e, messageSize);
             }
             catch (UnknownTableException e)

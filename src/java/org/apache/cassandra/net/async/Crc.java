@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.zip.CRC32;
 
@@ -36,6 +37,14 @@ public class Crc
     };
 
     private static final byte[] initialBytes = new byte[] { (byte) 0xFA, (byte) 0x2D, (byte) 0x55, (byte) 0xCA };
+
+    public static final class InvalidCrc extends IOException
+    {
+        public InvalidCrc(int read, int computed)
+        {
+            super(String.format("Read %d, Computed %d", read, computed));
+        }
+    }
 
     static CRC32 crc32()
     {

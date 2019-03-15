@@ -49,7 +49,7 @@ import static java.lang.Math.min;
  * The correctness of this class depends on the ChannelPromise we create against a Channel always being completed,
  * which appears to be a guarantee provided by Netty so long as the event loop is running.
  */
-public class MessageOutputPlus extends AsyncChannelOutputPlus
+public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
 {
     /**
      * the maximum {@link #highWaterMark} and minimum {@link #lowWaterMark} number of bytes we have flushing
@@ -72,7 +72,7 @@ public class MessageOutputPlus extends AsyncChannelOutputPlus
     private final FrameEncoder.PayloadAllocator payloadAllocator;
     private volatile FrameEncoder.Payload payload;
 
-    public MessageOutputPlus(Channel channel, int bufferSize, FrameEncoder.PayloadAllocator payloadAllocator)
+    public AsyncMessagingOutputPlus(Channel channel, int bufferSize, FrameEncoder.PayloadAllocator payloadAllocator)
     {
         super(channel);
         WriteBufferWaterMark waterMark = channel.config().getWriteBufferWaterMark();

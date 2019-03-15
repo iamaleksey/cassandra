@@ -43,10 +43,9 @@ import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.AsyncChannelOutputPlus;
 import org.apache.cassandra.net.async.ByteBufDataInputPlus;
 import org.apache.cassandra.net.async.SharedDefaultFileRegion;
-import org.apache.cassandra.net.async.StreamMessageOutputPlus;
+import org.apache.cassandra.net.async.AsyncStreamingOutputPlus;
 import org.apache.cassandra.schema.CachingParams;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
@@ -115,7 +114,7 @@ public class CassandraEntireSSTableStreamWriterTest
         CassandraEntireSSTableStreamWriter writer = new CassandraEntireSSTableStreamWriter(sstable, session, CassandraOutgoingFile.getComponentManifest(sstable));
 
         EmbeddedChannel channel = new EmbeddedChannel();
-        StreamMessageOutputPlus out = new StreamMessageOutputPlus(channel);
+        AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel);
         writer.write(out);
 
         Queue msgs = channel.outboundMessages();
@@ -134,7 +133,7 @@ public class CassandraEntireSSTableStreamWriterTest
         // This is needed as Netty releases the ByteBuffers as soon as the channel is flushed
         ByteBuf serializedFile = Unpooled.buffer(8192);
         EmbeddedChannel channel = createMockNettyChannel(serializedFile);
-        StreamMessageOutputPlus out = new StreamMessageOutputPlus(channel);
+        AsyncStreamingOutputPlus out = new AsyncStreamingOutputPlus(channel);
 
         writer.write(out);
 

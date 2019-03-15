@@ -51,7 +51,7 @@ import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.net.async.AsyncChannelPromise;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
-import org.apache.cassandra.net.async.StreamMessageOutputPlus;
+import org.apache.cassandra.net.async.AsyncStreamingOutputPlus;
 import org.apache.cassandra.streaming.StreamConnectionFactory;
 import org.apache.cassandra.streaming.StreamSession;
 import org.apache.cassandra.streaming.StreamingMessageSender;
@@ -323,7 +323,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
                     throw new IllegalStateException("channel's transferring state is currently set to true. refusing to start new stream");
 
                 // close the DataOutputStreamPlus as we're done with it - but don't close the channel
-                try (DataOutputStreamPlus outPlus = new StreamMessageOutputPlus(channel))
+                try (DataOutputStreamPlus outPlus = new AsyncStreamingOutputPlus(channel))
                 {
                     StreamMessage.serialize(msg, outPlus, streamingVersion, session);
                     channel.flush();

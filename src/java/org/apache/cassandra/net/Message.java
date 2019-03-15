@@ -35,6 +35,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.async.Crc;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
@@ -342,26 +343,18 @@ public class Message<T>
         return "(from:" + from + ", type:" + verb.stage + " verb:" + verb + ')';
     }
 
-    public static final class UnrecoverableCRCMismatch extends IOException
+    public static final class InvalidLegacyProtocolMagic extends IOException
     {
-        public UnrecoverableCRCMismatch(int read, int computed)
+        public InvalidLegacyProtocolMagic(int read)
         {
-            super(String.format("Read %d, Computed %d", read, computed));
+            super(String.format("Read %d, Expected %d", read, PROTOCOL_MAGIC));
         }
     }
 
-    public static final class RecoverableCRCMismatch extends IOException
-    {
-        public RecoverableCRCMismatch(int read, int computed)
-        {
-            super(String.format("Read %d, Computed %d", read, computed));
-        }
-    }
-
-    public static void validateMagic(int magic) throws UnrecoverableCRCMismatch
+    public static void validateLegacyProtocolMagic(int magic) throws InvalidLegacyProtocolMagic
     {
         if (magic != PROTOCOL_MAGIC)
-            throw new UnrecoverableCRCMismatch(magic, PROTOCOL_MAGIC);
+            throw new InvalidLegacyProtocolMagic(magic);
     }
 
     /**
@@ -445,7 +438,7 @@ public class Message<T>
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          */
-        public int messageSize(ByteBuf buf, int version) throws UnrecoverableCRCMismatch
+        public int messageSize(ByteBuf buf, int version) throws InvalidLegacyProtocolMagic, Crc.InvalidCrc
         {
             return version >= VERSION_40 ? messageSizePost40(buf) : messageSizePre40(buf);
         }
@@ -510,7 +503,7 @@ public class Message<T>
             int readCRC = readCRC24(in);
             int computedCRC = crc24(size, SIZE_SIZE);
             if (readCRC != computedCRC)
-                throw new UnrecoverableCRCMismatch(readCRC, computedCRC);
+                throw new Crc.InvalidCrc(readCRC, computedCRC);
 
             long messageId = in.readUnsignedVInt();
             long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
@@ -543,7 +536,7 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePost40(ByteBuf buf) throws UnrecoverableCRCMismatch
+        private int messageSizePost40(ByteBuf buf) throws Crc.InvalidCrc
         {
             int index = buf.readerIndex();
 
@@ -554,7 +547,7 @@ public class Message<T>
             int readCRC = getCRC24(buf, index + SIZE_SIZE);
             int computedCRC = crc24(size, SIZE_SIZE);
             if (readCRC != computedCRC)
-                throw new UnrecoverableCRCMismatch(readCRC, computedCRC);
+                throw new Crc.InvalidCrc(readCRC, computedCRC);
             return size;
         }
 
@@ -671,7 +664,7 @@ public class Message<T>
 
         private <T> Message<T> deserializePre40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            validateMagic(in.readInt());
+            validateLegacyProtocolMagic(in.readInt());
             int messageId = in.readInt();
             long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
             InetAddressAndPort from = CompactEndpointSerializationHelper.instance.deserialize(in, version);
@@ -707,7 +700,7 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePre40(ByteBuf buf) throws UnrecoverableCRCMismatch
+        private int messageSizePre40(ByteBuf buf) throws InvalidLegacyProtocolMagic
         {
             int index = buf.readerIndex();
             final int limit = index + buf.readableBytes();
@@ -716,7 +709,7 @@ public class Message<T>
             index += 4;
             if (index > limit)
                 return -1;
-            validateMagic(buf.getInt(index - 4));
+            validateLegacyProtocolMagic(buf.getInt(index - 4));
 
             // rest of prefix
             index += PRE_40_MESSAGE_PREFIX_SIZE - 4;
