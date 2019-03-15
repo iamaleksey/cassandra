@@ -37,6 +37,10 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelOutboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -505,4 +509,135 @@ public class OutboundConnectionTest
             outbound.close(false).await(10, TimeUnit.SECONDS);
         }
     }
+
+    @Test
+    public void testRecoverableCorruptedMessageDelivery() throws Throwable
+    {
+        test((inbound, outbound, endpoint) -> {
+            AtomicInteger counter = new AtomicInteger();
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
+            {
+                public void serialize(Object o, DataOutputPlus out, int version) throws IOException
+                {
+                    out.writeInt((Integer) o);
+                }
+
+                public Object deserialize(DataInputPlus in, int version) throws IOException
+                {
+                    if (counter.getAndIncrement() == 3)
+                        throw new IOException();
+
+                    return in.readInt();
+                }
+
+                public long serializedSize(Object o, int version)
+                {
+                    return Integer.BYTES;
+                }
+            });
+
+            // Connect
+            connect(outbound);
+
+            CountDownLatch latch = new CountDownLatch(4);
+            unsafeSetHandler(Verb._TEST_1, () -> message -> latch.countDown());
+            for (int i = 0; i < 5; i++)
+                outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
+
+            latch.await(10, TimeUnit.SECONDS);
+            Assert.assertEquals(latch.getCount(), 0);
+            Assert.assertEquals(counter.get(), 6);
+        });
+    }
+
+    @Test
+    public void testUnrecoverableCorruptedMessageDelivery() throws Throwable
+    {
+        test((inbound, outbound, endpoint) -> {
+            AtomicInteger counter = new AtomicInteger();
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
+            {
+                public void serialize(Object o, DataOutputPlus out, int version) throws IOException
+                {
+                    out.writeInt((Integer) o);
+                }
+
+                public Object deserialize(DataInputPlus in, int version) throws IOException
+                {
+                    if (counter.getAndIncrement() == 3)
+                        throw new RuntimeException();
+
+                    return in.readInt();
+                }
+
+                public long serializedSize(Object o, int version)
+                {
+                    return Integer.BYTES;
+                }
+            });
+
+            connect(outbound);
+            for (int i = 0; i < 5; i++)
+                outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
+            CompletableFuture.runAsync(() -> {
+                while (outbound.isConnected() && !Thread.interrupted()) {}
+            }).get(10, TimeUnit.SECONDS);
+            Assert.assertFalse(outbound.isConnected());
+            Assert.assertEquals(inbound.errorCount(), 1);
+
+            connect(outbound);
+        });
+    }
+
+    @Test
+    public void testCRCCorruption() throws Throwable
+    {
+        test((inbound, outbound, endpoint) -> {
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
+            {
+                public void serialize(Object o, DataOutputPlus out, int version) throws IOException
+                {
+                    out.writeInt((Integer) o);
+                }
+
+                public Object deserialize(DataInputPlus in, int version) throws IOException
+                {
+                    return in.readInt();
+                }
+
+                public long serializedSize(Object o, int version)
+                {
+                    return Integer.BYTES;
+                }
+            });
+
+            connect(outbound);
+
+            outbound.unsafeGetChannel().pipeline().addFirst(new ChannelOutboundHandlerAdapter() {
+                public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception {
+                    ByteBuf bb = (ByteBuf) msg;
+                    bb.setByte(0, 0xAB);
+                    ctx.write(msg, promise);
+                }
+            });
+            outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
+            CompletableFuture.runAsync(() -> {
+                while (outbound.isConnected() && !Thread.interrupted()) {}
+            }).get(10, TimeUnit.SECONDS);
+            Assert.assertFalse(outbound.isConnected());
+            // TODO: count corruptions
+
+            connect(outbound);
+        });
+    }
+
+    private void connect(OutboundConnection outbound) throws Throwable
+    {
+        CountDownLatch latch = new CountDownLatch(1);
+        unsafeSetHandler(Verb._TEST_1, () -> message -> latch.countDown());
+        outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
+        latch.await(10, TimeUnit.SECONDS);
+        Assert.assertTrue(outbound.isConnected());
+    }
+
 }
