@@ -28,6 +28,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -164,11 +165,12 @@ public class HandshakeProtocol
 
         static Initiate maybeDecode(ByteBuf buf) throws IOException
         {
-            int start = buf.readerIndex();
             if (buf.readableBytes() < MIN_LENGTH)
                 return null;
 
-            try (ByteBufDataInputPlus in = new ByteBufDataInputPlus(buf))
+            ByteBuffer nio = buf.nioBuffer();
+            int start = nio.position();
+            try (DataInputBuffer in = new DataInputBuffer(nio, false))
             {
                 validateLegacyProtocolMagic(in.readInt());
                 int flags = in.readInt();
@@ -187,12 +189,13 @@ public class HandshakeProtocol
                 {
                     from = CompactEndpointSerializationHelper.instance.deserialize(in, requestedMessagingVersion);
 
-                    int computed = computeCrc32(buf, start, buf.readerIndex());
+                    int computed = computeCrc32(nio, start, nio.position());
                     int read = in.readInt();
                     if (read != computed)
                         throw new InvalidCrc(read, computed);
                 }
 
+                buf.skipBytes(nio.position() - start);
                 return new Initiate(requestedMessagingVersion,
                                     minMessagingVersion == 0 && maxMessagingVersion == 0
                                         ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
@@ -201,7 +204,6 @@ public class HandshakeProtocol
             }
             catch (EOFException e)
             {
-                buf.readerIndex(start);
                 return null;
             }
         }
@@ -357,19 +359,20 @@ public class HandshakeProtocol
         @SuppressWarnings("resource")
         static ConfirmOutboundPre40 maybeDecode(ByteBuf in)
         {
-            in.markReaderIndex();
-            DataInputPlus input = new ByteBufDataInputPlus(in);
+            ByteBuffer nio = in.nioBuffer();
+            int start = nio.position();
+            DataInputPlus input = new DataInputBuffer(nio, false);
             try
             {
                 int version = input.readInt();
                 InetAddressAndPort address = CompactEndpointSerializationHelper.instance.deserialize(input, version);
+                in.skipBytes(nio.position() - start);
                 return new ConfirmOutboundPre40(version, address);
             }
             catch (EOFException e)
             {
                 // makes the assumption we didn't have enough bytes to deserialize an IPv6 address,
                 // as we only check the MIN_LENGTH of the buf.
-                in.resetReaderIndex();
                 return null;
             }
             catch (IOException e)

@@ -42,8 +42,8 @@ import org.apache.cassandra.db.RowUpdateBuilder;
 import org.apache.cassandra.db.compaction.CompactionManager;
 import org.apache.cassandra.io.sstable.SSTableMultiWriter;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.ByteBufDataInputPlus;
 import org.apache.cassandra.net.async.SharedDefaultFileRegion;
 import org.apache.cassandra.net.async.AsyncStreamingOutputPlus;
 import org.apache.cassandra.schema.CachingParams;
@@ -155,7 +155,7 @@ public class CassandraEntireSSTableStreamWriterTest
 
         CassandraEntireSSTableStreamReader reader = new CassandraEntireSSTableStreamReader(new StreamMessageHeader(sstable.metadata().id, peer, session.planId(), 0, 0, 0, null), header, session);
 
-        SSTableMultiWriter sstableWriter = reader.read(new ByteBufDataInputPlus(serializedFile));
+        SSTableMultiWriter sstableWriter = reader.read(new DataInputBuffer(serializedFile.nioBuffer(), false));
         Collection<SSTableReader> newSstables = sstableWriter.finished();
 
         assertEquals(1, newSstables.size());
