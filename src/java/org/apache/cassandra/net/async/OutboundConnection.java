@@ -43,6 +43,7 @@ import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
+import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.FBUtilities;
@@ -53,7 +54,7 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiate;
+import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateMessaging;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 /**
@@ -889,7 +890,7 @@ public class OutboundConnection
             ++failedConnections;
         }
 
-        void onCompletedHandshake(Result result)
+        void onCompletedHandshake(Result<MessagingSuccess> result)
         {
             switch (result.outcome)
             {
@@ -902,7 +903,7 @@ public class OutboundConnection
                     assert !isClosed;
                     whileDisconnected.cancel(false);
                     whileDisconnected = null;
-                    Result.Success success = result.success();
+                    MessagingSuccess success = result.success();
                     if (messagingVersion != success.messagingVersion)
                     {
                         messagingVersion = success.messagingVersion;
@@ -950,13 +951,13 @@ public class OutboundConnection
         {
             // system defaults etc might have changed, so refresh before connect
             settings = template.withDefaults(type, messagingVersion);
-            connecting = initiate(eventLoop, type, settings, messagingVersion)
+            connecting = initiateMessaging(eventLoop, type, settings, messagingVersion)
                          .addListener(future -> {
                              connecting = null;
                              if (future.isCancelled())
                                  return;
                              if (future.isSuccess())
-                                 onCompletedHandshake((Result) future.getNow());
+                                 onCompletedHandshake((Result<MessagingSuccess>) future.getNow());
                              else
                                  onFailure(future.cause());
                          });

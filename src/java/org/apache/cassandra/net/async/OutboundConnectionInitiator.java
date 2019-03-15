@@ -54,6 +54,8 @@ import org.apache.cassandra.net.async.HandshakeProtocol.Initiate;
 import org.apache.cassandra.net.async.HandshakeProtocol.Mode;
 import org.apache.cassandra.net.async.HandshakeProtocol.AcceptInbound;
 import org.apache.cassandra.net.async.OutboundConnection.Type;
+import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
+import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 
@@ -61,9 +63,11 @@ import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.async.HandshakeProtocol.*;
 import static org.apache.cassandra.net.async.NettyFactory.newSslHandler;
+import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.incompatible;
+import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.messagingSuccess;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.retry;
-import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.success;
+import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.streamingSuccess;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
 /**
@@ -78,17 +82,17 @@ import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
  * This class extends {@link ByteToMessageDecoder}, which is a {@link ChannelInboundHandler}, because this handler
  * waits for the peer's handshake response (the {@link AcceptInbound} of the internode messaging handshake protocol).
  */
-public class OutboundConnectionInitiator
+public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionInitiator.Result.Success>
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundConnectionInitiator.class);
 
     private final Type type;
     private final OutboundConnectionSettings settings;
     private final int requestMessagingVersion; // for pre40 nodes only
-    private final Promise<Result> resultPromise;
+    private final Promise<Result<SuccessType>> resultPromise;
 
     private OutboundConnectionInitiator(Type type, OutboundConnectionSettings settings,
-                                        int requestMessagingVersion, Promise<Result> resultPromise)
+                                        int requestMessagingVersion, Promise<Result<SuccessType>> resultPromise)
     {
         this.type = type;
         this.requestMessagingVersion = requestMessagingVersion;
@@ -101,13 +105,24 @@ public class OutboundConnectionInitiator
      * if the other node supports a newer version, or doesn't support this version, we will fail to connect
      * and try again with the version they reported
      */
-    public static Future<Result> initiate(EventLoop eventLoop, Type type, OutboundConnectionSettings settings, int requestMessagingVersion)
+    public static Future<Result<StreamingSuccess>> initiateStreaming(EventLoop eventLoop, OutboundConnectionSettings settings, int requestMessagingVersion)
     {
-        return new OutboundConnectionInitiator(type, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
+        return new OutboundConnectionInitiator<StreamingSuccess>(STREAM, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
                .initiate(eventLoop);
     }
 
-    private Future<Result> initiate(EventLoop eventLoop)
+    /**
+     * Initiate a connection with the requested messaging version.
+     * if the other node supports a newer version, or doesn't support this version, we will fail to connect
+     * and try again with the version they reported
+     */
+    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, Type type, OutboundConnectionSettings settings, int requestMessagingVersion)
+    {
+        return new OutboundConnectionInitiator<MessagingSuccess>(type, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
+               .initiate(eventLoop);
+    }
+
+    private Future<Result<SuccessType>> initiate(EventLoop eventLoop)
     {
         if (logger.isTraceEnabled())
             logger.trace("creating outbound bootstrap to {}, requestVersion: {}", settings, requestMessagingVersion);
@@ -152,7 +167,6 @@ public class OutboundConnectionInitiator
      * Create the {@link Bootstrap} for connecting to a remote peer. This method does <b>not</b> attempt to connect to the peer,
      * and thus does not block.
      */
-    @VisibleForTesting
     private Bootstrap createBootstrap(EventLoop eventLoop)
     {
         Bootstrap bootstrap = NettyFactory.instance.newBootstrap(eventLoop, settings.tcpUserTimeoutInMS)
@@ -210,13 +224,13 @@ public class OutboundConnectionInitiator
         @Override
         public void channelActive(final ChannelHandlerContext ctx)
         {
-            Mode mode = type == Type.STREAM ? Mode.STREAM : Mode.REGULAR;
+            Mode mode = type == STREAM ? Mode.STREAM : Mode.REGULAR;
             Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, mode, settings.withCompression(), settings.withCrc(), getBroadcastAddressAndPort());
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectTo, msg);
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
                   future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
 
-            if (type == Type.STREAM && requestMessagingVersion < VERSION_40)
+            if (type == STREAM && requestMessagingVersion < VERSION_40)
                 ctx.pipeline().remove(this);
 
             ctx.fireChannelActive();
@@ -246,7 +260,7 @@ public class OutboundConnectionInitiator
                 logger.trace("received second handshake message from peer {}, msg = {}", settings.connectTo, msg);
 
                 FrameEncoder frameEncoder = null;
-                Result result;
+                Result<SuccessType> result;
                 if (useMessagingVersion > 0)
                 {
                     if (useMessagingVersion < settings.acceptVersions.min || useMessagingVersion > settings.acceptVersions.max)
@@ -255,19 +269,27 @@ public class OutboundConnectionInitiator
                     }
                     else
                     {
-                        if (settings.withCompression)
-                            frameEncoder = FrameEncoderLZ4.fastInstance;
-                        else if (settings.withCrc)
-                            frameEncoder = FrameEncoderCrc.instance;
-                        else
-                            frameEncoder = FrameEncoderNone.instance;
+                        // This is a bit ugly
+                        if (type != STREAM)
+                        {
+                            if (settings.withCompression)
+                                frameEncoder = FrameEncoderLZ4.fastInstance;
+                            else if (settings.withCrc)
+                                frameEncoder = FrameEncoderCrc.instance;
+                            else
+                                frameEncoder = FrameEncoderNone.instance;
 
-                        result = success(ctx.channel(), useMessagingVersion, frameEncoder.allocator());
+                            result = (Result<SuccessType>) messagingSuccess(ctx.channel(), useMessagingVersion, frameEncoder.allocator());
+                        }
+                        else
+                        {
+                            result = (Result<SuccessType>) streamingSuccess(ctx.channel(), useMessagingVersion);
+                        }
                     }
                 }
                 else
                 {
-                    assert type != Type.STREAM;
+                    assert type != STREAM;
                     // pre40 responses only
                     if (peerMessagingVersion == requestMessagingVersion)
                     {
@@ -276,7 +298,7 @@ public class OutboundConnectionInitiator
                         else
                             frameEncoder = FrameEncoderNone.instance;
 
-                        result = success(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
+                        result = (Result<SuccessType>) messagingSuccess(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
                     }
                     else if (peerMessagingVersion < settings.acceptVersions.min)
                         result = incompatible(-1, peerMessagingVersion);
@@ -292,8 +314,12 @@ public class OutboundConnectionInitiator
 
                 if (result.isSuccess())
                 {
-                    frameEncoder.addLastTo(ctx.pipeline());
                     ctx.pipeline().remove(this);
+                    if (type != STREAM)
+                    {
+                        assert frameEncoder != null;
+                        frameEncoder.addLastTo(ctx.pipeline());
+                    }
                 }
                 else
                 {
@@ -324,7 +350,7 @@ public class OutboundConnectionInitiator
      *  2) we may decide to disconnect to reconnect with another protocol version (namely, the version is passed in this result).
      *  3) we can have a negotiation failure for an unknown reason. (#sadtrombone)
      */
-    public static class Result
+    public static class Result<SuccessType extends Result.Success>
     {
         /**
          * Describes the result of receiving the response back from the peer (Message 2 of the handshake)
@@ -335,21 +361,37 @@ public class OutboundConnectionInitiator
             SUCCESS, RETRY, INCOMPATIBLE
         }
 
-        public static class Success extends Result
+        public static class Success<SuccessType extends Success> extends Result<SuccessType>
         {
             public final Channel channel;
             public final int messagingVersion;
-            public final FrameEncoder.PayloadAllocator allocator;
-            Success(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator)
+            Success(Channel channel, int messagingVersion)
             {
                 super(Outcome.SUCCESS);
                 this.channel = channel;
                 this.messagingVersion = messagingVersion;
+            }
+        }
+
+        public static class StreamingSuccess extends Success<StreamingSuccess>
+        {
+            StreamingSuccess(Channel channel, int messagingVersion)
+            {
+                super(channel, messagingVersion);
+            }
+        }
+
+        public static class MessagingSuccess extends Success<MessagingSuccess>
+        {
+            public final FrameEncoder.PayloadAllocator allocator;
+            MessagingSuccess(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator)
+            {
+                super(channel, messagingVersion);
                 this.allocator = allocator;
             }
         }
 
-        static class Retry extends Result
+        static class Retry<SuccessType extends Success> extends Result<SuccessType>
         {
             final int withMessagingVersion;
             Retry(int withMessagingVersion)
@@ -359,7 +401,7 @@ public class OutboundConnectionInitiator
             }
         }
 
-        static class Incompatible extends Result
+        static class Incompatible<SuccessType extends Success> extends Result<SuccessType>
         {
             final int closestSupportedVersion;
             final int maxMessagingVersion;
@@ -379,14 +421,15 @@ public class OutboundConnectionInitiator
         }
 
         boolean isSuccess() { return outcome == Outcome.SUCCESS; }
-        public Success success() { return (Success) this; }
-        static Result success(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator) { return new Success(channel, messagingVersion, allocator); }
+        public SuccessType success() { return (SuccessType) this; }
+        static MessagingSuccess messagingSuccess(Channel channel, int messagingVersion, FrameEncoder.PayloadAllocator allocator) { return new MessagingSuccess(channel, messagingVersion, allocator); }
+        static StreamingSuccess streamingSuccess(Channel channel, int messagingVersion) { return new StreamingSuccess(channel, messagingVersion); }
 
         public Retry retry() { return (Retry) this; }
-        static Result retry(int withMessagingVersion) { return new Retry(withMessagingVersion); }
+        static <SuccessType extends Success> Result<SuccessType> retry(int withMessagingVersion) { return new Retry<>(withMessagingVersion); }
 
         public Incompatible incompatible() { return (Incompatible) this; }
-        static Result incompatible(int closestSupportedVersion, int maxMessagingVersion) { return new Incompatible(closestSupportedVersion, maxMessagingVersion); }
+        static <SuccessType extends Success> Result<SuccessType> incompatible(int closestSupportedVersion, int maxMessagingVersion) { return new Incompatible(closestSupportedVersion, maxMessagingVersion); }
     }
 
 }

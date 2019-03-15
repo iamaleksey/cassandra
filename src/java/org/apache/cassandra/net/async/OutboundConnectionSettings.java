@@ -342,7 +342,7 @@ public class OutboundConnectionSettings
             compress = type != STREAM && shouldCompressConnection(snitch, self, endpoint);
 
         if (crc == null)
-            crc = messagingVersion >= VERSION_40 && !compress;
+            crc = type != STREAM && messagingVersion >= VERSION_40 && !compress;
 
         if (tcpNoDelay == null)
             tcpNoDelay = isInLocalDC(snitch, self, endpoint)
