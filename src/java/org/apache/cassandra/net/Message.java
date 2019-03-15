@@ -46,7 +46,6 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
-import static org.apache.cassandra.net.async.Crc.crc24;
 
 /*
  * * @param <T> The type of the message payload.
@@ -367,23 +366,21 @@ public class Message<T>
      *
      * Legacy Notes (see {@link Serializer#serialize(Message, DataOutputPlus, int)} for complete details):
      * - pre 4.0, the IP address was sent along in the header, before the verb. The IP address may be either IPv4 (4 bytes) or IPv6 (16 bytes).
-     * - pre-4.0, the message size was not included on the wire; in 4.0 and up it is an int.
+     * - pre-4.0, the message size was not included on the wire; in 4.0 and up it is an unsigned int.
      * - pre-4.0, the verb was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
      * - pre-4.0, the payloadSize was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
      * - pre-4.0, the count of a parameter values was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
      * - pre-4.0, parameter names were encoded as strings; in 4.0 they are encoded as enum id vints.
      * - pre-4.0, expiry time wasn't encoded at all; in 4.0 it's an unsigned vint
      * - pre-4.0, message id was an int; in 4.0 and up it's an unsigned vint
-     * - pre-4.0, messages included PROTOCOL MAGIC BYTES; post-4.0, we rely on length CRC24 instead
+     * - pre-4.0, messages included PROTOCOL MAGIC BYTES; post-4.0, we rely on frame CRCs instead
      *
      * <pre>
      * {@code
      *            1 1 1 1 1 2 2 2 2 2 3
      *  0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * | Message Size (int)            |
-     * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * | Size CRC24 (3 bytes)          |
+     * | Message Size (vint)           |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * | Message ID (vint)             |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -410,7 +407,6 @@ public class Message<T>
      */
     public static final class Serializer
     {
-        private static final int SIZE_SIZE = 4;
         private static final int CREATION_TIME_SIZE = 4;
 
         private Serializer()
@@ -470,13 +466,9 @@ public class Message<T>
          * 4.0 ser/deser
          */
 
-        private static final int CRC24_SIZE = 3;
-
         private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
-            int size = message.serializedSize(version);
-            out.writeInt(size);
-            writeCRC24(out, crc24(size, SIZE_SIZE));
+            out.writeUnsignedVInt(message.serializedSize(version));
             out.writeUnsignedVInt(message.id);
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
@@ -499,12 +491,7 @@ public class Message<T>
 
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            int size = in.readInt();
-            int readCRC = readCRC24(in);
-            int computedCRC = crc24(size, SIZE_SIZE);
-            if (readCRC != computedCRC)
-                throw new Crc.InvalidCrc(readCRC, computedCRC);
-
+            in.readUnsignedVInt(); // skip size
             long messageId = in.readUnsignedVInt();
             long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
             long expiresAtNanos = creationTimeNanos + TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt());
@@ -521,8 +508,6 @@ public class Message<T>
         {
             long size = 0;
 
-            size += SIZE_SIZE;
-            size += CRC24_SIZE;
             size += TypeSizes.sizeofUnsignedVInt(message.id);
             size += CREATION_TIME_SIZE;
             size += TypeSizes.sizeofUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
@@ -533,22 +518,17 @@ public class Message<T>
             size += TypeSizes.sizeofUnsignedVInt(payloadSize);
             size += payloadSize;
 
+            size += VIntCoding.computeUnsignedVIntSize(VIntCoding.computeUnsignedVIntSize(size) + size);
+
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePost40(ByteBuf buf) throws Crc.InvalidCrc
+        private int messageSizePost40(ByteBuf buf)
         {
-            int index = buf.readerIndex();
-
-            if (buf.readableBytes() < SIZE_SIZE + CRC24_SIZE)
-                return -1; // not enough bytes to read size + size CRC yet
-
-            int size = buf.getInt(index);
-            int readCRC = getCRC24(buf, index + SIZE_SIZE);
-            int computedCRC = crc24(size, SIZE_SIZE);
-            if (readCRC != computedCRC)
-                throw new Crc.InvalidCrc(readCRC, computedCRC);
-            return size;
+            long size = Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, buf.readerIndex()));
+            if (size < 0)
+                return -1; // not enough bytes to read size yet
+            return Ints.checkedCast(size);
         }
 
         private boolean canReadHeaderPost40(ByteBuf buf)
@@ -556,8 +536,10 @@ public class Message<T>
             int index = buf.readerIndex();
             final int limit = index + buf.readableBytes();
 
-            index += SIZE_SIZE;
-            index += CRC24_SIZE;
+            int sizeSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            if (sizeSize < 0)
+                return false;
+            index += sizeSize;
 
             int messageIdSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (messageIdSize < 0)
@@ -585,18 +567,16 @@ public class Message<T>
         private long getCreatedAtNanosPost40(ByteBuf buf, InetAddressAndPort peer)
         {
             int index = buf.readerIndex();
-            index += SIZE_SIZE;
-            index += CRC24_SIZE;
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
         }
 
         private long getExpiresAtNanosPost40(ByteBuf buf, long createdAtNanos)
         {
             int index = buf.readerIndex();
-            index += SIZE_SIZE;
-            index += CRC24_SIZE;
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             return createdAtNanos + TimeUnit.MILLISECONDS.toNanos(VIntCoding.getUnsignedVInt(buf, index));
         }
@@ -604,35 +584,11 @@ public class Message<T>
         private Verb getVerbPost40(ByteBuf buf)
         {
             int index = buf.readerIndex();
-            index += SIZE_SIZE;
-            index += CRC24_SIZE;
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // message id
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
             return Verb.fromId(Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index)));
-        }
-
-        private static int readCRC24(DataInputPlus in) throws IOException
-        {
-            int b0 = 0xff & in.readByte();
-            int b1 = 0xff & in.readByte();
-            int b2 = 0xff & in.readByte();
-            return b2 << 16 | b1 << 8 | b0;
-        }
-
-        private static int getCRC24(ByteBuf buf, int index)
-        {
-            int b0 = 0xff & buf.getByte(index);
-            int b1 = 0xff & buf.getByte(index + 1);
-            int b2 = 0xff & buf.getByte(index + 2);
-            return b2 << 16 | b1 << 8 | b0;
-        }
-
-        private static void writeCRC24(DataOutputPlus out, int crc) throws IOException
-        {
-            out.write(crc);
-            out.write(crc >> 8);
-            out.write(crc >> 16);
         }
 
         /*
