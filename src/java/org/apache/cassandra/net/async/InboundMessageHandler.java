@@ -217,7 +217,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             largeBytesRemaining = 0;
             if (!largeCoprocessor.supply(slice))
                 aheadOfCoprocessors();
-            closeCoprocessor();
+            stopCoprocessor();
         }
 
         // more than enough bytes to complete the large message in-flight
@@ -229,7 +229,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             boolean isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(largeBytesRemaining));
             slice.skipBytes(largeBytesRemaining);
             largeBytesRemaining = 0;
-            closeCoprocessor();
+            stopCoprocessor();
 
             if (!isKeepingUp)
                 aheadOfCoprocessors();
@@ -273,7 +273,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             if (largeBytesRemaining == frameSize)
                 receivedCount++;
-            closeCoprocessor();
+            stopCoprocessor();
             skipBytesRemaining = largeBytesRemaining - frameSize;
             largeBytesRemaining = 0;
             noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
@@ -418,8 +418,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean processLargeMessage(Slice slice, int messageSize)
     {
-        largeCoprocessor = new LargeCoprocessor(messageSize);
-        largeExecutor.submit(largeCoprocessor);
+        startCoprocessor(messageSize);
 
         boolean isKeepingUp;
         final int readableBytes = slice.readableBytes();
@@ -439,7 +438,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(readableBytes));
             largeBytesRemaining = 0;
-            closeCoprocessor();
+            stopCoprocessor();
         }
         // more than enough bytes for the large message
         else
@@ -449,7 +448,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(messageSize));
             slice.skipBytes(messageSize);
-            closeCoprocessor();
+            stopCoprocessor();
         }
 
         if (!isKeepingUp)
@@ -715,7 +714,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             stash.release();
 
         if (null != largeCoprocessor)
-            closeCoprocessor();
+            stopCoprocessor();
 
         if (null != ticket)
         {
@@ -736,9 +735,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return state == State.CLOSED;
     }
 
-    private void closeCoprocessor()
+    private void startCoprocessor(int messageSize)
     {
-        largeCoprocessor.close();
+        largeCoprocessor = new LargeCoprocessor(messageSize);
+        largeExecutor.submit(largeCoprocessor);
+    }
+
+    private void stopCoprocessor()
+    {
+        largeCoprocessor.stop();
         largeCoprocessor = null;
     }
 
@@ -821,7 +826,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 releaseCapacity(messageSize);
         }
 
-        void close()
+        void stop()
         {
             input.requestClosure();
         }
