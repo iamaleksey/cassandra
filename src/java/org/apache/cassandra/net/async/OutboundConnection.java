@@ -486,7 +486,7 @@ public class OutboundConnection
         {
             JVMStabilityInspector.inspectThrowable(cause);
             if (cause instanceof ClosedChannelException)
-                logger.error("{} channel closed by provider", id(), cause);
+                logger.debug("{} channel closed by provider", id(), cause);
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
             GenericFutureListener<Future<Object>> scheduleOnCompletion = scheduleOnCompletion();
