@@ -22,8 +22,6 @@ import java.util.Queue;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.IntConsumer;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.jctools.queues.SpscUnboundedArrayQueue;
 

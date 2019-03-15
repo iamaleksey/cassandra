@@ -19,15 +19,14 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import com.google.common.annotations.VisibleForTesting;
-
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
-import io.netty.handler.codec.MessageToMessageDecoder;
+import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -35,8 +34,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
-// TODO: extend ChannelInboundHandlerAdapter
-abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
+abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
     enum IsSelfContained { YES, NO, NOT_SPECIFIED, CORRUPTED }
 
@@ -222,6 +220,9 @@ abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
     abstract int frameLength(long header);
     abstract Frame unpackFrame(Slice slice, int begin, int end, long header);
 
+    /**
+     * If the new logical slice would reach the end of the provided slice, cannibalise it
+     */
     public static Slice sliceIfRemaining(Slice slice, int begin, int end)
     {
         if (end == slice.contents.limit())
@@ -237,90 +238,100 @@ abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
     protected final void decode(Slice slice, int headerLength, List<Object> output)
     {
         ByteBuffer in = slice.contents;
-        try
+
+        if (stash != null)
         {
-            if (stash != null)
+            if (!copyToSize(in, stash, headerLength))
+                return;
+
+            long header = readHeader(stash, 0);
+            CorruptFrame c = verifyHeader(header);
+            if (c != null)
             {
-                if (!copyToSize(in, stash, headerLength))
-                    return;
-
-                long header = readHeader(stash, 0);
-                CorruptFrame c = verifyHeader(header);
-                if (c != null)
-                {
-                    output.add(c);
-                    reset();
-                    return;
-                }
-
-                int frameLength = frameLength(header);
-                stash = ensureCapacity(stash, frameLength);
-
-                if (!copyToSize(in, stash, frameLength))
-                    return;
-
-                stash.flip();
-                Slice stashed = Slice.wrap(stash);
-                stash = null;
-                try
-                {
-                    output.add(unpackFrame(stashed, 0, frameLength, header));
-                }
-                catch (Throwable t)
-                {
-                    stashed.release();
-                    throw t;
-                }
+                output.add(c);
+                reset();
+                return;
             }
 
-            int begin = in.position();
-            int limit = in.limit();
-            while (begin < limit)
+            int frameLength = frameLength(header);
+            stash = ensureCapacity(stash, frameLength);
+
+            if (!copyToSize(in, stash, frameLength))
+                return;
+
+            stash.flip();
+            Slice stashed = Slice.wrap(stash);
+            stash = null;
+            try
             {
-                int remaining = limit - begin;
-                if (remaining < headerLength)
-                {
-                    stash(slice, headerLength, begin, remaining);
-                    return;
-                }
-
-                long header = readHeader(in, begin);
-                CorruptFrame c = verifyHeader(header);
-                if (c != null)
-                {
-                    output.add(c);
-                    return;
-                }
-
-                int frameLength = frameLength(header);
-                if (remaining < frameLength)
-                {
-                    stash(slice, frameLength, begin, remaining);
-                    return;
-                }
-
-                int end = begin + frameLength;
-                output.add(unpackFrame(slice, begin, end, header));
-
-                begin = end;
+                output.add(unpackFrame(stashed, 0, frameLength, header));
+            }
+            catch (Throwable t)
+            {
+                stashed.release();
+                throw t;
             }
         }
-        catch (Throwable t)
+
+        int begin = in.position();
+        int limit = in.limit();
+        while (begin < limit)
         {
-            for (Object object : output)
-                ((Slice) object).release();
-            slice.release();
-            throw t;
+            int remaining = limit - begin;
+            if (remaining < headerLength)
+            {
+                stash(slice, headerLength, begin, remaining);
+                return;
+            }
+
+            long header = readHeader(in, begin);
+            CorruptFrame c = verifyHeader(header);
+            if (c != null)
+            {
+                output.add(c);
+                slice.release();
+                return;
+            }
+
+            int frameLength = frameLength(header);
+            if (remaining < frameLength)
+            {
+                stash(slice, frameLength, begin, remaining);
+                return;
+            }
+
+            int end = begin + frameLength;
+            output.add(unpackFrame(slice, begin, end, header));
+
+            begin = end;
         }
     }
 
     abstract void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output);
 
-    @VisibleForTesting
-    protected void decode(ChannelHandlerContext ctx, ByteBuf nettyIn, List<Object> output)
+    private static final FastThreadLocal<List<Object>> decodeBuffer = new FastThreadLocal<List<Object>>()
     {
-        Slice slice = Slice.wrap(((BufferPoolAllocator.Wrapped) nettyIn).adopt());
-        decode(ctx, slice, output);
+        protected List<Object> initialValue() { return new ArrayList<>(); }
+    };
+
+    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    {
+        Slice slice = Slice.wrap(((BufferPoolAllocator.Wrapped) msg).adopt());
+        List<Object> out = decodeBuffer.get();
+        out.clear();
+        try
+        {
+            decode(ctx, slice, out);
+            for (Object object : out)
+                ctx.fireChannelRead(object);
+        }
+        catch (Throwable t)
+        {
+            for (Object object : out)
+                ((Slice) object).release();
+            slice.release();
+            throw t;
+        }
     }
 
     private static boolean copyToSize(ByteBuffer in, ByteBuffer out, int toOutPosition)
