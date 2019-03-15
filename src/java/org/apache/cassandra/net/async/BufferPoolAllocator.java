@@ -35,7 +35,7 @@ import static java.lang.Math.min;
 public class BufferPoolAllocator extends AbstractByteBufAllocator
 {
     public static final BufferPoolAllocator instance = new BufferPoolAllocator();
-    private BufferPoolAllocator() {}
+    private BufferPoolAllocator() { super(true); }
 
     protected ByteBuf newHeapBuffer(int minCapacity, int maxCapacity)
     {
