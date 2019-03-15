@@ -23,13 +23,10 @@ import java.nio.ByteOrder;
 import java.util.List;
 import java.util.zip.CRC32;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
-import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
-import net.jpountz.xxhash.XXHashFactory;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
@@ -56,11 +53,9 @@ final class FrameDecoderLZ4 extends FrameDecoder
     {
         return ((int) (header8b >>> 17)) & 0x1FFFF;
     }
-    private static IsSelfContained isSelfContained(long header8b)
+    private static boolean isSelfContained(long header8b)
     {
-        if (0 == (header8b & (1L << 34)))
-            return IsSelfContained.NO;
-        return IsSelfContained.YES;
+        return 0 != (header8b & (1L << 34));
     }
     private static int headerCrc(long header8b)
     {
@@ -68,7 +63,8 @@ final class FrameDecoderLZ4 extends FrameDecoder
     }
 
     private final LZ4FastDecompressor decompressor;
-    public FrameDecoderLZ4(LZ4FastDecompressor decompressor)
+
+    private FrameDecoderLZ4(LZ4FastDecompressor decompressor)
     {
         this.decompressor = decompressor;
     }
@@ -98,7 +94,7 @@ final class FrameDecoderLZ4 extends FrameDecoder
     {
         ByteBuffer input = slice.contents;
 
-        IsSelfContained isSelfContained = isSelfContained(header8b);
+        boolean isSelfContained = isSelfContained(header8b);
         int uncompressedLength = uncompressedLength(header8b);
 
         CRC32 crc = crc32();

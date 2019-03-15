@@ -289,7 +289,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
          */
         else
         {
-            if (frame.isSelfContained == FrameDecoder.IsSelfContained.YES)
+            if (frame.isSelfContained)
             {
                 noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading messages from {} (corrupted frame of small messages)", peer);
             }

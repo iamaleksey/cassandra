@@ -21,7 +21,6 @@ package org.apache.cassandra.net.async;
 import java.nio.ByteBuffer;
 import java.util.List;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
@@ -53,7 +52,7 @@ class FrameDecoderNone extends FrameDecoder
 
     void decode(ChannelHandlerContext ctx, Slice slice, List<Object> out)
     {
-        out.add(new IntactFrame(IsSelfContained.NOT_SPECIFIED, slice));
+        out.add(new IntactFrame(false, slice));
     }
 
     void addLastTo(ChannelPipeline pipeline)

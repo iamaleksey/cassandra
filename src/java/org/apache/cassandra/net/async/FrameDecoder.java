@@ -192,10 +192,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     final static class IntactFrame extends Frame
     {
-        final IsSelfContained isSelfContained;
+        final boolean isSelfContained;
         final Slice contents;
 
-        IntactFrame(IsSelfContained isSelfContained, Slice contents)
+        IntactFrame(boolean isSelfContained, Slice contents)
         {
             this.isSelfContained = isSelfContained;
             this.contents = contents;
@@ -204,10 +204,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     final static class CorruptFrame extends Frame
     {
-        final IsSelfContained isSelfContained;
+        final boolean isSelfContained;
         final int frameSize, readCRC, computedCRC;
 
-        CorruptFrame(IsSelfContained isSelfContained, int frameSize, int readCRC, int computedCRC)
+        CorruptFrame(boolean isSelfContained, int frameSize, int readCRC, int computedCRC)
         {
             this.isSelfContained = isSelfContained;
             this.frameSize = frameSize;
@@ -215,14 +215,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             this.computedCRC = computedCRC;
         }
 
-        static CorruptFrame recoverable(IsSelfContained isSelfContained, int frameSize, int readCRC, int computedCRC)
+        static CorruptFrame recoverable(boolean isSelfContained, int frameSize, int readCRC, int computedCRC)
         {
             return new CorruptFrame(isSelfContained, frameSize, readCRC, computedCRC);
         }
 
         static CorruptFrame unrecoverable(int readCRC, int computedCRC)
         {
-            return new CorruptFrame(IsSelfContained.CORRUPTED, Integer.MIN_VALUE, readCRC, computedCRC);
+            return new CorruptFrame(false, Integer.MIN_VALUE, readCRC, computedCRC);
         }
 
         boolean isRecoverable()

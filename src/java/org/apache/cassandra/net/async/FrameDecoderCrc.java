@@ -23,7 +23,6 @@ import java.nio.ByteOrder;
 import java.util.List;
 import java.util.zip.CRC32;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 
@@ -41,11 +40,9 @@ public final class FrameDecoderCrc extends FrameDecoder
     private static final int TRAILER_LENGTH = 4;
     private static final int HEADER_AND_TRAILER_LENGTH = 10;
 
-    private static IsSelfContained isSelfContained(long header6b)
+    private static boolean isSelfContained(long header6b)
     {
-        if (0 == (header6b & (1L << 17)))
-            return IsSelfContained.NO;
-        return IsSelfContained.YES;
+        return 0 != (header6b & (1L << 17));
     }
 
     private static int payloadLength(long header6b)
@@ -93,7 +90,7 @@ public final class FrameDecoderCrc extends FrameDecoder
     final Frame unpackFrame(Slice slice, int begin, int end, long header6b)
     {
         ByteBuffer in = slice.contents;
-        IsSelfContained isSelfContained = isSelfContained(header6b);
+        boolean isSelfContained = isSelfContained(header6b);
 
         CRC32 crc = Crc.crc32();
         int readFullCrc = in.getInt(end - TRAILER_LENGTH);
