@@ -499,7 +499,7 @@ public class Message<T>
             size += CREATION_TIME_SIZE;
             size += TypeSizes.sizeofUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             size += TypeSizes.sizeofUnsignedVInt(message.verb.id);
-            size += paramsSerlializedSize(message.parameters, version);
+            size += serializedParamsSize(message.parameters, version);
 
             int payloadSize = message.payloadSize(version);
             size += TypeSizes.sizeofUnsignedVInt(payloadSize);
@@ -625,7 +625,7 @@ public class Message<T>
             size += PRE_40_MESSAGE_PREFIX_SIZE;
             size += CompactEndpointSerializationHelper.instance.serializedSize(message.from, version);
             size += TypeSizes.sizeof(message.verb.id);
-            size += paramsSerlializedSize(message.parameters, version);
+            size += serializedParamsSize(message.parameters, version);
 
             int payloadSize = message.payloadSize(version);
             size += TypeSizes.sizeof(payloadSize);
@@ -757,7 +757,7 @@ public class Message<T>
             return params;
         }
 
-        private long paramsSerlializedSize(Map<ParameterType, Object> params, int version)
+        private long serializedParamsSize(Map<ParameterType, Object> params, int version)
         {
             long size = version >= VERSION_40
                       ? VIntCoding.computeUnsignedVIntSize(params.size())
