@@ -257,7 +257,7 @@ public class OutboundConnection
      */
     private boolean acquireCapacity(long amount)
     {
-        long claimedReserve = 0;
+        long unusedClaimedReserve = 0;
         boolean success = false;
         loop: while (true)
         {
@@ -273,11 +273,11 @@ public class OutboundConnection
             if (isFailingToConnect)
                 break;
 
-            long excess = min(amount, newQueueSize - queueCapacityInBytes);
-            if (claimedReserve < excess)
+            long requiredReserve = min(amount, newQueueSize - queueCapacityInBytes);
+            if (unusedClaimedReserve < requiredReserve)
             {
-                excess -= claimedReserve;
-                switch (reserveCapacityInBytes.tryAllocate(excess))
+                long extraGlobalReserve = requiredReserve - unusedClaimedReserve;
+                switch (reserveCapacityInBytes.tryAllocate(extraGlobalReserve))
                 {
                     case INSUFFICIENT_ENDPOINT:
                     case INSUFFICIENT_GLOBAL:
@@ -285,19 +285,15 @@ public class OutboundConnection
                     case SUCCESS:
                 }
             }
-            else
-            {
-                claimedReserve -= excess;
-            }
 
+            unusedClaimedReserve -= requiredReserve;
             if (success = queueSizeInBytesUpdater.compareAndSet(this, currentQueueSize, newQueueSize))
                 break;
-
-            claimedReserve += excess;
+            unusedClaimedReserve += requiredReserve;
         }
 
-        if (claimedReserve > 0)
-            reserveCapacityInBytes.release(claimedReserve);
+        if (unusedClaimedReserve > 0)
+            reserveCapacityInBytes.release(unusedClaimedReserve);
 
         return success;
     }
