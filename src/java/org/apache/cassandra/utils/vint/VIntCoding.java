@@ -95,7 +95,7 @@ public class VIntCoding
     public static long getUnsignedVInt(ByteBuf input, int readerIndex)
     {
         int readerLimit = input.readerIndex() + input.readableBytes();
-        if (readerIndex == readerLimit)
+        if (readerIndex >= readerLimit)
             return -1;
 
         int firstByte = input.getByte(readerIndex++);

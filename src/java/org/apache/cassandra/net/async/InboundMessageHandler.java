@@ -324,8 +324,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (messageSize < 0) // not enough bytes to read size of the message
             return false;
 
-        if (!serializer.canReadHeader(buf, version))
-            return false;
+        /*
+         * if we can calculate message size, then at the very least we have enough bytes to read the header fully
+         */
 
         long currentTimeNanos = ApproximateTime.nanoTime();
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);

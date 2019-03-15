@@ -365,12 +365,11 @@ public class Message<T>
      *  The parameter value is prefixed with it's length, encoded as an unsigned vint, followed by by the value's bytes.
      *
      * Legacy Notes (see {@link Serializer#serialize(Message, DataOutputPlus, int)} for complete details):
-     * - pre 4.0, the IP address was sent along in the header, before the verb. The IP address may be either IPv4 (4 bytes) or IPv6 (16 bytes).
-     * - pre-4.0, the message size was not included on the wire; in 4.0 and up it is an unsigned int.
-     * - pre-4.0, the verb was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
-     * - pre-4.0, the payloadSize was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
-     * - pre-4.0, the count of a parameter values was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint.
-     * - pre-4.0, parameter names were encoded as strings; in 4.0 they are encoded as enum id vints.
+     * - pre 4.0, the IP address was sent along in the header, before the verb. The IP address may be either IPv4 (4 bytes) or IPv6 (16 bytes)
+     * - pre-4.0, the verb was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint
+     * - pre-4.0, the payloadSize was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint
+     * - pre-4.0, the count of a parameter values was encoded as a 4-byte integer; in 4.0 and up it is an unsigned vint
+     * - pre-4.0, parameter names were encoded as strings; in 4.0 they are encoded as enum id vints
      * - pre-4.0, expiry time wasn't encoded at all; in 4.0 it's an unsigned vint
      * - pre-4.0, message id was an int; in 4.0 and up it's an unsigned vint
      * - pre-4.0, messages included PROTOCOL MAGIC BYTES; post-4.0, we rely on frame CRCs instead
@@ -379,8 +378,6 @@ public class Message<T>
      * {@code
      *            1 1 1 1 1 2 2 2 2 2 3
      *  0 2 4 6 8 0 2 4 6 8 0 2 4 6 8 0
-     * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * | Message Size (vint)           |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * | Message ID (vint)             |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -439,14 +436,6 @@ public class Message<T>
             return version >= VERSION_40 ? messageSizePost40(buf) : messageSizePre40(buf);
         }
 
-        /**
-         * Find out if the buffer has enough readable bytes to read all of header (all fields except for params and payload)
-         */
-        public boolean canReadHeader(ByteBuf buf, int version)
-        {
-            return version >= VERSION_40 ? canReadHeaderPost40(buf) : canReadHeaderPre40(buf);
-        }
-
         public long getCreatedAtNanos(ByteBuf buf, InetAddressAndPort peer, int version)
         {
             return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, peer) : getCreatedAtNanosPre40(buf, peer);
@@ -468,7 +457,6 @@ public class Message<T>
 
         private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
-            out.writeUnsignedVInt(message.serializedSize(version));
             out.writeUnsignedVInt(message.id);
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
@@ -491,7 +479,6 @@ public class Message<T>
 
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            in.readUnsignedVInt(); // skip size
             long messageId = in.readUnsignedVInt();
             long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
             long expiresAtNanos = creationTimeNanos + TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt());
@@ -518,56 +505,49 @@ public class Message<T>
             size += TypeSizes.sizeofUnsignedVInt(payloadSize);
             size += payloadSize;
 
-            size += VIntCoding.computeUnsignedVIntSize(VIntCoding.computeUnsignedVIntSize(size) + size);
-
             return Ints.checkedCast(size);
         }
 
         private int messageSizePost40(ByteBuf buf)
         {
-            long size = Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, buf.readerIndex()));
-            if (size < 0)
-                return -1; // not enough bytes to read size yet
-            return Ints.checkedCast(size);
-        }
-
-        private boolean canReadHeaderPost40(ByteBuf buf)
-        {
             int index = buf.readerIndex();
-            final int limit = index + buf.readableBytes();
+            final int limit = buf.writerIndex();
 
-            int sizeSize = VIntCoding.computeUnsignedVIntSize(buf, index);
-            if (sizeSize < 0)
-                return false;
-            index += sizeSize;
-
-            int messageIdSize = VIntCoding.computeUnsignedVIntSize(buf, index);
-            if (messageIdSize < 0)
-                return false;
-            index += messageIdSize;
+            int idSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            if (idSize < 0)
+                return -1; // not enough bytes to read id
+            index += idSize;
 
             index += CREATION_TIME_SIZE;
-
             if (index > limit)
-                return false;
+                return -1;
 
             int expirationSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (expirationSize < 0)
-                return false;
+                return -1;
             index += expirationSize;
 
             int verbIdSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (verbIdSize < 0)
-                return false;
+                return -1;
             index += verbIdSize;
 
-            return index <= limit;
+            int paramsSize = serializedParamsSizePost40(buf, index);
+            if (paramsSize < 0)
+                return -1;
+            index += paramsSize;
+
+            long payloadSize = VIntCoding.getUnsignedVInt(buf, index);
+            if (payloadSize < 0)
+                return -1;
+            index += VIntCoding.computeUnsignedVIntSize(payloadSize) + payloadSize;
+
+            return index - buf.readerIndex();
         }
 
         private long getCreatedAtNanosPost40(ByteBuf buf, InetAddressAndPort peer)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
         }
@@ -575,7 +555,6 @@ public class Message<T>
         private long getExpiresAtNanosPost40(ByteBuf buf, long createdAtNanos)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             return createdAtNanos + TimeUnit.MILLISECONDS.toNanos(VIntCoding.getUnsignedVInt(buf, index));
@@ -584,7 +563,6 @@ public class Message<T>
         private Verb getVerbPost40(ByteBuf buf)
         {
             int index = buf.readerIndex();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // size
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
@@ -659,7 +637,7 @@ public class Message<T>
         private int messageSizePre40(ByteBuf buf) throws InvalidLegacyProtocolMagic
         {
             int index = buf.readerIndex();
-            final int limit = index + buf.readableBytes();
+            final int limit = buf.writerIndex();
 
             // protocol magic
             index += 4;
@@ -676,28 +654,13 @@ public class Message<T>
             index += buf.getByte(index - 1);
             // verb
             index += 4;
-
-            // parameters
-            index += 4;
-
             if (index > limit)
                 return -1;
-            int paramsCount = buf.getInt(index - 4);
 
-            for (int i = 0; i < paramsCount; i++)
-            {
-                // try to read length and skip to the end of the parameter name
-                index += 2;
-
-                if (index > limit)
-                    return -1;
-                index += buf.getShort(index - 2);
-                // try to read length and skip to the end of the parameter value
-                index += 4;
-                if (index > limit)
-                    return -1;
-                index += buf.getInt(index - 4);
-            }
+            int paramsSize = serializedParamsSizePre40(buf, index);
+            if (paramsSize < 0)
+                return -1;
+            index += paramsSize;
 
             // payload
             index += 4;
@@ -707,21 +670,6 @@ public class Message<T>
             index += buf.getInt(index - 4);
 
             return index - buf.readerIndex();
-        }
-
-        private boolean canReadHeaderPre40(ByteBuf buf)
-        {
-            int index = buf.readerIndex();
-            final int limit = index + buf.readableBytes();
-
-            index += PRE_40_MESSAGE_PREFIX_SIZE;
-            index += 1; // ip address size
-            if (index > limit)
-                return false;
-            index += buf.getByte(index - 1); // ip address
-            index += 4; // verb
-
-            return index <= limit;
         }
 
         private long getCreatedAtNanosPre40(ByteBuf buf, InetAddressAndPort peer)
@@ -831,6 +779,59 @@ public class Message<T>
             }
 
             return size;
+        }
+
+        private int serializedParamsSizePost40(ByteBuf buf, int readerIndex)
+        {
+            int index = readerIndex;
+
+            long paramsCount = VIntCoding.getUnsignedVInt(buf, index);
+            if (paramsCount < 0)
+                return -1;
+            index += VIntCoding.computeUnsignedVIntSize(paramsCount);
+
+            for (int i = 0; i < paramsCount; i++)
+            {
+                long type = VIntCoding.getUnsignedVInt(buf, index);
+                if (type < 0)
+                    return -1;
+                index += VIntCoding.computeUnsignedVIntSize(type);
+
+                long length = VIntCoding.getUnsignedVInt(buf, index);
+                if (length < 0)
+                    return -1;
+                index += VIntCoding.computeUnsignedVIntSize(length) + length;
+            }
+
+            return index - readerIndex;
+        }
+
+        private int serializedParamsSizePre40(ByteBuf buf, int readerIndex)
+        {
+            int index = readerIndex;
+            final int limit = buf.writerIndex();
+
+            index += 4;
+            if (index > limit)
+                return -1;
+            int paramsCount = buf.getInt(index - 4);
+
+            for (int i = 0; i < paramsCount; i++)
+            {
+                // try to read length and skip to the end of the parameter name
+                index += 2;
+
+                if (index > limit)
+                    return -1;
+                index += buf.getShort(index - 2);
+                // try to read length and skip to the end of the parameter value
+                index += 4;
+                if (index > limit)
+                    return -1;
+                index += buf.getInt(index - 4);
+            }
+
+            return index - readerIndex;
         }
 
         /*
