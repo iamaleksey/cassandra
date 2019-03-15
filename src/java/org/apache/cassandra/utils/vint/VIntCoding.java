@@ -92,13 +92,13 @@ public class VIntCoding
      *
      * @return -1 if there are not enough bytes in the input to read the value; else, the vint unsigned value.
      */
-    public static long getUnsignedVInt(ByteBuf input, int readerIndex)
+    public static long getUnsignedVInt(ByteBuffer input, int readerIndex)
     {
-        int readerLimit = input.readerIndex() + input.readableBytes();
+        int readerLimit = input.limit();
         if (readerIndex >= readerLimit)
             return -1;
 
-        int firstByte = input.getByte(readerIndex++);
+        int firstByte = input.get(readerIndex++);
 
         //Bail out early if this is one byte, necessary or it fails later
         if (firstByte >= 0)
@@ -111,7 +111,7 @@ public class VIntCoding
         long retval = firstByte & firstByteValueMask(size);
         for (int ii = 0; ii < size; ii++)
         {
-            byte b = input.getByte(readerIndex++);
+            byte b = input.get(readerIndex++);
             retval <<= 8;
             retval |= b & 0xff;
         }
@@ -124,13 +124,13 @@ public class VIntCoding
      *
      * @return -1 if there are not enough bytes in the input to calculate the size; else, the vint unsigned value size in bytes.
      */
-    public static int computeUnsignedVIntSize(ByteBuf input, int readerIndex)
+    public static int computeUnsignedVIntSize(ByteBuffer input, int readerIndex)
     {
-        int readerLimit = input.readerIndex() + input.readableBytes();
+        int readerLimit = input.limit();
         if (readerIndex == readerLimit)
             return -1;
 
-        int firstByte = input.getByte(readerIndex);
+        int firstByte = input.get(readerIndex);
         return 1 + ((firstByte >= 0) ? 0 : numberOfExtraBytesToRead(firstByte));
     }
 

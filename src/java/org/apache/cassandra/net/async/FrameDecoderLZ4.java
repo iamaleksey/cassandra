@@ -94,8 +94,10 @@ final class FrameDecoderLZ4 extends FrameDecoder
         return compressedLength(header8b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(ByteBuf owner, ByteBuffer input, int begin, int end, long header8b)
+    final Frame unpackFrame(Slice slice, int begin, int end, long header8b)
     {
+        ByteBuffer input = slice.contents;
+
         IsSelfContained isSelfContained = isSelfContained(header8b);
         int uncompressedLength = uncompressedLength(header8b);
 
@@ -112,7 +114,7 @@ final class FrameDecoderLZ4 extends FrameDecoder
 
         if (uncompressedLength == 0)
         {
-            return new IntactFrame(isSelfContained, slice(owner, input, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
+            return new IntactFrame(isSelfContained, sliceIfRemaining(slice, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
         }
         else
         {
@@ -120,7 +122,7 @@ final class FrameDecoderLZ4 extends FrameDecoder
             try
             {
                 decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
-                return new IntactFrame(isSelfContained, BufferPoolAllocator.wrap(out));
+                return new IntactFrame(isSelfContained, Slice.wrap(out));
             }
             catch (Throwable t)
             {
@@ -130,10 +132,10 @@ final class FrameDecoderLZ4 extends FrameDecoder
         }
     }
 
-    protected void decode(ChannelHandlerContext ctx, ByteBuf nettyIn, List<Object> output)
+    protected void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output)
     {
         // TODO: confirm in assembly output that we inline the relevant nested method calls
-        decode(nettyIn, HEADER_LENGTH, output);
+        decode(slice, HEADER_LENGTH, output);
     }
 
     void addLastTo(ChannelPipeline pipeline)

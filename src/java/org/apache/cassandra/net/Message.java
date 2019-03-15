@@ -18,6 +18,7 @@
 package org.apache.cassandra.net;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
@@ -27,7 +28,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
-import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -431,22 +431,22 @@ public class Message<T>
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          */
-        public int messageSize(ByteBuf buf, int version) throws InvalidLegacyProtocolMagic, Crc.InvalidCrc
+        public int messageSize(ByteBuffer buf, int version) throws InvalidLegacyProtocolMagic, Crc.InvalidCrc
         {
             return version >= VERSION_40 ? messageSizePost40(buf) : messageSizePre40(buf);
         }
 
-        public long getCreatedAtNanos(ByteBuf buf, InetAddressAndPort peer, int version)
+        public long getCreatedAtNanos(ByteBuffer buf, InetAddressAndPort peer, int version)
         {
             return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, peer) : getCreatedAtNanosPre40(buf, peer);
         }
 
-        public long getExpiresAtNanos(ByteBuf buf, long createdAtNanos, int version)
+        public long getExpiresAtNanos(ByteBuffer buf, long createdAtNanos, int version)
         {
             return version >= VERSION_40 ? getExpiresAtNanosPost40(buf, createdAtNanos) : getExpiresAtNanosPre40(buf, createdAtNanos);
         }
 
-        public Verb getVerb(ByteBuf buf, int version)
+        public Verb getVerb(ByteBuffer buf, int version)
         {
             return version >= VERSION_40 ? getVerbPost40(buf) : getVerbPre40(buf);
         }
@@ -508,10 +508,10 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePost40(ByteBuf buf)
+        private int messageSizePost40(ByteBuffer buf)
         {
-            int index = buf.readerIndex();
-            final int limit = buf.writerIndex();
+            int index = buf.position();
+            final int limit = buf.limit();
 
             int idSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (idSize < 0)
@@ -542,27 +542,27 @@ public class Message<T>
                 return -1;
             index += VIntCoding.computeUnsignedVIntSize(payloadSize) + payloadSize;
 
-            return index - buf.readerIndex();
+            return index - buf.position();
         }
 
-        private long getCreatedAtNanosPost40(ByteBuf buf, InetAddressAndPort peer)
+        private long getCreatedAtNanosPost40(ByteBuffer buf, InetAddressAndPort peer)
         {
-            int index = buf.readerIndex();
+            int index = buf.position();
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
         }
 
-        private long getExpiresAtNanosPost40(ByteBuf buf, long createdAtNanos)
+        private long getExpiresAtNanosPost40(ByteBuffer buf, long createdAtNanos)
         {
-            int index = buf.readerIndex();
+            int index = buf.position();
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             return createdAtNanos + TimeUnit.MILLISECONDS.toNanos(VIntCoding.getUnsignedVInt(buf, index));
         }
 
-        private Verb getVerbPost40(ByteBuf buf)
+        private Verb getVerbPost40(ByteBuffer buf)
         {
-            int index = buf.readerIndex();
+            int index = buf.position();
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
             index += CREATION_TIME_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
@@ -634,10 +634,10 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePre40(ByteBuf buf) throws InvalidLegacyProtocolMagic
+        private int messageSizePre40(ByteBuffer buf) throws InvalidLegacyProtocolMagic
         {
-            int index = buf.readerIndex();
-            final int limit = buf.writerIndex();
+            int index = buf.position();
+            final int limit = buf.limit();
 
             // protocol magic
             index += 4;
@@ -651,7 +651,7 @@ public class Message<T>
             index += 1;
             if (index > limit)
                 return -1;
-            index += buf.getByte(index - 1);
+            index += buf.get(index - 1);
             // verb
             index += 4;
             if (index > limit)
@@ -669,29 +669,29 @@ public class Message<T>
                 return -1;
             index += buf.getInt(index - 4);
 
-            return index - buf.readerIndex();
+            return index - buf.position();
         }
 
-        private long getCreatedAtNanosPre40(ByteBuf buf, InetAddressAndPort peer)
+        private long getCreatedAtNanosPre40(ByteBuffer buf, InetAddressAndPort peer)
         {
-            int index = buf.readerIndex();
+            int index = buf.position();
             index += 4; // protocol magic
             index += 4; // message id
             return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
         }
 
-        private long getExpiresAtNanosPre40(ByteBuf buf, long createdAtNanos)
+        private long getExpiresAtNanosPre40(ByteBuffer buf, long createdAtNanos)
         {
             return getVerbPre40(buf).expirationTimeNanos(createdAtNanos);
         }
 
-        private Verb getVerbPre40(ByteBuf buf)
+        private Verb getVerbPre40(ByteBuffer buf)
         {
-            int index = buf.readerIndex();
+            int index = buf.position();
             index += 4;                      // protocol magic
             index += 4;                      // message id
             index += 4;                      // creation time
-            index += 1 + buf.getByte(index); // from
+            index += 1 + buf.get(index); // from
             return Verb.fromId(buf.getInt(index));
         }
 
@@ -781,7 +781,7 @@ public class Message<T>
             return size;
         }
 
-        private int serializedParamsSizePost40(ByteBuf buf, int readerIndex)
+        private int serializedParamsSizePost40(ByteBuffer buf, int readerIndex)
         {
             int index = readerIndex;
 
@@ -806,10 +806,10 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private int serializedParamsSizePre40(ByteBuf buf, int readerIndex)
+        private int serializedParamsSizePre40(ByteBuffer buf, int readerIndex)
         {
             int index = readerIndex;
-            final int limit = buf.writerIndex();
+            final int limit = buf.limit();
 
             index += 4;
             if (index > limit)

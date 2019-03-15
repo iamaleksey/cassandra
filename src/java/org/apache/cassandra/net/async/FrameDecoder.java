@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -29,23 +30,156 @@ import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.MessageToMessageDecoder;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
-import sun.nio.ch.DirectBuffer;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
+// TODO: extend ChannelInboundHandlerAdapter
 abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
 {
     enum IsSelfContained { YES, NO, NOT_SPECIFIED, CORRUPTED }
 
-    static class Frame {}
+    private static class SharedByteBuffer
+    {
+        final ByteBuffer buffer;
+        private volatile int owners = UNSHARED;
+
+        private static final int UNSHARED = -1;
+        private static final int RELEASED = 0;
+        private static final AtomicIntegerFieldUpdater<SharedByteBuffer> ownersUpdater = AtomicIntegerFieldUpdater.newUpdater(SharedByteBuffer.class, "owners");
+
+        public SharedByteBuffer(ByteBuffer buffer)
+        {
+            this.buffer = buffer;
+        }
+
+        public void release()
+        {
+            if (owners == UNSHARED || RELEASED == ownersUpdater.decrementAndGet(this))
+            {
+                ownersUpdater.lazySet(this, RELEASED);
+                BufferPool.put(buffer);
+            }
+        }
+
+        public boolean tryAdopt()
+        {
+            if (owners == UNSHARED || RELEASED == ownersUpdater.updateAndGet(this, v -> v == 1 ? RELEASED : v))
+            {
+                ownersUpdater.lazySet(this, RELEASED);
+                return true;
+            }
+            return false;
+        }
+
+        public void retain()
+        {
+            if (owners == UNSHARED)
+            {
+                owners = 2;
+            }
+            else
+            {
+                ownersUpdater.updateAndGet(this, v -> {
+                    if (v == RELEASED)
+                        throw new IllegalStateException("Attempted to reference an already released SharedByteBuffer");
+                    return v + 1;
+                });
+            }
+        }
+    }
+
+    static class Slice
+    {
+        public static final Slice EMPTY = new Slice(null, ByteBufferUtil.EMPTY_BYTE_BUFFER)
+        {
+            void retain() {}
+            void release() {}
+        };
+
+        final SharedByteBuffer owner;
+        final ByteBuffer contents;
+
+        Slice(SharedByteBuffer owner, ByteBuffer contents)
+        {
+            this.owner = owner;
+            this.contents = contents;
+        }
+
+        boolean isReadable()
+        {
+            return contents.hasRemaining();
+        }
+
+        int readableBytes()
+        {
+            return contents.remaining();
+        }
+
+        void skipBytes(int skipBytes)
+        {
+            contents.position(contents.position() + skipBytes);
+        }
+
+        void retain()
+        {
+            owner.retain();
+        }
+
+        void release()
+        {
+            owner.release();
+        }
+
+        ByteBuffer tryAdopt()
+        {
+            if (owner.buffer == contents && owner.tryAdopt())
+                return owner.buffer;
+            return null;
+        }
+
+        /**
+         * Create a slice over the next {@code length} bytes, and consume them from our buffer
+         */
+        Slice sliceAndConsume(int length)
+        {
+            int begin = contents.position();
+            int end = begin + length;
+            Slice result = slice(begin, end);
+            contents.position(end);
+            return result;
+        }
+
+        Slice slice(int begin, int end)
+        {
+            ByteBuffer slice = contents.duplicate();
+            slice.position(begin).limit(end);
+            retain();
+            return new Slice(owner, slice);
+        }
+
+        static Slice wrap(ByteBuffer buffer)
+        {
+            return new Slice(new SharedByteBuffer(buffer), buffer);
+        }
+    }
+
+    static class Frame
+    {
+        static void release(Object msg)
+        {
+            if (msg instanceof IntactFrame)
+                ((IntactFrame) msg).contents.release();
+        }
+    }
 
     final static class IntactFrame extends Frame
     {
         final IsSelfContained isSelfContained;
-        final ByteBuf contents;
+        final Slice contents;
 
-        IntactFrame(IsSelfContained isSelfContained, ByteBuf contents)
+        IntactFrame(IsSelfContained isSelfContained, Slice contents)
         {
             this.isSelfContained = isSelfContained;
             this.contents = contents;
@@ -86,106 +220,107 @@ abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
     abstract long readHeader(ByteBuffer in, int begin);
     abstract CorruptFrame verifyHeader(long header);
     abstract int frameLength(long header);
-    abstract Frame unpackFrame(ByteBuf owner, ByteBuffer in, int begin, int end, long header);
+    abstract Frame unpackFrame(Slice slice, int begin, int end, long header);
 
-    @Inline
-    protected final void decode(ByteBuf nettyIn, int headerLength, List<Object> output)
+    public static Slice sliceIfRemaining(Slice slice, int begin, int end)
     {
-        ByteBuffer in = nettyIn.internalNioBuffer(nettyIn.readerIndex(), nettyIn.readableBytes());
-
-        if (stash != null)
+        if (end == slice.contents.limit())
         {
-            if (!copyToSize(in, stash, headerLength))
-                return;
-
-            long header = readHeader(stash, 0);
-            CorruptFrame c = verifyHeader(header);
-            if (c != null)
-            {
-                output.add(c);
-                reset();
-                return;
-            }
-
-            int frameLength = frameLength(header);
-            stash = ensureCapacity(stash, frameLength);
-
-            if (!copyToSize(in, stash, frameLength))
-                return;
-
-            try
-            {
-                output.add(unpackFrame(null, stash, 0, frameLength, header));
-            }
-            finally
-            {
-                reset();
-            }
+            slice.contents.position(begin);
+            return slice;
         }
 
-        int begin = in.position();
-        int limit = in.limit();
-        while (begin < limit)
+        return slice.slice(begin, end);
+    }
+
+    @Inline
+    protected final void decode(Slice slice, int headerLength, List<Object> output)
+    {
+        ByteBuffer in = slice.contents;
+        try
         {
-
-            int remaining = limit - begin;
-            if (remaining < headerLength)
+            if (stash != null)
             {
-                stash(in, headerLength, begin, remaining);
-                return;
+                if (!copyToSize(in, stash, headerLength))
+                    return;
+
+                long header = readHeader(stash, 0);
+                CorruptFrame c = verifyHeader(header);
+                if (c != null)
+                {
+                    output.add(c);
+                    reset();
+                    return;
+                }
+
+                int frameLength = frameLength(header);
+                stash = ensureCapacity(stash, frameLength);
+
+                if (!copyToSize(in, stash, frameLength))
+                    return;
+
+                stash.flip();
+                Slice stashed = Slice.wrap(stash);
+                stash = null;
+                try
+                {
+                    output.add(unpackFrame(stashed, 0, frameLength, header));
+                }
+                catch (Throwable t)
+                {
+                    stashed.release();
+                    throw t;
+                }
             }
 
-            long header = readHeader(in, begin);
-            CorruptFrame c = verifyHeader(header);
-            if (c != null)
+            int begin = in.position();
+            int limit = in.limit();
+            while (begin < limit)
             {
-                output.add(c);
-                return;
+                int remaining = limit - begin;
+                if (remaining < headerLength)
+                {
+                    stash(slice, headerLength, begin, remaining);
+                    return;
+                }
+
+                long header = readHeader(in, begin);
+                CorruptFrame c = verifyHeader(header);
+                if (c != null)
+                {
+                    output.add(c);
+                    return;
+                }
+
+                int frameLength = frameLength(header);
+                if (remaining < frameLength)
+                {
+                    stash(slice, frameLength, begin, remaining);
+                    return;
+                }
+
+                int end = begin + frameLength;
+                output.add(unpackFrame(slice, begin, end, header));
+
+                begin = end;
             }
-
-            int frameLength = frameLength(header);
-            if (remaining < frameLength)
-            {
-                stash(in, frameLength, begin, remaining);
-                return;
-            }
-
-            int end = begin + frameLength;
-            output.add(unpackFrame(nettyIn, in, begin, end, header));
-
-            begin = end;
+        }
+        catch (Throwable t)
+        {
+            for (Object object : output)
+                ((Slice) object).release();
+            slice.release();
+            throw t;
         }
     }
 
+    abstract void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output);
+
     @VisibleForTesting
-    protected abstract void decode(ChannelHandlerContext ctx, ByteBuf nettyIn, List<Object> output);
-
-    /**
-     * Efficiently slice the {@code input} buffer into a ByteBuf with the given bounds.
-     *
-     * If the input buffer is the stash, we simply move ownership into a ByteBuf and return it.
-     *
-     * If the input buffer is sliced from a ByteBuf, we instead retain() a handle to the ByteBuf
-     * and modify its bounds, returning this new ByteBuf.
-     */
-    protected ByteBuf slice(ByteBuf owner, ByteBuffer input, int begin, int end)
+    protected void decode(ChannelHandlerContext ctx, ByteBuf nettyIn, List<Object> output)
     {
-        if (input == stash)
-        {
-            assert owner == null;
-            input.position(begin);
-            input.limit(end);
-            ByteBuf result = BufferPoolAllocator.wrap(input);
-            stash = null;
-            return result;
-        }
-        else
-        {
-            return owner.retainedDuplicate()
-                        .readerIndex(begin)
-                        .writerIndex(end);
-        }
-
+        Slice slice = Slice.wrap(((BufferPoolAllocator.Wrapped) nettyIn).adopt());
+        decode(ctx, slice, output);
     }
 
     private static boolean copyToSize(ByteBuffer in, ByteBuffer out, int toOutPosition)
@@ -218,11 +353,18 @@ abstract class FrameDecoder extends MessageToMessageDecoder<ByteBuf>
         return newBuffer;
     }
 
-    private void stash(ByteBuffer in, int stashLength, int begin, int length)
+    private void stash(Slice in, int stashLength, int begin, int length)
     {
-        stash = BufferPool.get(stashLength, BufferType.OFF_HEAP);
-        copyBytes(in, begin, stash, 0, length);
-        stash.position(length);
+        try
+        {
+            stash = BufferPool.get(stashLength, BufferType.OFF_HEAP);
+            copyBytes(in.contents, begin, stash, 0, length);
+            stash.position(length);
+        }
+        finally
+        {
+            in.release();
+        }
     }
 
     private void reset()

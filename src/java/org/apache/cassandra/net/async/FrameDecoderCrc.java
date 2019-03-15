@@ -61,7 +61,7 @@ public final class FrameDecoderCrc extends FrameDecoder
     final long readHeader(ByteBuffer frame, int begin)
     {
         long header6b;
-        if (frame.remaining() >= 8)
+        if (frame.limit() - begin >= 8)
         {
             header6b = frame.getLong(begin);
             if (frame.order() == ByteOrder.BIG_ENDIAN)
@@ -90,8 +90,9 @@ public final class FrameDecoderCrc extends FrameDecoder
         return payloadLength(header6b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(ByteBuf owner, ByteBuffer in, int begin, int end, long header6b)
+    final Frame unpackFrame(Slice slice, int begin, int end, long header6b)
     {
+        ByteBuffer in = slice.contents;
         IsSelfContained isSelfContained = isSelfContained(header6b);
 
         CRC32 crc = Crc.crc32();
@@ -105,12 +106,12 @@ public final class FrameDecoderCrc extends FrameDecoder
         if (readFullCrc != computeFullCrc)
             return CorruptFrame.recoverable(isSelfContained, (end - begin) - HEADER_AND_TRAILER_LENGTH, readFullCrc, computeFullCrc);
 
-        return new IntactFrame(isSelfContained, slice(owner, in, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
+        return new IntactFrame(isSelfContained, sliceIfRemaining(slice, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
     }
 
-    protected void decode(ChannelHandlerContext ctx, ByteBuf nettyIn, List<Object> output)
+    void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output)
     {
-        decode(nettyIn, HEADER_LENGTH, output);
+        decode(slice, HEADER_LENGTH, output);
     }
 
     void addLastTo(ChannelPipeline pipeline)

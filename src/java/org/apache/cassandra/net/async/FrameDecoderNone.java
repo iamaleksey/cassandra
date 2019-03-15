@@ -31,11 +31,6 @@ class FrameDecoderNone extends FrameDecoder
 {
     public static final FrameDecoderNone instance = new FrameDecoderNone();
 
-    protected void decode(ChannelHandlerContext ctx, ByteBuf msg, List<Object> out)
-    {
-        out.add(new IntactFrame(IsSelfContained.NOT_SPECIFIED, msg.retain()));
-    }
-
     long readHeader(ByteBuffer in, int begin)
     {
         throw new UnsupportedOperationException();
@@ -51,9 +46,14 @@ class FrameDecoderNone extends FrameDecoder
         throw new UnsupportedOperationException();
     }
 
-    Frame unpackFrame(ByteBuf owner, ByteBuffer in, int begin, int end, long header)
+    Frame unpackFrame(Slice slice, int begin, int end, long header)
     {
         throw new UnsupportedOperationException();
+    }
+
+    void decode(ChannelHandlerContext ctx, Slice slice, List<Object> out)
+    {
+        out.add(new IntactFrame(IsSelfContained.NOT_SPECIFIED, slice));
     }
 
     void addLastTo(ChannelPipeline pipeline)

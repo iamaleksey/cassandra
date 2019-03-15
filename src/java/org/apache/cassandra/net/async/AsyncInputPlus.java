@@ -27,6 +27,8 @@ import io.netty.buffer.Unpooled;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.jctools.queues.SpscUnboundedArrayQueue;
 
+import static org.apache.cassandra.net.async.FrameDecoder.*;
+
 class AsyncInputPlus extends RebufferingInputStream
 {
     /**
@@ -37,23 +39,23 @@ class AsyncInputPlus extends RebufferingInputStream
     }
 
     // EMPTY_BUFFER is used to signal AsyncInputPlus that it should be closed
-    private static final ByteBuf CLOSE_INPUT = Unpooled.EMPTY_BUFFER;
+    private static final Slice CLOSE_INPUT = Slice.EMPTY;
 
-    private final Queue<ByteBuf> queue;
+    private final Queue<Slice> queue;
 
     private final IntConsumer onReleased;
 
-    private ByteBuf buf;
-    private int bufSize;
+    private Slice slice;
+    private int sliceSize;
 
     private volatile boolean isClosed;
     private volatile Thread parkedThread;
 
     AsyncInputPlus(IntConsumer onReleased)
     {
-        super(Unpooled.EMPTY_BUFFER.nioBuffer());
-        this.buf = Unpooled.EMPTY_BUFFER;
-        this.bufSize = 0;
+        super(Slice.EMPTY.contents);
+        this.slice = Slice.EMPTY;
+        this.sliceSize = 0;
 
         this.queue = new SpscUnboundedArrayQueue<>(16);
         this.onReleased = onReleased;
@@ -64,16 +66,16 @@ class AsyncInputPlus extends RebufferingInputStream
     {
         releaseCurrentBuf();
 
-        ByteBuf nextBuf = pollBlockingly();
-        if (nextBuf == CLOSE_INPUT)
+        Slice nextSlice = pollBlockingly();
+        if (nextSlice == CLOSE_INPUT)
         {
             isClosed = true;
             throw new InputClosedException();
         }
 
-        buf = nextBuf;
-        bufSize = nextBuf.readableBytes();
-        buffer = nextBuf.nioBuffer();
+        slice = nextSlice;
+        sliceSize = nextSlice.contents.remaining();
+        buffer = nextSlice.contents;
     }
 
     @Override
@@ -82,35 +84,35 @@ class AsyncInputPlus extends RebufferingInputStream
         if (isClosed)
             return;
 
-        if (null != buf)
+        if (null != slice)
             releaseCurrentBuf();
 
-        ByteBuf nextBuf;
-        while ((nextBuf = pollBlockingly()) != CLOSE_INPUT)
+        Slice nextSlice;
+        while ((nextSlice = pollBlockingly()) != CLOSE_INPUT)
         {
-            onReleased.accept(nextBuf.readableBytes());
-            nextBuf.release();
+            onReleased.accept(nextSlice.readableBytes());
+            nextSlice.release();
         }
 
         isClosed = true;
     }
 
-    void supply(ByteBuf buf)
+    void supply(Slice slice)
     {
         if (isClosed)
             throw new IllegalStateException("Cannot supply a buffer to a closed AsyncInputPlus");
 
-        queue.add(buf);
+        queue.add(slice);
         maybeUnpark();
     }
 
     private void releaseCurrentBuf()
     {
-        buf.release();
-        if (bufSize > 0)
-            onReleased.accept(bufSize);
-        buf = null;
-        bufSize = 0;
+        slice.release();
+        if (sliceSize > 0)
+            onReleased.accept(sliceSize);
+        slice = null;
+        sliceSize = 0;
         buffer = null;
     }
 
@@ -123,9 +125,9 @@ class AsyncInputPlus extends RebufferingInputStream
         maybeUnpark();
     }
 
-    private ByteBuf pollBlockingly()
+    private Slice pollBlockingly()
     {
-        ByteBuf buf = queue.poll();
+        Slice buf = queue.poll();
         if (null != buf)
             return buf;
 

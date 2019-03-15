@@ -18,6 +18,7 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
@@ -37,16 +38,19 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
-import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.EventExecutorGroup;
 import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.Crc.InvalidCrc;
+import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
+import org.apache.cassandra.net.async.FrameDecoder.Slice;
 import org.apache.cassandra.net.async.InboundCallbacks.MessageProcessor;
 import org.apache.cassandra.net.async.InboundCallbacks.OnHandlerClosed;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageError;
@@ -58,6 +62,7 @@ import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.min;
 
@@ -159,7 +164,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         if (isClosed())
-            ReferenceCountUtil.release(msg);
+            Frame.release(msg);
         else if (msg instanceof CorruptFrame)
             handleCorruption((CorruptFrame) msg);
         else
@@ -168,32 +173,32 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void doChannelRead(IntactFrame frame) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
-        final ByteBuf buf = frame.contents;
-        final int readableBytes = buf.readableBytes();
+        final Slice slice = frame.contents;
+        final int readableBytes = slice.contents.remaining();
 
         // some bytes of an expired message in the stream to skip still
         if (skipBytesRemaining > 0)
         {
             int skippedBytes = min(readableBytes, skipBytesRemaining);
             receivedBytes += skippedBytes;
-            buf.skipBytes(skippedBytes);
+            slice.skipBytes(skippedBytes);
 
             skipBytesRemaining -= skippedBytes;
             if (skipBytesRemaining > 0)
             {
-                buf.release();
+                slice.release();
             }
             else
             {
                 receivedCount++;
-                processMessages(buf);
+                processMessages(slice);
             }
         }
 
         // no large message in-flight
         else if (largeBytesRemaining == 0)
         {
-            processMessages(cumulate(unstash(), buf));
+            processMessages(unstash(slice));
         }
 
         // less than enough bytes to complete the large message in-flight
@@ -201,7 +206,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             receivedBytes += readableBytes;
             largeBytesRemaining -= readableBytes;
-            if (!largeCoprocessor.supply(buf))
+            if (!largeCoprocessor.supply(slice))
                 aheadOfCoprocessors();
         }
 
@@ -212,7 +217,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedBytes += largeBytesRemaining;
 
             largeBytesRemaining = 0;
-            if (!largeCoprocessor.supply(buf))
+            if (!largeCoprocessor.supply(slice))
                 aheadOfCoprocessors();
             closeCoprocessor();
         }
@@ -223,8 +228,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedCount++;
             receivedBytes += largeBytesRemaining;
 
-            boolean isKeepingUp = largeCoprocessor.supply(buf.retainedSlice(buf.readerIndex(), largeBytesRemaining));
-            buf.skipBytes(largeBytesRemaining);
+            boolean isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(largeBytesRemaining));
+            slice.skipBytes(largeBytesRemaining);
             largeBytesRemaining = 0;
             closeCoprocessor();
 
@@ -232,9 +237,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 aheadOfCoprocessors();
 
             if (isKeepingUp)
-                processMessages(buf);
+                processMessages(slice);
             else
-                stash(buf);
+                stash(slice);
         }
     }
 
@@ -292,33 +297,34 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void processMessages(ByteBuf buf) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private void processMessages(Slice slice) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
-        processMessages(buf, Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
+        processMessages(slice, Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
     }
 
     /*
      * Process a stream of messages (potentially not ending with a completely read one). The buffer starts at a boundary
      * of a new message. Will process at most count messages.
      */
-    private void processMessages(ByteBuf buf, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private void processMessages(Slice slice, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         try
         {
             //noinspection StatementWithEmptyBody
-            while (count-- > 0 && processMessage(buf, endpointReserve, globalReserve));
+            while (count-- > 0 && processMessage(slice, endpointReserve, globalReserve));
         }
         finally
         {
-            if (buf.isReadable())
-                stash(buf);
+            if (slice.contents.hasRemaining())
+                stash(slice);
             else
-                buf.release();
+                slice.release();
         }
     }
 
-    private boolean processMessage(ByteBuf buf, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private boolean processMessage(Slice slice, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
+        ByteBuffer buf = slice.contents;
         int messageSize = serializer.messageSize(buf, version);
 
         if (messageSize < 0) // not enough bytes to read size of the message
@@ -336,14 +342,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             onExpired.call(serializer.getVerb(buf, version), messageSize, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
 
-            int skippedBytes = min(buf.readableBytes(), messageSize);
+            int skippedBytes = min(buf.remaining(), messageSize);
             receivedBytes += skippedBytes;
-            buf.skipBytes(skippedBytes);
+            slice.skipBytes(skippedBytes);
 
             skipBytesRemaining = messageSize - skippedBytes;
             if (skipBytesRemaining == 0)
                 receivedCount++;
-            return buf.isReadable();
+            return buf.hasRemaining();
         }
 
         Outcome outcome = acquireCapacity(endpointReserve, globalReserve, messageSize);
@@ -355,26 +361,26 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         return messageSize <= largeThreshold
              ? processSmallMessage(buf, messageSize)
-             : processLargeMessage(buf, messageSize);
+             : processLargeMessage(slice, messageSize);
     }
 
     @SuppressWarnings("resource")
-    private boolean processSmallMessage(ByteBuf buf, int messageSize)
+    private boolean processSmallMessage(ByteBuffer buf, int messageSize)
     {
-        if (buf.readableBytes() < messageSize)
+        if (buf.remaining() < messageSize)
             return false; // not enough bytes to read the entire small message
 
         receivedCount += 1;
         receivedBytes += messageSize;
 
-        final int readerIndex = buf.readerIndex();
-        final int writerIndex = buf.writerIndex();
-        buf.writerIndex(readerIndex + messageSize); // cap to expected message size
+        final int begin = buf.position();
+        final int end = buf.limit();
+        buf.limit(begin + messageSize); // cap to expected message size
 
         Message<?> message = null;
         try
         {
-            message = serializer.deserialize(new ByteBufDataInputPlus(buf), peer, version);
+            message = serializer.deserialize(new DataInputBuffer(buf, false), peer, version);
         }
         catch (UnknownTableException e)
         {
@@ -394,8 +400,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         finally
         {
-            buf.readerIndex(readerIndex + messageSize);
-            buf.writerIndex(writerIndex);
+            buf.position(begin + messageSize);
+            buf.limit(end);
         }
 
         if (null != message)
@@ -403,24 +409,23 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         else
             releaseCapacity(messageSize);
 
-        return buf.isReadable();
+        return buf.hasRemaining();
     }
 
-    private boolean processLargeMessage(ByteBuf buf, int messageSize)
+    private boolean processLargeMessage(Slice slice, int messageSize)
     {
         largeCoprocessor = new LargeCoprocessor(messageSize);
         largeExecutor.submit(largeCoprocessor);
 
         boolean isKeepingUp;
-        final int readableBytes = buf.readableBytes();
+        final int readableBytes = slice.readableBytes();
 
         // not enough bytes for the large message
         if (readableBytes < messageSize)
         {
             receivedBytes += readableBytes;
-            isKeepingUp = largeCoprocessor.supply(buf.retainedDuplicate());
+            isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(readableBytes));
             largeBytesRemaining = messageSize - readableBytes;
-            buf.clear();
         }
         // just enough bytes for the large message
         else if (readableBytes == messageSize)
@@ -428,9 +433,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedCount++;
             receivedBytes += readableBytes;
 
-            isKeepingUp = largeCoprocessor.supply(buf.retainedDuplicate());
+            isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(readableBytes));
             largeBytesRemaining = 0;
-            buf.clear();
             closeCoprocessor();
         }
         // more than enough bytes for the large message
@@ -439,15 +443,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedCount++;
             receivedBytes += messageSize;
 
-            isKeepingUp = largeCoprocessor.supply(buf.retainedSlice(buf.readerIndex(), messageSize));
-            buf.skipBytes(messageSize);
+            isKeepingUp = largeCoprocessor.supply(slice.sliceAndConsume(messageSize));
+            slice.skipBytes(messageSize);
             closeCoprocessor();
         }
 
         if (!isKeepingUp)
             aheadOfCoprocessors();
 
-        return isKeepingUp && buf.isReadable();
+        return isKeepingUp && slice.isReadable();
     }
 
     // wrap parent callback to release capacity first
@@ -488,23 +492,73 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
 
     // left over bytes that couldn't be processed yet for whatever reason (incomplete, or got ahead of coprocessor or limits)
-    private ByteBuf stashedBytes;
+    private ByteBuffer stashedBytes;
 
-    private ByteBuf unstash()
+    private Slice unstash()
     {
-        ByteBuf buf = stashedBytes;
+        ByteBuffer buf = stashedBytes;
+        if (buf == null)
+            return null;
         stashedBytes = null;
-        return buf;
+        return Slice.wrap(buf);
     }
 
-    private void stash(ByteBuf buf)
+    private Slice unstash(Slice append)
     {
-        stashedBytes = buf;
+        ByteBuffer buf = stashedBytes;
+        if (buf == null)
+            return append;
+
+        stashedBytes = null;
+
+        int savePosition = readableToWriteable(buf);
+        if (buf.remaining() < append.readableBytes())
+        {
+            writableToReadable(buf, savePosition);
+            ByteBuffer newBuffer = BufferPool.get(buf.remaining() + append.readableBytes());
+            newBuffer.put(buf);
+            BufferPool.put(buf);
+            buf = newBuffer;
+            savePosition = 0;
+        }
+
+        buf.put(append.contents);
+        append.release();
+        writableToReadable(buf, savePosition);
+
+        return Slice.wrap(buf);
     }
 
-    private ByteBuf cumulate(ByteBuf buf1, ByteBuf buf2)
+    private static int readableToWriteable(ByteBuffer buffer)
     {
-        return null == buf1 ? buf2 : ByteToMessageDecoder.MERGE_CUMULATOR.cumulate(channel.alloc(), buf1, buf2);
+        int position = buffer.position();
+        buffer.position(buffer.limit());
+        buffer.limit(buffer.capacity());
+        return position;
+    }
+
+    private static void writableToReadable(ByteBuffer buffer, int position)
+    {
+        buffer.limit(buffer.position());
+        buffer.position(position);
+    }
+
+    private void stash(Slice slice)
+    {
+        stashedBytes = slice.tryAdopt();
+        if (stashedBytes == null)
+        {
+            try
+            {
+                stashedBytes = BufferPool.get(slice.readableBytes(), BufferType.OFF_HEAP);
+                stashedBytes.put(slice.contents);
+                stashedBytes.flip();
+            }
+            finally
+            {
+                slice.release();
+            }
+        }
     }
 
     private void onCoprocessorCaughtUp()
@@ -534,7 +588,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         state = State.ACTIVE;
 
         // resume from where we left off
-        ByteBuf stash = unstash();
+        Slice stash = unstash();
         try
         {
             if (null != stash)
@@ -557,7 +611,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return;
 
         // resume from where we left off
-        ByteBuf stash = unstash();
+        Slice stash = unstash();
         try
         {
             if (null != stash)
@@ -652,7 +706,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         state = State.CLOSED;
 
-        ByteBuf stash = unstash();
+        Slice stash = unstash();
         if (null != stash)
             stash.release();
 
@@ -771,10 +825,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         /*
          * Returns true if coprocessor is keeping up and can accept more input, false if it's fallen behind.
          */
-        boolean supply(ByteBuf buf)
+        boolean supply(Slice slice)
         {
-            int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, buf.readableBytes());
-            input.supply(buf);
+            int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, slice.readableBytes());
+            input.supply(slice);
             return unconsumed <= maxUnconsumedBytes;
         }
 

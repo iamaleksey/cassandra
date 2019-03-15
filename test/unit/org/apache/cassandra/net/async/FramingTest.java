@@ -35,6 +35,7 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.*;
+import static org.apache.cassandra.net.async.FrameDecoder.Slice.wrap;
 
 // TODO: test corruption
 // TODO: use a different random seed each time
@@ -50,13 +51,13 @@ public class FramingTest
     {
         final List<byte[]> original;
         final int[] boundaries;
-        final ByteBuffer frames;
+        final FrameDecoder.Slice frames;
 
         private SequenceOfFrames(List<byte[]> original, int[] boundaries, ByteBuffer frames)
         {
             this.original = original;
             this.boundaries = boundaries;
-            this.frames = frames;
+            this.frames = wrap(frames);
         }
     }
 
@@ -84,16 +85,16 @@ public class FramingTest
         SequenceOfFrames sequenceOfFrames = pairOfFrames(random, encoder);
 
         List<byte[]> uncompressed = sequenceOfFrames.original;
-        ByteBuffer frames = sequenceOfFrames.frames;
+        FrameDecoder.Slice frames = sequenceOfFrames.frames;
         int[] boundaries = sequenceOfFrames.boundaries;
 
-        int end = frames.limit();
+        int end = frames.contents.limit();
         List<Object> out = new ArrayList<>();
         int prevBoundary = -1;
         for (int i = 0 ; i < end ; )
         {
             int limit = i + random.nextInt(1 + end - i);
-            decoder.decode(null, Unpooled.wrappedBuffer((ByteBuffer) sequenceOfFrames.frames.duplicate().position(i).limit(limit)), out);
+            decoder.decode(null, FrameDecoder.sliceIfRemaining(frames, i, limit), out);
             int boundary = Arrays.binarySearch(boundaries, limit);
             if (boundary < 0) boundary = -2 -boundary;
 
@@ -107,10 +108,10 @@ public class FramingTest
         }
     }
 
-    private static void verify(byte[] expect, ByteBuf actual)
+    private static void verify(byte[] expect, FrameDecoder.Slice actual)
     {
         byte[] fetch = new byte[expect.length];
-        actual.getBytes(actual.readerIndex(), fetch);
+        actual.contents.get(fetch);
         Assert.assertArrayEquals(expect, fetch);
         actual.release();
     }
