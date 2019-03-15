@@ -35,7 +35,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.Crc;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
@@ -344,7 +343,7 @@ public class Message<T>
 
     public static final class InvalidLegacyProtocolMagic extends IOException
     {
-        public InvalidLegacyProtocolMagic(int read)
+        private InvalidLegacyProtocolMagic(int read)
         {
             super(String.format("Read %d, Expected %d", read, PROTOCOL_MAGIC));
         }
@@ -431,7 +430,7 @@ public class Message<T>
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          */
-        public int messageSize(ByteBuffer buf, int version) throws InvalidLegacyProtocolMagic, Crc.InvalidCrc
+        public int messageSize(ByteBuffer buf, int version) throws InvalidLegacyProtocolMagic
         {
             return version >= VERSION_40 ? messageSizePost40(buf) : messageSizePre40(buf);
         }

@@ -33,12 +33,10 @@ import java.util.function.Consumer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
-import io.netty.util.ReferenceCountUtil;
 import io.netty.util.concurrent.EventExecutorGroup;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.compress.BufferType;
@@ -171,7 +169,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             doChannelRead((IntactFrame) msg);
     }
 
-    private void doChannelRead(IntactFrame frame) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private void doChannelRead(IntactFrame frame) throws InvalidLegacyProtocolMagic
     {
         final Slice slice = frame.contents;
         final int readableBytes = slice.contents.remaining();
@@ -246,12 +244,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     /*
      * Handle a corrupted LZ4 frame.
      */
-    private void handleCorruption(CorruptFrame corruption) throws InvalidCrc
+    private void handleCorruption(CorruptFrame frame) throws InvalidCrc
     {
-        if (!corruption.isRecoverable())
-            throw new InvalidCrc(corruption.readCRC, corruption.computedCRC);
+        if (!frame.isRecoverable())
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
 
-        final int frameSize = corruption.frameSize;
+        final int frameSize = frame.frameSize;
         receivedBytes += frameSize;
 
         /*
@@ -264,7 +262,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             skipBytesRemaining -= frameSize;
             noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
         }
-
         /*
          * Corrupted frame in the middle or at the very end of a large message. Can safely be skipped with only the
          * large message in flight dropped.
@@ -281,7 +278,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             largeBytesRemaining = 0;
             noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
         }
-
         /*
          * First frame of a large message, or a frame of small messages; nothing we can really do here.
          *
@@ -293,11 +289,19 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
          */
         else
         {
-            noSpamLogger.warn("Invalid, potentially recoverable CRC mismatch detected while reading messages from {}", peer);
+            if (frame.isSelfContained == FrameDecoder.IsSelfContained.YES)
+            {
+                noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading messages from {} (corrupted frame of small messages)", peer);
+            }
+            else
+            {
+                noSpamLogger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} (corrupted first frame of a large message)", peer);
+                throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+            }
         }
     }
 
-    private void processMessages(Slice slice) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private void processMessages(Slice slice) throws InvalidLegacyProtocolMagic
     {
         processMessages(slice, Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
     }
@@ -306,7 +310,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
      * Process a stream of messages (potentially not ending with a completely read one). The buffer starts at a boundary
      * of a new message. Will process at most count messages.
      */
-    private void processMessages(Slice slice, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private void processMessages(Slice slice, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         try
         {
@@ -322,7 +326,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private boolean processMessage(Slice slice, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic, InvalidCrc
+    private boolean processMessage(Slice slice, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = slice.contents;
         int messageSize = serializer.messageSize(buf, version);
@@ -364,7 +368,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
              : processLargeMessage(slice, messageSize);
     }
 
-    @SuppressWarnings("resource")
+    @SuppressWarnings({ "resource", "RedundantSuppression" })
     private boolean processSmallMessage(ByteBuffer buf, int messageSize)
     {
         if (buf.remaining() < messageSize)
@@ -594,7 +598,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (null != stash)
                 processMessages(stash, maxCount, endpointReserve, globalReserve);
         }
-        catch (InvalidLegacyProtocolMagic | InvalidCrc e)
+        catch (InvalidLegacyProtocolMagic e)
         {
             exceptionCaught(e);
         }
@@ -617,7 +621,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (null != stash)
                 processMessages(stash);
         }
-        catch (InvalidLegacyProtocolMagic | InvalidCrc e)
+        catch (InvalidLegacyProtocolMagic e)
         {
             exceptionCaught(e);
         }
