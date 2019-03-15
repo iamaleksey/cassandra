@@ -130,10 +130,22 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             owner.release();
         }
 
+        /**
+         * Attempt to take unique ownership of the underlying buffer, if we are currently the only owners.
+         *
+         * This method is NOT safe in the face of multi-threaded retain() or slice() calls;
+         * you should already know that you have exclusive ownership of these operations.
+         *
+         * The underlying buffer's position and limit will be updated to match those of this slice.
+         */
         ByteBuffer tryAdopt()
         {
             if (owner.buffer == contents && owner.tryAdopt())
+            {
+                // propagate our position/limit to the underlying buffer
+                owner.buffer.position(contents.position()).limit(contents.limit());
                 return owner.buffer;
+            }
             return null;
         }
 
@@ -149,6 +161,9 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             return result;
         }
 
+        /**
+         * Create a new slice, incrementing the number of owners (making it shared if it was previously unshared)
+         */
         Slice slice(int begin, int end)
         {
             ByteBuffer slice = contents.duplicate();
@@ -165,6 +180,9 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     static class Frame
     {
+        /**
+         * If the provided Object is a Frame, release any associated resources it owns
+         */
         static void release(Object msg)
         {
             if (msg instanceof IntactFrame)
