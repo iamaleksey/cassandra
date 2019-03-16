@@ -1,21 +1,20 @@
 /*
-* Licensed to the Apache Software Foundation (ASF) under one
-* or more contributor license agreements.  See the NOTICE file
-* distributed with this work for additional information
-* regarding copyten ownership.  The ASF licenses this file
-* to you under the Apache License, Version 2.0 (the
-* "License"); you may not use this file except in compliance
-* with the License.  You may obtain a copy of the License at
-*
-*    http://www.apache.org/licenses/LICENSE-2.0
-*
-* Unless required by applicable law or agreed to in writing,
-* software distributed under the License is distributed on an
-* "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-* KIND, either express or implied.  See the License for the
-* specific language governing permissions and limitations
-* under the License.
-*/
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 package org.apache.cassandra.utils;
 
 import java.math.BigInteger;
@@ -36,10 +35,8 @@ import org.apache.cassandra.dht.RandomPartitioner.BigIntegerToken;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputBuffer;
-import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.utils.MerkleTree.Hashable;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTree.TreeRange;
 import org.apache.cassandra.utils.MerkleTree.TreeRangeIterator;
@@ -49,7 +46,7 @@ import static org.junit.Assert.*;
 
 public class MerkleTreeTest
 {
-    public static byte[] DUMMY = "blah".getBytes();
+    private static final byte[] DUMMY = HashingUtils.newMessageDigest("SHA-256").digest("dummy".getBytes());
 
     /**
      * If a test assumes that the tree is 8 units wide, then it should set this value
@@ -68,6 +65,9 @@ public class MerkleTreeTest
     @Before
     public void setup()
     {
+        DatabaseDescriptor.clientInitialization();
+        DatabaseDescriptor.setOffheapMerkleTreesEnabled(false);
+
         TOKEN_SCALE = new BigInteger("8");
         partitioner = RandomPartitioner.instance;
         // TODO need to trickle TokenSerializer
@@ -171,7 +171,7 @@ public class MerkleTreeTest
         Iterator<TreeRange> ranges;
 
         // (zero, zero]
-        ranges = mt.invalids();
+        ranges = mt.rangeIterator();
         assertEquals(new Range<>(tok(-1), tok(-1)), ranges.next());
         assertFalse(ranges.hasNext());
 
@@ -181,7 +181,7 @@ public class MerkleTreeTest
         mt.split(tok(6));
         mt.split(tok(3));
         mt.split(tok(5));
-        ranges = mt.invalids();
+        ranges = mt.rangeIterator();
         assertEquals(new Range<>(tok(6), tok(-1)), ranges.next());
         assertEquals(new Range<>(tok(-1), tok(2)), ranges.next());
         assertEquals(new Range<>(tok(2), tok(3)), ranges.next());
@@ -200,7 +200,7 @@ public class MerkleTreeTest
         Range<Token> range = new Range<>(tok(-1), tok(-1));
 
         // (zero, zero]
-        assertNull(mt.hash(range));
+        assertFalse(mt.hashesRange(range));
 
         // validate the range
         mt.get(tok(-1)).hash(val);
@@ -223,11 +223,12 @@ public class MerkleTreeTest
         // (zero,two] (two,four] (four, zero]
         mt.split(tok(4));
         mt.split(tok(2));
-        assertNull(mt.hash(left));
-        assertNull(mt.hash(partial));
-        assertNull(mt.hash(right));
-        assertNull(mt.hash(linvalid));
-        assertNull(mt.hash(rinvalid));
+
+        assertFalse(mt.hashesRange(left));
+        assertFalse(mt.hashesRange(partial));
+        assertFalse(mt.hashesRange(right));
+        assertFalse(mt.hashesRange(linvalid));
+        assertFalse(mt.hashesRange(rinvalid));
 
         // validate the range
         mt.get(tok(2)).hash(val);
@@ -237,8 +238,8 @@ public class MerkleTreeTest
         assertHashEquals(leftval, mt.hash(left));
         assertHashEquals(partialval, mt.hash(partial));
         assertHashEquals(val, mt.hash(right));
-        assertNull(mt.hash(linvalid));
-        assertNull(mt.hash(rinvalid));
+        assertFalse(mt.hashesRange(linvalid));
+        assertFalse(mt.hashesRange(rinvalid));
     }
 
     @Test
@@ -258,10 +259,6 @@ public class MerkleTreeTest
         mt.split(tok(2));
         mt.split(tok(6));
         mt.split(tok(1));
-        assertNull(mt.hash(full));
-        assertNull(mt.hash(lchild));
-        assertNull(mt.hash(rchild));
-        assertNull(mt.hash(invalid));
 
         // validate the range
         mt.get(tok(1)).hash(val);
@@ -270,10 +267,14 @@ public class MerkleTreeTest
         mt.get(tok(6)).hash(val);
         mt.get(tok(-1)).hash(val);
 
+        assertTrue(mt.hashesRange(full));
+        assertTrue(mt.hashesRange(lchild));
+        assertTrue(mt.hashesRange(rchild));
+        assertFalse(mt.hashesRange(invalid));
+
         assertHashEquals(fullval, mt.hash(full));
         assertHashEquals(lchildval, mt.hash(lchild));
         assertHashEquals(rchildval, mt.hash(rchild));
-        assertNull(mt.hash(invalid));
     }
 
     @Test
@@ -294,9 +295,6 @@ public class MerkleTreeTest
         mt.split(tok(4));
         mt.split(tok(2));
         mt.split(tok(1));
-        assertNull(mt.hash(full));
-        assertNull(mt.hash(childfull));
-        assertNull(mt.hash(invalid));
 
         // validate the range
         mt.get(tok(1)).hash(val);
@@ -306,9 +304,12 @@ public class MerkleTreeTest
         mt.get(tok(16)).hash(val);
         mt.get(tok(-1)).hash(val);
 
+        assertTrue(mt.hashesRange(full));
+        assertTrue(mt.hashesRange(childfull));
+        assertFalse(mt.hashesRange(invalid));
+
         assertHashEquals(fullval, mt.hash(full));
         assertHashEquals(childfullval, mt.hash(childfull));
-        assertNull(mt.hash(invalid));
     }
 
     @Test
@@ -326,7 +327,7 @@ public class MerkleTreeTest
         }
 
         // validate the tree
-        TreeRangeIterator ranges = mt.invalids();
+        TreeRangeIterator ranges = mt.rangeIterator();
         for (TreeRange range : ranges)
             range.addHash(new RowHash(range.right, new byte[0], 0));
 
@@ -355,7 +356,7 @@ public class MerkleTreeTest
         mt.split(tok(6));
         mt.split(tok(10));
 
-        ranges = mt.invalids();
+        ranges = mt.rangeIterator();
         ranges.next().addAll(new HIterator(2, 4)); // (-1,4]: depth 2
         ranges.next().addAll(new HIterator(6)); // (4,6]
         ranges.next().addAll(new HIterator(8)); // (6,8]
@@ -372,7 +373,7 @@ public class MerkleTreeTest
         mt2.split(tok(9));
         mt2.split(tok(11));
 
-        ranges = mt2.invalids();
+        ranges = mt2.rangeIterator();
         ranges.next().addAll(new HIterator(2)); // (-1,2]
         ranges.next().addAll(new HIterator(4)); // (2,4]
         ranges.next().addAll(new HIterator(6, 8)); // (4,8]: depth 2
@@ -395,19 +396,33 @@ public class MerkleTreeTest
         // populate and validate the tree
         mt.maxsize(256);
         mt.init();
-        for (TreeRange range : mt.invalids())
+        for (TreeRange range : mt.rangeIterator())
             range.addAll(new HIterator(range.right));
 
         byte[] initialhash = mt.hash(full);
 
         DataOutputBuffer out = new DataOutputBuffer();
-        MerkleTree.serializer.serialize(mt, out, MessagingService.current_version);
+        mt.serialize(out, MessagingService.current_version);
         byte[] serialized = out.toByteArray();
 
-        DataInputPlus in = new DataInputBuffer(serialized);
-        MerkleTree restored = MerkleTree.serializer.deserialize(in, MessagingService.current_version);
+        MerkleTree restoredOnHeap =
+            MerkleTree.deserialize(new DataInputBuffer(serialized), false, MessagingService.current_version);
+        MerkleTree restoredOffHeap =
+            MerkleTree.deserialize(new DataInputBuffer(serialized), true, MessagingService.current_version);
+        MerkleTree movedOffHeap = mt.tryMoveOffHeap();
 
-        assertHashEquals(initialhash, restored.hash(full));
+        assertHashEquals(initialhash, restoredOnHeap.hash(full));
+        assertHashEquals(initialhash, restoredOffHeap.hash(full));
+        assertHashEquals(initialhash, movedOffHeap.hash(full));
+
+        assertEquals(mt, restoredOnHeap);
+        assertEquals(mt, restoredOffHeap);
+        assertEquals(mt, movedOffHeap);
+
+        assertEquals(restoredOnHeap, restoredOffHeap);
+        assertEquals(restoredOnHeap, movedOffHeap);
+
+        assertEquals(restoredOffHeap, movedOffHeap);
     }
 
     @Test
@@ -420,9 +435,9 @@ public class MerkleTreeTest
         mt2.init();
 
         // add dummy hashes to both trees
-        for (TreeRange range : mt.invalids())
+        for (TreeRange range : mt.rangeIterator())
             range.addAll(new HIterator(range.right));
-        for (TreeRange range : mt2.invalids())
+        for (TreeRange range : mt2.rangeIterator())
             range.addAll(new HIterator(range.right));
 
         TreeRange leftmost = null;
@@ -431,7 +446,7 @@ public class MerkleTreeTest
         mt.maxsize(maxsize + 2); // give some room for splitting
 
         // split the leftmost
-        Iterator<TreeRange> ranges = mt.invalids();
+        Iterator<TreeRange> ranges = mt.rangeIterator();
         leftmost = ranges.next();
         mt.split(leftmost.right);
 
@@ -465,18 +480,18 @@ public class MerkleTreeTest
         byte[] h2 = "hjkl".getBytes();
 
         // add dummy hashes to both trees
-        for (TreeRange tree : ltree.invalids())
+        for (TreeRange tree : ltree.rangeIterator())
         {
             tree.addHash(new RowHash(range.right, h1, h1.length));
         }
-        for (TreeRange tree : rtree.invalids())
+        for (TreeRange tree : rtree.rangeIterator())
         {
             tree.addHash(new RowHash(range.right, h2, h2.length));
         }
 
         List<TreeRange> diffs = MerkleTree.difference(ltree, rtree);
         assertEquals(Lists.newArrayList(range), diffs);
-        assertEquals(MerkleTree.FULLY_INCONSISTENT, MerkleTree.differenceHelper(ltree, rtree, new ArrayList<>(), new MerkleTree.TreeDifference(ltree.fullRange.left, ltree.fullRange.right, (byte) 0)));
+        assertEquals(MerkleTree.FULLY_INCONSISTENT, MerkleTree.differenceHelper(ltree, rtree, new ArrayList<>(), new MerkleTree.TreeRange(ltree.fullRange.left, ltree.fullRange.right, (byte)0)));
     }
 
     /**
@@ -499,11 +514,11 @@ public class MerkleTreeTest
 
 
         // add dummy hashes to both trees
-        for (TreeRange tree : ltree.invalids())
+        for (TreeRange tree : ltree.rangeIterator())
         {
             tree.addHash(new RowHash(range.right, h1, h1.length));
         }
-        for (TreeRange tree : rtree.invalids())
+        for (TreeRange tree : rtree.rangeIterator())
         {
             tree.addHash(new RowHash(range.right, h2, h2.length));
         }
@@ -533,7 +548,7 @@ public class MerkleTreeTest
             while (depth.equals(dstack.peek()))
             {
                 // consume the stack
-                hash = Hashable.binaryHash(hstack.pop(), hash);
+                hash = FBUtilities.xor(hstack.pop(), hash);
                 depth = dstack.pop() - 1;
             }
             dstack.push(depth);

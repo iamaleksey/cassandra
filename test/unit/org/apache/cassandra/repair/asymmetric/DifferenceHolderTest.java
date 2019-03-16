@@ -74,9 +74,9 @@ public class DifferenceHolderTest
         mt1.init();
         mt2.init();
         // add dummy hashes to both trees
-        for (MerkleTree.TreeRange range : mt1.invalids())
+        for (MerkleTree.TreeRange range : mt1.rangeIterator())
             range.addAll(new MerkleTreesTest.HIterator(range.right));
-        for (MerkleTree.TreeRange range : mt2.invalids())
+        for (MerkleTree.TreeRange range : mt2.rangeIterator())
             range.addAll(new MerkleTreesTest.HIterator(range.right));
 
         MerkleTree.TreeRange leftmost = null;
@@ -85,7 +85,7 @@ public class DifferenceHolderTest
         mt1.maxsize(fullRange, maxsize + 2); // give some room for splitting
 
         // split the leftmost
-        Iterator<MerkleTree.TreeRange> ranges = mt1.invalids();
+        Iterator<MerkleTree.TreeRange> ranges = mt1.rangeIterator();
         leftmost = ranges.next();
         mt1.split(leftmost.right);
 
