@@ -127,10 +127,6 @@ public class LocalSyncTaskTest extends SchemaLoader
         MerkleTrees tree = new MerkleTrees(partirioner);
         tree.addMerkleTrees((int) Math.pow(2, 15), desc.ranges);
         tree.init();
-        for (MerkleTree.TreeRange r : tree.invalids())
-        {
-            r.ensureHashInitialised();
-        }
         return tree;
     }
 }

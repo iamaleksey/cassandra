@@ -58,7 +58,6 @@ import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTrees;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.UUIDGen;
@@ -261,10 +260,6 @@ public class RepairJobTest extends SchemaLoader
         MerkleTrees tree = new MerkleTrees(MURMUR3_PARTITIONER);
         tree.addMerkleTrees((int) Math.pow(2, 15), fullRange);
         tree.init();
-        for (MerkleTree.TreeRange r : tree.invalids())
-        {
-            r.ensureHashInitialised();
-        }
 
         if (invalidate)
         {

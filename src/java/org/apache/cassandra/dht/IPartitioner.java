@@ -84,4 +84,9 @@ public interface IPartitioner
      * Used by secondary indices.
      */
     public AbstractType<?> partitionOrdering();
+
+    default public int getMaxTokenSize()
+    {
+        return Integer.MIN_VALUE;
+    }
 }

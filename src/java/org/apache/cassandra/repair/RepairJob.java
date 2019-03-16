@@ -139,20 +139,19 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
     }
 
     @VisibleForTesting
-    List<SyncTask> createSyncTasks(List<TreeResponse> trees, InetAddress local)
+    List<SyncTask> createSyncTasks(List<TreeResponse> responses, InetAddress local)
     {
         List<SyncTask> syncTasks = new ArrayList<>();
         // We need to difference all trees one against another
-        for (int i = 0; i < trees.size() - 1; ++i)
+        for (int i = 0; i < responses.size() - 1; ++i)
         {
-            TreeResponse r1 = trees.get(i);
-            for (int j = i + 1; j < trees.size(); ++j)
+            TreeResponse r1 = responses.get(i);
+            for (int j = i + 1; j < responses.size(); ++j)
             {
-                TreeResponse r2 = trees.get(j);
-                SyncTask task;
-
+                TreeResponse r2 = responses.get(j);
                 List<Range<Token>> differences = MerkleTrees.difference(r1.trees, r2.trees);
 
+                SyncTask task;
                 if (r1.endpoint.equals(local) || r2.endpoint.equals(local))
                 {
                     task = new LocalSyncTask(desc, r1.endpoint, r2.endpoint, differences, repairedAt);
@@ -167,7 +166,10 @@ public class RepairJob extends AbstractFuture<RepairResult> implements Runnable
                 syncTasks.add(task);
                 taskExecutor.submit(task);
             }
+            responses.get(i).trees.release();
         }
+        responses.get(responses.size() - 1).trees.release();
+
         return syncTasks;
     }
 

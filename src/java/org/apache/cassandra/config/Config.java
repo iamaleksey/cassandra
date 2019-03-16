@@ -378,6 +378,8 @@ public class Config
         overrideLoadConfig = loadConfig;
     }
 
+    public volatile boolean prefer_offheap_merkle_trees = true;
+
     public enum CommitLogSync
     {
         periodic,

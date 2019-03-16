@@ -277,6 +277,22 @@ public class FBUtilities
         return out;
     }
 
+    /**
+     * Bitwise XOR of the inputs, in place on the left array
+     *
+     * Assumes inputs are same length
+     */
+    static void xorOntoLeft(byte[] left, byte[] right)
+    {
+        if (left == null || right == null)
+            return;
+
+        assert left.length == right.length;
+
+        for (int i = 0; i < left.length; i++)
+            left[i] = (byte) ((left[i] & 0xFF) ^ (right[i] & 0xFF));
+    }
+
     public static void sortSampledKeys(List<DecoratedKey> keys, Range<Token> range)
     {
         if (range.left.compareTo(range.right) >= 0)
