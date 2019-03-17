@@ -18,19 +18,32 @@
 
 package org.apache.cassandra.exceptions;
 
+import java.io.IOException;
+
+import com.google.common.primitives.Ints;
+
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.utils.vint.VIntCoding;
+
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
+
 public enum RequestFailureReason
 {
     /**
      * The reason for the failure was none of the below reasons or was not recorded by the data node.
      */
-    UNKNOWN                  (0x0000),
+    UNKNOWN                  (0),
 
     /**
      * The data node read too many tombstones when attempting to execute a read query (see tombstone_failure_threshold).
      */
-    READ_TOO_MANY_TOMBSTONES (0x0001);
+    READ_TOO_MANY_TOMBSTONES (1);
 
-    /** The code to be serialized as an unsigned 16 bit integer */
+    public static final Serializer serializer = new Serializer();
+
     public final int code;
     private static final RequestFailureReason[] VALUES = values();
 
@@ -47,5 +60,35 @@ public enum RequestFailureReason
                 return reasonCode;
         }
         throw new IllegalArgumentException("Unknown request failure reason error code: " + code);
+    }
+
+    public static RequestFailureReason forException(Throwable t)
+    {
+        return t instanceof TombstoneOverwhelmingException ? READ_TOO_MANY_TOMBSTONES : UNKNOWN;
+    }
+
+    public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
+    {
+        private Serializer()
+        {
+        }
+
+        public void serialize(RequestFailureReason reason, DataOutputPlus out, int version) throws IOException
+        {
+            if (version < VERSION_40)
+                out.writeShort(reason.code);
+            else
+                out.writeUnsignedVInt(reason.code);
+        }
+
+        public RequestFailureReason deserialize(DataInputPlus in, int version) throws IOException
+        {
+            return fromCode(version < VERSION_40 ? in.readUnsignedShort() : Ints.checkedCast(in.readUnsignedVInt()));
+        }
+
+        public long serializedSize(RequestFailureReason reason, int version)
+        {
+            return version < VERSION_40 ? 2 : VIntCoding.computeVIntSize(reason.code);
+        }
     }
 }

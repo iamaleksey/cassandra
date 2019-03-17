@@ -220,7 +220,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     private void logErrorAndSendFailureResponse(String errorMessage, Message<?> respondTo)
     {
         logger.error(errorMessage);
-        Message reply = Message.respondWithFlag(respondTo, emptyMessage, MessageFlag.FAILURE_RESPONSE);
+        Message reply = Message.respondWithFlag(respondTo, emptyMessage, MessageFlag.IS_FAILURE_RESPONSE);
         MessagingService.instance().sendResponse(reply, respondTo.from);
     }
 }

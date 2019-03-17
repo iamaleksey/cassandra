@@ -22,9 +22,9 @@ import java.util.Map;
 
 import javax.annotation.Nullable;
 
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.DummyByteVersionedSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.ShortVersionedSerializer;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDSerializer;
 
@@ -39,10 +39,10 @@ public enum ParameterType
     FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
 
     @Deprecated
-    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance, MessageFlag.FAILURE_RESPONSE),
-    FAILURE_REASON      (3, "FAIL_REASON",   ShortVersionedSerializer.instance),
+    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance, MessageFlag.IS_FAILURE_RESPONSE),
+    FAILURE_REASON      (3, "FAIL_REASON",   RequestFailureReason.serializer),
     @Deprecated
-    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance, MessageFlag.FAILURE_CALLBACK),
+    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance, MessageFlag.CALL_BACK_ON_FAILURE),
 
     TRACE_SESSION       (5, "TraceSession",  UUIDSerializer.serializer),
     TRACE_TYPE          (6, "TraceType",     Tracing.traceTypeSerializer),

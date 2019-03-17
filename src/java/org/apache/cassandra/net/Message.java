@@ -29,6 +29,8 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
@@ -236,6 +238,11 @@ public class Message<T>
         return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, Collections.emptySet(), parameterType, parameterValue);
     }
 
+    public static <T> Message<T> respondWithFlagAndParameter(Message<?> respondTo, T payload, MessageFlag flag, ParameterType parameterType, Object parameterValue)
+    {
+        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, EnumSet.of(flag), parameterType, parameterValue);
+    }
+
     static <T> Message<T> outboundWithFlagsAndParameter(long id, Verb verb, long expiresAtNanos, T payload, Set<MessageFlag> flags, ParameterType parameterType, Object parameterValue)
     {
         if (payload == null)
@@ -363,14 +370,14 @@ public class Message<T>
      * Flags
      */
 
-    public boolean doCallbackOnFailure()
+    boolean doCallbackOnFailure()
     {
-        return flags.contains(MessageFlag.FAILURE_CALLBACK);
+        return flags.contains(MessageFlag.CALL_BACK_ON_FAILURE);
     }
 
-    public boolean isFailureResponse()
+    boolean isFailureResponse()
     {
-        return flags.contains(MessageFlag.FAILURE_RESPONSE);
+        return flags.contains(MessageFlag.IS_FAILURE_RESPONSE);
     }
 
     public boolean trackRepairedData()
@@ -382,29 +389,34 @@ public class Message<T>
      * Parameters
      */
 
+    @Nullable
     public ForwardToContainer forwardTo()
     {
         return (ForwardToContainer) parameters.get(ParameterType.FORWARD_TO);
     }
 
+    @Nullable
     public InetAddressAndPort forwardedFrom()
     {
         return (InetAddressAndPort) parameters.get(ParameterType.FORWARDED_FROM);
     }
 
+    @Nullable
     public UUID traceSession()
     {
         return (UUID) parameters.get(ParameterType.TRACE_SESSION);
     }
 
+    @Nullable
     public TraceType traceType()
     {
         return (TraceType) parameters.getOrDefault(ParameterType.TRACE_TYPE, TraceType.QUERY);
     }
 
-    public RequestFailureReason getFailureReason()
+    public RequestFailureReason failureReason()
     {
-        return RequestFailureReason.fromCode((short) parameters.getOrDefault(ParameterType.FAILURE_REASON, RequestFailureReason.UNKNOWN.code));
+        // FIXME: in C* 5, simplify, since reason will always be set to something in a failure response.
+        return (RequestFailureReason) parameters.getOrDefault(ParameterType.FAILURE_REASON, RequestFailureReason.UNKNOWN);
     }
 
     public long getSlowQueryTimeout(TimeUnit units)

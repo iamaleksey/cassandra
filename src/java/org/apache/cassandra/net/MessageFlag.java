@@ -25,10 +25,9 @@ public enum MessageFlag
     /*
      * The order matters here, since we use enum ordinals to encode the flags.
      */
-
-    FAILURE_CALLBACK    (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
-    FAILURE_RESPONSE    (ParameterType.FAILURE_RESPONSE,    MessagingService.ONE_BYTE),
-    TRACK_REPAIRED_DATA (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
+    CALL_BACK_ON_FAILURE (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
+    IS_FAILURE_RESPONSE  (ParameterType.FAILURE_RESPONSE,    MessagingService.ONE_BYTE),
+    TRACK_REPAIRED_DATA  (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
 
     final ParameterType legacyParam;
     final Object legacyValue;

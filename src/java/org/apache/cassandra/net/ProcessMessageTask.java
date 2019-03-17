@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 
-import com.google.common.primitives.Shorts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -33,6 +32,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.ParameterType.*;
+import static org.apache.cassandra.net.MessageFlag.IS_FAILURE_RESPONSE;
 
 public class ProcessMessageTask implements Runnable
 {
@@ -101,11 +101,8 @@ public class ProcessMessageTask implements Runnable
     {
         if (message.doCallbackOnFailure())
         {
-            Message response = Message.respondWithFlag(message, emptyMessage, MessageFlag.FAILURE_RESPONSE);
-
-            if (t instanceof TombstoneOverwhelmingException)
-                response = response.withParameter(FAILURE_REASON, Shorts.checkedCast(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.code));
-
+            RequestFailureReason reason = RequestFailureReason.forException(t);
+            Message response = Message.respondWithFlagAndParameter(message, emptyMessage, IS_FAILURE_RESPONSE, FAILURE_REASON, reason);
             MessagingService.instance().sendResponse(response, message.from);
         }
     }
