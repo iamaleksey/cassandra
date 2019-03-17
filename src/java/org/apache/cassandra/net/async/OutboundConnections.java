@@ -22,13 +22,11 @@ import java.nio.channels.ClosedChannelException;
 import java.util.List;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
-import com.carrotsearch.hppc.LongObjectOpenHashMap;
 import com.carrotsearch.hppc.ObjectObjectOpenHashMap;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.Config;
@@ -69,7 +67,7 @@ public class OutboundConnections
         this.backPressureState = backPressureState;
         this.template = template.withDefaultReserveLimits();
         ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(this.template.applicationReserveSendQueueEndpointCapacityInBytes);
-        ResourceLimits.Static reserveCapacityInBytes = new ResourceLimits.Static(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
         this.small = new OutboundConnection(SMALL_MESSAGE, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGE, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT, template, reserveCapacityInBytes);

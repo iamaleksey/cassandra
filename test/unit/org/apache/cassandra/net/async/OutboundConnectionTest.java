@@ -43,6 +43,7 @@ import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.MessagingService.current_version;
@@ -127,7 +128,7 @@ public class OutboundConnectionTest
         MessagingService.instance().removeInbound(endpoint);
         OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
                                               .withDefaults(settings.type, current_version);
-        ResourceLimits.Static reserveCapacityInBytes = new ResourceLimits.Static(new ResourceLimits.Concurrent(outboundSettings.applicationReserveSendQueueEndpointCapacityInBytes), outboundSettings.applicationReserveSendQueueGlobalCapacityInBytes);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundSettings.applicationReserveSendQueueEndpointCapacityInBytes), outboundSettings.applicationReserveSendQueueGlobalCapacityInBytes);
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
         try
         {
@@ -336,15 +337,21 @@ public class OutboundConnectionTest
             CountDownLatch enqueueDone = new CountDownLatch(1);
             CountDownLatch deliveryDone = new CountDownLatch(1);
             AtomicInteger delivered = new AtomicInteger();
-            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
             Verb._TEST_1.unsafeSetHandler(() -> msg -> delivered.incrementAndGet());
+            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+                                        .withExpirationTime(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
+                                        .build();
+            long sentSize = message.serializedSize(current_version);
             outbound.enqueue(message);
+            long timeoutMillis = 10L;
             while (delivered.get() < 1);
-            outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 1L, TimeUnit.MINUTES));
+            outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 1L, TimeUnit.DAYS));
+            message = Message.builder(Verb._TEST_1, emptyMessage)
+                             .withExpirationTime(ApproximateTime.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
+                             .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            Uninterruptibles.sleepUninterruptibly(message.verb.expirationTimeNanos(0), TimeUnit.NANOSECONDS);
-            Uninterruptibles.sleepUninterruptibly(10L, TimeUnit.MILLISECONDS);
+            Uninterruptibles.sleepUninterruptibly(timeoutMillis * 2, TimeUnit.MILLISECONDS);
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
             deliveryDone.await(1L, TimeUnit.MINUTES);
@@ -352,7 +359,7 @@ public class OutboundConnectionTest
             Assert.assertEquals(11, outbound.getSubmitted());
             Assert.assertEquals(0, outbound.getPending());
             Assert.assertEquals(1, outbound.getSent());
-            Assert.assertEquals(message.serializedSize(current_version), outbound.getSentBytes());
+            Assert.assertEquals(sentSize, outbound.getSentBytes());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToError());

@@ -19,7 +19,6 @@
 package org.apache.cassandra.net.async;
 
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import net.jpountz.lz4.LZ4Factory;
@@ -28,8 +27,12 @@ import net.jpountz.xxhash.XXHashFactory;
 @ChannelHandler.Sharable
 class FrameDecoderLegacyLZ4 extends FrameDecoderNone
 {
-    public static FrameDecoderLegacyLZ4 instance = new FrameDecoderLegacyLZ4();
     private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
+
+    FrameDecoderLegacyLZ4(int messagingVersion)
+    {
+        super(messagingVersion);
+    }
 
     void addLastTo(ChannelPipeline pipeline)
     {

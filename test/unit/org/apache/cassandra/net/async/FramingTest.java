@@ -28,14 +28,12 @@ import org.junit.Assert;
 import org.junit.Test;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandlerContext;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.*;
-import static org.apache.cassandra.net.async.FrameDecoder.Slice.wrap;
+import static org.apache.cassandra.net.async.FrameDecoder.SharedBytes.wrap;
 
 // TODO: test corruption
 // TODO: use a different random seed each time
@@ -51,7 +49,7 @@ public class FramingTest
     {
         final List<byte[]> original;
         final int[] boundaries;
-        final FrameDecoder.Slice frames;
+        final FrameDecoder.SharedBytes frames;
 
         private SequenceOfFrames(List<byte[]> original, int[] boundaries, ByteBuffer frames)
         {
@@ -85,16 +83,16 @@ public class FramingTest
         SequenceOfFrames sequenceOfFrames = pairOfFrames(random, encoder);
 
         List<byte[]> uncompressed = sequenceOfFrames.original;
-        FrameDecoder.Slice frames = sequenceOfFrames.frames;
+        FrameDecoder.SharedBytes frames = sequenceOfFrames.frames;
         int[] boundaries = sequenceOfFrames.boundaries;
 
-        int end = frames.contents.limit();
+        int end = frames.get().limit();
         List<Object> out = new ArrayList<>();
         int prevBoundary = -1;
         for (int i = 0 ; i < end ; )
         {
             int limit = i + random.nextInt(1 + end - i);
-            decoder.decode(null, FrameDecoder.sliceIfRemaining(frames, i, limit), out);
+            decoder.decode(out::add, FrameDecoder.slice(frames, i, limit, limit == end));
             int boundary = Arrays.binarySearch(boundaries, limit);
             if (boundary < 0) boundary = -2 -boundary;
 
@@ -108,10 +106,10 @@ public class FramingTest
         }
     }
 
-    private static void verify(byte[] expect, FrameDecoder.Slice actual)
+    private static void verify(byte[] expect, FrameDecoder.SharedBytes actual)
     {
         byte[] fetch = new byte[expect.length];
-        actual.contents.get(fetch);
+        actual.get().get(fetch);
         Assert.assertArrayEquals(expect, fetch);
         actual.release();
     }

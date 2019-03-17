@@ -136,6 +136,8 @@ public class Message<T>
             this.verb = verb;
             if (expiresAtNanos == 0 && verb != null && createdAtNanos != 0)
                 expiresAtNanos = verb.expirationTimeNanos(createdAtNanos);
+            if (!this.verb.isResponse() && from == null) // default to sending from self if we're a request verb
+                from = FBUtilities.getBroadcastAddressAndPort();
             return this;
         }
 
@@ -343,9 +345,11 @@ public class Message<T>
 
     public static final class InvalidLegacyProtocolMagic extends IOException
     {
+        public final int read;
         private InvalidLegacyProtocolMagic(int read)
         {
             super(String.format("Read %d, Expected %d", read, PROTOCOL_MAGIC));
+            this.read = read;
         }
     }
 
@@ -430,9 +434,9 @@ public class Message<T>
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          */
-        public int messageSize(ByteBuffer buf, int version) throws InvalidLegacyProtocolMagic
+        public int messageSize(ByteBuffer buf, int index, int limit, int version) throws InvalidLegacyProtocolMagic
         {
-            return version >= VERSION_40 ? messageSizePost40(buf) : messageSizePre40(buf);
+            return version >= VERSION_40 ? messageSizePost40(buf, index, limit) : messageSizePre40(buf, index, limit);
         }
 
         public long getCreatedAtNanos(ByteBuffer buf, InetAddressAndPort peer, int version)
@@ -507,11 +511,8 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePost40(ByteBuffer buf)
+        private int messageSizePost40(ByteBuffer buf, int index, int limit)
         {
-            int index = buf.position();
-            final int limit = buf.limit();
-
             int idSize = VIntCoding.computeUnsignedVIntSize(buf, index);
             if (idSize < 0)
                 return -1; // not enough bytes to read id
@@ -633,11 +634,8 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePre40(ByteBuffer buf) throws InvalidLegacyProtocolMagic
+        private int messageSizePre40(ByteBuffer buf, int index, int limit) throws InvalidLegacyProtocolMagic
         {
-            int index = buf.position();
-            final int limit = buf.limit();
-
             // protocol magic
             index += 4;
             if (index > limit)

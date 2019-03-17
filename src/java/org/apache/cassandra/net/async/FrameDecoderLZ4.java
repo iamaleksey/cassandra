@@ -20,10 +20,9 @@ package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.List;
+import java.util.function.Consumer;
 import java.util.zip.CRC32;
 
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
@@ -90,48 +89,58 @@ final class FrameDecoderLZ4 extends FrameDecoder
         return compressedLength(header8b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(Slice slice, int begin, int end, long header8b)
+    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header8b, boolean ownsBytes)
     {
-        ByteBuffer input = slice.contents;
-
-        boolean isSelfContained = isSelfContained(header8b);
-        int uncompressedLength = uncompressedLength(header8b);
-
-        CRC32 crc = crc32();
-        int readFullCrc = input.getInt(end - TRAILER_LENGTH);
-        if (input.order() == ByteOrder.BIG_ENDIAN)
-            readFullCrc = Integer.reverseBytes(readFullCrc);
-
-        updateCrc32(crc, input, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
-        int computeFullCrc = (int) crc.getValue();
-
-        if (readFullCrc != computeFullCrc)
-            return CorruptFrame.recoverable(isSelfContained, uncompressedLength, readFullCrc, computeFullCrc);
-
-        if (uncompressedLength == 0)
+        try
         {
-            return new IntactFrame(isSelfContained, sliceIfRemaining(slice, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
+            ByteBuffer input = bytes.get();
+
+            boolean isSelfContained = isSelfContained(header8b);
+            int uncompressedLength = uncompressedLength(header8b);
+
+            CRC32 crc = crc32();
+            int readFullCrc = input.getInt(end - TRAILER_LENGTH);
+            if (input.order() == ByteOrder.BIG_ENDIAN)
+                readFullCrc = Integer.reverseBytes(readFullCrc);
+
+            updateCrc32(crc, input, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
+            int computeFullCrc = (int) crc.getValue();
+
+            if (readFullCrc != computeFullCrc)
+                return CorruptFrame.recoverable(isSelfContained, uncompressedLength, readFullCrc, computeFullCrc);
+
+            if (uncompressedLength == 0)
+            {
+                bytes = slice(bytes, begin + HEADER_LENGTH, end - TRAILER_LENGTH, ownsBytes);
+                ownsBytes = false;
+                return new IntactFrame(isSelfContained, bytes);
+            }
+            else
+            {
+                ByteBuffer out = BufferPool.get(uncompressedLength, BufferType.OFF_HEAP);
+                try
+                {
+                    decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
+                    return new IntactFrame(isSelfContained, SharedBytes.wrap(out));
+                }
+                catch (Throwable t)
+                {
+                    BufferPool.put(out);
+                    throw t;
+                }
+            }
         }
-        else
+        finally
         {
-            ByteBuffer out = BufferPool.get(uncompressedLength, BufferType.OFF_HEAP);
-            try
-            {
-                decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
-                return new IntactFrame(isSelfContained, Slice.wrap(out));
-            }
-            catch (Throwable t)
-            {
-                BufferPool.put(out);
-                throw t;
-            }
+            if (ownsBytes)
+                bytes.release();
         }
     }
 
-    protected void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output)
+    void decode(Consumer<Frame> consumer, SharedBytes bytes)
     {
         // TODO: confirm in assembly output that we inline the relevant nested method calls
-        decode(slice, HEADER_LENGTH, output);
+        decode(consumer, bytes, HEADER_LENGTH);
     }
 
     void addLastTo(ChannelPipeline pipeline)

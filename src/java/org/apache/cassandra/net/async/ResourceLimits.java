@@ -31,12 +31,12 @@ public abstract class ResourceLimits
         void release(long amount);
     }
 
-    public static class Static
+    public static class EndpointAndGlobal
     {
         public final Limit endpoint;
         public final Limit global;
 
-        public Static(Limit endpoint, Limit global)
+        public EndpointAndGlobal(Limit endpoint, Limit global)
         {
             this.endpoint = endpoint;
             this.global = global;

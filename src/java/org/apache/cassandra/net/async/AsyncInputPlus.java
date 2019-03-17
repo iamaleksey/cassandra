@@ -37,23 +37,23 @@ class AsyncInputPlus extends RebufferingInputStream
     }
 
     // EMPTY_BUFFER is used to signal AsyncInputPlus that it should be closed
-    private static final Slice CLOSE_INPUT = Slice.EMPTY;
+    private static final SharedBytes CLOSE_INPUT = SharedBytes.EMPTY;
 
-    private final Queue<Slice> queue;
+    private final Queue<SharedBytes> queue;
 
     private final IntConsumer onReleased;
 
-    private Slice slice;
-    private int sliceSize;
+    private SharedBytes current;
+    private int currentSize;
 
     private volatile boolean isClosed;
     private volatile Thread parkedThread;
 
     AsyncInputPlus(IntConsumer onReleased)
     {
-        super(Slice.EMPTY.contents);
-        this.slice = Slice.EMPTY;
-        this.sliceSize = 0;
+        super(SharedBytes.EMPTY.get());
+        this.current = SharedBytes.EMPTY;
+        this.currentSize = 0;
 
         this.queue = new SpscUnboundedArrayQueue<>(16);
         this.onReleased = onReleased;
@@ -64,16 +64,16 @@ class AsyncInputPlus extends RebufferingInputStream
     {
         releaseCurrentBuf();
 
-        Slice nextSlice = pollBlockingly();
-        if (nextSlice == CLOSE_INPUT)
+        SharedBytes next = pollBlockingly();
+        if (next == CLOSE_INPUT)
         {
             isClosed = true;
             throw new InputClosedException();
         }
 
-        slice = nextSlice;
-        sliceSize = nextSlice.contents.remaining();
-        buffer = nextSlice.contents;
+        current = next;
+        currentSize = next.readableBytes();
+        buffer = next.get();
     }
 
     @Override
@@ -82,10 +82,10 @@ class AsyncInputPlus extends RebufferingInputStream
         if (isClosed)
             return;
 
-        if (null != slice)
+        if (null != current)
             releaseCurrentBuf();
 
-        Slice nextSlice;
+        SharedBytes nextSlice;
         while ((nextSlice = pollBlockingly()) != CLOSE_INPUT)
         {
             onReleased.accept(nextSlice.readableBytes());
@@ -95,22 +95,22 @@ class AsyncInputPlus extends RebufferingInputStream
         isClosed = true;
     }
 
-    void supply(Slice slice)
+    void supply(SharedBytes bytes)
     {
         if (isClosed)
             throw new IllegalStateException("Cannot supply a buffer to a closed AsyncInputPlus");
 
-        queue.add(slice);
+        queue.add(bytes);
         maybeUnpark();
     }
 
     private void releaseCurrentBuf()
     {
-        slice.release();
-        if (sliceSize > 0)
-            onReleased.accept(sliceSize);
-        slice = null;
-        sliceSize = 0;
+        current.release();
+        if (currentSize > 0)
+            onReleased.accept(currentSize);
+        current = null;
+        currentSize = 0;
         buffer = null;
     }
 
@@ -123,9 +123,9 @@ class AsyncInputPlus extends RebufferingInputStream
         maybeUnpark();
     }
 
-    private Slice pollBlockingly()
+    private SharedBytes pollBlockingly()
     {
-        Slice buf = queue.poll();
+        SharedBytes buf = queue.poll();
         if (null != buf)
             return buf;
 

@@ -20,10 +20,9 @@ package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.List;
+import java.util.function.Consumer;
 import java.util.zip.CRC32;
 
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 
 import static org.apache.cassandra.net.async.Crc.crc24;
@@ -87,28 +86,38 @@ public final class FrameDecoderCrc extends FrameDecoder
         return payloadLength(header6b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(Slice slice, int begin, int end, long header6b)
+    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header6b, boolean ownsBytes)
     {
-        ByteBuffer in = slice.contents;
-        boolean isSelfContained = isSelfContained(header6b);
+        try
+        {
+            ByteBuffer in = bytes.get();
+            boolean isSelfContained = isSelfContained(header6b);
 
-        CRC32 crc = Crc.crc32();
-        int readFullCrc = in.getInt(end - TRAILER_LENGTH);
-        if (in.order() == ByteOrder.BIG_ENDIAN)
-            readFullCrc = Integer.reverseBytes(readFullCrc);
+            CRC32 crc = Crc.crc32();
+            int readFullCrc = in.getInt(end - TRAILER_LENGTH);
+            if (in.order() == ByteOrder.BIG_ENDIAN)
+                readFullCrc = Integer.reverseBytes(readFullCrc);
 
-        updateCrc32(crc, in, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
-        int computeFullCrc = (int) crc.getValue();
+            updateCrc32(crc, in, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
+            int computeFullCrc = (int) crc.getValue();
 
-        if (readFullCrc != computeFullCrc)
-            return CorruptFrame.recoverable(isSelfContained, (end - begin) - HEADER_AND_TRAILER_LENGTH, readFullCrc, computeFullCrc);
+            if (readFullCrc != computeFullCrc)
+                return CorruptFrame.recoverable(isSelfContained, (end - begin) - HEADER_AND_TRAILER_LENGTH, readFullCrc, computeFullCrc);
 
-        return new IntactFrame(isSelfContained, sliceIfRemaining(slice, begin + HEADER_LENGTH, end - TRAILER_LENGTH));
+            bytes = slice(bytes, begin + HEADER_LENGTH, end - TRAILER_LENGTH, ownsBytes);
+            ownsBytes = false;
+            return new IntactFrame(isSelfContained, bytes);
+        }
+        finally
+        {
+            if (ownsBytes)
+                bytes.release();
+        }
     }
 
-    void decode(ChannelHandlerContext ctx, Slice slice, List<Object> output)
+    void decode(Consumer<Frame> consumer, SharedBytes bytes)
     {
-        decode(slice, HEADER_LENGTH, output);
+        decode(consumer, bytes, HEADER_LENGTH);
     }
 
     void addLastTo(ChannelPipeline pipeline)

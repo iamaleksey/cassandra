@@ -108,37 +108,25 @@ public class OutboundConnection
     private final Delivery delivery;
 
     private final OutboundMessageQueue queue;
-
     /** the number of bytes we permit to queue to the network without acquiring any shared resource permits */
     private final long queueCapacityInBytes;
     /** the number of bytes queued for flush to the network, including those that are being flushed but have not been completed */
     private volatile long queueSizeInBytes = 0;
     /** global shared limits that we use only if our local limits are exhausted;
      *  we allocate from here whenever queueSize > queueCapacity */
-    private final ResourceLimits.Static reserveCapacityInBytes;
+    private final ResourceLimits.EndpointAndGlobal reserveCapacityInBytes;
 
-    /** number of messages submitted */
-    private volatile long submitted = 0;
-    /** number of messages we dropped due to overload; exclusively for reporting to metrics */
-    private volatile long droppedDueToOverload = 0;
-    /** number of messages we dropped due to overload; exclusively for reporting to metrics */
-    private volatile long droppedBytesDueToOverload = 0;
-    /** number of messages we dropped due to timeout; exclusively for reporting to metrics */
-    private long droppedDueToTimeout = 0; // must be updated with queue lock held
-    /** bytes we have dropped due to timeout; exclusively for reporting to metrics */
-    private long droppedBytesDueToTimeout = 0; // must be updated with queue lock held
-    /** messages we have potentially dropped due to an error serializing or flushing; exclusively for reporting to metrics */
-    private long droppedDueToError = 0; // updated only by delivery thread
-    /** bytes we have potentially dropped due to an error serializing or flushing; exclusively for reporting to metrics */
-    private long droppedBytesDueToError = 0; // updated by delivery thread only
-    /** number of messages we have successfully written to the network */
-    private long sent; // updated by delivery thread only
-    /** bytes we have successfully written to the network */
-    private long sentBytes; // updated by delivery thread only
-    /** number of connections we have successfully established */
-    private long successfulConnections; // updated by event loop only
-    /** number of connections we have attempted to establish */
-    private long failedConnections; // updated by event loop only
+    private volatile long submitted = 0;                    // updated with cas
+    private volatile long droppedDueToOverload = 0;         // updated with cas
+    private volatile long droppedBytesDueToOverload = 0;    // updated with cas
+    private long droppedDueToTimeout = 0;                   // updated with queue lock held
+    private long droppedBytesDueToTimeout = 0;              // updated with queue lock held
+    private long droppedDueToError = 0;                     // updated only by delivery thread
+    private long droppedBytesDueToError = 0;                // updated by delivery thread only
+    private long sent;                                      // updated by delivery thread only
+    private long sentBytes;                                 // updated by delivery thread only
+    private long successfulConnections;                     // updated by event loop only
+    private long failedConnections;                         // updated by event loop only
 
     /*
      * The following four fields define our connection behaviour; the template contains the user-specified desired properties,
@@ -172,7 +160,7 @@ public class OutboundConnection
 
     /** The underlying Netty channel we are connected to our endpoint via; this may be closed, or null */
     private volatile Channel channel;
-    /** We cannot depend in channel.isOpen, as we may be closing it asynchronously */
+    /** We cannot depend on channel.isOpen, as we may be closing it asynchronously */
     private volatile boolean isConnected;
     /** If we are not connected, are trying to connect, and have failed to connect at least once */
     private volatile boolean isFailingToConnect;
@@ -192,7 +180,7 @@ public class OutboundConnection
      */
     private Future<?> connecting;
 
-    OutboundConnection(Type type, OutboundConnectionSettings template, ResourceLimits.Static reserveCapacityInBytes)
+    OutboundConnection(Type type, OutboundConnectionSettings template, ResourceLimits.EndpointAndGlobal reserveCapacityInBytes)
     {
         // use the best guessed messaging version for a node
         // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
@@ -1167,7 +1155,9 @@ public class OutboundConnection
         /**
          * If we want to shutdown gracefully, flushing any outstanding messages, we have to do it very carefully.
          * Things to note:
+         *
          *  - It is possible flushing messages will require establishing a new connection
+         *    (However, if a connection cannot be established, we do not want to keep trying)
          *  - We have to negotiate with a separate thread, so we must be sure it is not in-progress before we stop (like channel close)
          *  - Cleanup must still happen on the eventLoop
          *
@@ -1185,7 +1175,11 @@ public class OutboundConnection
                     if (queue.isEmpty())
                         delivery.stopAndRunOnEventLoop(eventLoopCleanup);
                     else
-                        delivery.stopAndRun(this);
+                        delivery.stopAndRun(() -> {
+                            if (isFailingToConnect)
+                                queue.clear();  // if we cannot connect, clear the queue
+                            run();
+                        });
                 }
             }
 
