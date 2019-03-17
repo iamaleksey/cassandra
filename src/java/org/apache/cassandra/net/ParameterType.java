@@ -37,16 +37,23 @@ public enum ParameterType
 {
     FORWARD_TO          (0, "FORWARD_TO",    ForwardToSerializer.instance),
     FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
-    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance),
+
+    @Deprecated
+    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance, MessageFlag.FAILURE_RESPONSE),
     FAILURE_REASON      (3, "FAIL_REASON",   ShortVersionedSerializer.instance),
-    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance),
+    @Deprecated
+    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance, MessageFlag.FAILURE_CALLBACK),
+
     TRACE_SESSION       (5, "TraceSession",  UUIDSerializer.serializer),
     TRACE_TYPE          (6, "TraceType",     Tracing.traceTypeSerializer),
-    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance);
+
+    @Deprecated
+    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance, MessageFlag.TRACK_REPAIRED_DATA);
 
     public final int id;
     public final String legacyAlias;
     public final IVersionedSerializer serializer;
+    public final MessageFlag flagEquivalent;
 
     private static final ParameterType[] idToTypeMap;
     private static final Map<String, ParameterType> aliasToTypeMap;
@@ -78,12 +85,18 @@ public enum ParameterType
 
     ParameterType(int id, String legacyAlias, IVersionedSerializer serializer)
     {
+        this(id, legacyAlias, serializer, null);
+    }
+
+    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer, MessageFlag flagEquivalent)
+    {
         if (id < 0)
             throw new IllegalArgumentException("ParameterType id must be non-negative");
 
         this.id = id;
         this.legacyAlias = legacyAlias;
         this.serializer = serializer;
+        this.flagEquivalent = flagEquivalent;
     }
 
     @Nullable

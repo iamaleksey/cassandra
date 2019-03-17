@@ -64,7 +64,6 @@ import org.apache.cassandra.utils.MBeanWrapper;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
-import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
 
     public final class MessagingService extends MessagingServiceMBeanImpl
 {
@@ -292,7 +291,7 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
     {
         long id = callbacks.addWithExpiration(cb, message, to, message.expiresAtNanos);
         updateBackPressureOnSend(to, cb, message);
-        sendOneWay(cb instanceof IAsyncCallbackWithFailure<?> ? message.withIdAndParameter(id, ParameterType.FAILURE_CALLBACK, ONE_BYTE)
+        sendOneWay(cb instanceof IAsyncCallbackWithFailure<?> ? message.withIdAndFlag(id, MessageFlag.FAILURE_CALLBACK)
                                                               : message.withId(id), to, specifyConnection);
         return id;
     }
@@ -325,7 +324,7 @@ import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
     {
         long id = callbacks.addWithExpiration(handler, message, to, message.expiresAtNanos, handler.consistencyLevel(), allowHints);
         updateBackPressureOnSend(to.endpoint(), handler, message);
-        sendOneWay(message.withIdAndParameter(id, ParameterType.FAILURE_CALLBACK, ONE_BYTE), to.endpoint(), specifyConnection);
+        sendOneWay(message.withIdAndFlag(id, MessageFlag.FAILURE_CALLBACK), to.endpoint(), specifyConnection);
         return id;
     }
 

@@ -42,12 +42,12 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     public void doVerb(Message<Mutation> message)
     {
         // Check if there were any forwarding headers in this message
-        InetAddressAndPort from = (InetAddressAndPort)message.parameters.get(ParameterType.FORWARDED_FROM);
+        InetAddressAndPort from = message.forwardedFrom();
         InetAddressAndPort respondToAddress;
         if (from == null)
         {
             respondToAddress = message.from;
-            ForwardToContainer forwardTo = (ForwardToContainer)message.parameters.get(ParameterType.FORWARD_TO);
+            ForwardToContainer forwardTo = message.forwardTo();
             if (forwardTo != null)
                 forwardToLocalNodes(message.payload, message.verb, forwardTo, message.from);
         }

@@ -19,11 +19,9 @@
 package org.apache.cassandra.db;
 
 import java.net.UnknownHostException;
-import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
 
-import com.google.common.collect.ImmutableMap;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -37,6 +35,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParameterType;
 import org.apache.cassandra.schema.Schema;
@@ -93,11 +92,10 @@ public class ReadCommandVerbHandlerTest
     {
         ReadCommand command = command(metadata);
         assertFalse(command.isTrackingRepairedStatus());
-        Map<ParameterType, Object> params = ImmutableMap.of(ParameterType.TRACK_REPAIRED_DATA,
-                                                            MessagingService.ONE_BYTE);
+
         handler.doVerb(Message.builder(READ_REQ, command)
                               .from(peer())
-                              .withParameters(params)
+                              .withFlag(MessageFlag.TRACK_REPAIRED_DATA)
                               .withId(messageId())
                               .build());
         assertTrue(command.isTrackingRepairedStatus());
@@ -108,12 +106,10 @@ public class ReadCommandVerbHandlerTest
     {
         ReadCommand command = command(metadata);
         assertFalse(command.isTrackingRepairedStatus());
-        Map<ParameterType, Object> params = ImmutableMap.of(ParameterType.TRACE_SESSION,
-                                                            UUID.randomUUID());
         handler.doVerb(Message.builder(READ_REQ, command)
                               .from(peer())
                               .withId(messageId())
-                              .withParameters(params)
+                              .withParameter(ParameterType.TRACE_SESSION, UUID.randomUUID())
                               .build());
         assertFalse(command.isTrackingRepairedStatus());
     }

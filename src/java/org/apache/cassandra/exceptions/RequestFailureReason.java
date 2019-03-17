@@ -32,7 +32,7 @@ public enum RequestFailureReason
 
     /** The code to be serialized as an unsigned 16 bit integer */
     public final int code;
-    public static final RequestFailureReason[] VALUES = values();
+    private static final RequestFailureReason[] VALUES = values();
 
     RequestFailureReason(final int code)
     {

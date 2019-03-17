@@ -79,7 +79,6 @@ public class MessageOutBench
 
         if (withParams)
         {
-            parameters.put(ParameterType.FAILURE_RESPONSE, MessagingService.ONE_BYTE);
             parameters.put(ParameterType.FAILURE_REASON, Shorts.checkedCast(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.code));
             parameters.put(ParameterType.TRACE_SESSION, uuid);
         }

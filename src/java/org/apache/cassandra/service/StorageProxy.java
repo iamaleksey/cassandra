@@ -2067,7 +2067,7 @@ public class StorageProxy implements StorageProxyMBean
                     ReadCommand command = replica.isFull() ? rangeCommand : rangeCommand.copyAsTransientQuery(replica);
                     Message<ReadCommand> message = command.createMessage();
                     if (command.isTrackingRepairedStatus() && replica.isFull())
-                        message = message.withParameter(ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
+                        message = message.withFlag(MessageFlag.TRACK_REPAIRED_DATA);
                     MessagingService.instance().sendRRWithFailure(message, replica.endpoint(), handler);
                 }
             }

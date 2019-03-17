@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Shorts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,7 +32,6 @@ import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
-import static org.apache.cassandra.net.MessagingService.ONE_BYTE;
 import static org.apache.cassandra.net.ParameterType.*;
 
 public class ProcessMessageTask implements Runnable
@@ -64,17 +62,6 @@ public class ProcessMessageTask implements Runnable
 
     public void run()
     {
-        process();
-    }
-
-    /**
-     * A helper function for making unit testing reasonable.
-     *
-     * @return true if the message was processed; else false.
-     */
-    @VisibleForTesting
-    boolean process()
-    {
         long nowNanos = ApproximateTime.nanoTime();
 
         MessagingService.instance().metrics.addQueueWaitTime(message.verb, nowNanos - enqueueTime, NANOSECONDS);
@@ -82,7 +69,7 @@ public class ProcessMessageTask implements Runnable
         if (nowNanos > message.expiresAtNanos)
         {
             onExpired.call(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
-            return false;
+            return;
         }
 
         try
@@ -108,23 +95,18 @@ public class ProcessMessageTask implements Runnable
         {
             onProcessed.call(messageSize);
         }
-
-        return true;
     }
 
     private void handleFailure(Throwable t)
     {
         if (message.doCallbackOnFailure())
         {
-            Message response = Message.respondWithParameter(message, emptyMessage, FAILURE_RESPONSE, ONE_BYTE);
+            Message response = Message.respondWithFlag(message, emptyMessage, MessageFlag.FAILURE_RESPONSE);
 
             if (t instanceof TombstoneOverwhelmingException)
-            {
                 response = response.withParameter(FAILURE_REASON, Shorts.checkedCast(RequestFailureReason.READ_TOO_MANY_TOMBSTONES.code));
-            }
 
             MessagingService.instance().sendResponse(response, message.from);
         }
     }
-
 }

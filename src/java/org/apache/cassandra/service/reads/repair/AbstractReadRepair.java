@@ -41,6 +41,7 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParameterType;
 import org.apache.cassandra.service.StorageProxy;
@@ -118,7 +119,7 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
         Message<ReadCommand> message = command.createMessage();
         // if enabled, request additional info about repaired data from any full replicas
         if (command.isTrackingRepairedStatus() && to.isFull())
-            message = message.withParameter(ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
+            message = message.withFlag(MessageFlag.TRACK_REPAIRED_DATA);
 
         MessagingService.instance().sendRRWithFailure(message, to.endpoint(), readCallback);
     }

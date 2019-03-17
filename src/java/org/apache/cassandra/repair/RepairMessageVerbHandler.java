@@ -25,6 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.*;
 import org.apache.cassandra.schema.TableId;
@@ -32,7 +33,6 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
-import static org.apache.cassandra.net.ParameterType.FAILURE_RESPONSE;
 
 /**
  * Handles all repair related message.
@@ -220,7 +220,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     private void logErrorAndSendFailureResponse(String errorMessage, Message<?> respondTo)
     {
         logger.error(errorMessage);
-        Message reply = Message.respondWithParameter(respondTo, emptyMessage, FAILURE_RESPONSE, MessagingService.ONE_BYTE);
+        Message reply = Message.respondWithFlag(respondTo, emptyMessage, MessageFlag.FAILURE_RESPONSE);
         MessagingService.instance().sendResponse(reply, respondTo.from);
     }
 }

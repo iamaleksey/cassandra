@@ -29,6 +29,7 @@ import org.apache.cassandra.net.MessagingService;
 /**
  * Serializes a dummy byte that can't be set. Will always write 0 and return 0 in a correctly formed message.
  */
+@Deprecated
 public class DummyByteVersionedSerializer implements IVersionedSerializer<byte[]>
 {
     public static final DummyByteVersionedSerializer instance = new DummyByteVersionedSerializer();

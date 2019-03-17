@@ -248,8 +248,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
      */
     public TraceState initializeFromMessage(final Message<?> message)
     {
-        final UUID sessionId = (UUID)message.parameters.get(ParameterType.TRACE_SESSION);
-
+        final UUID sessionId = message.traceSession();
         if (sessionId == null)
             return null;
 
@@ -257,7 +256,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         if (ts != null && ts.acquireReference())
             return ts;
 
-        TraceType traceType = (TraceType) message.parameters.getOrDefault(ParameterType.TRACE_TYPE, TraceType.QUERY);
+        TraceType traceType = message.traceType();
 
         if (message.verb.isResponse())
         {
@@ -279,8 +278,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     {
         try
         {
-            final UUID sessionId = (UUID) message.parameters.get(ParameterType.TRACE_SESSION);
-
+            final UUID sessionId = message.traceSession();
             if (sessionId == null)
                 return;
 
@@ -289,7 +287,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
             TraceState state = get(sessionId);
             if (state == null) // session may have already finished; see CASSANDRA-5668
             {
-                TraceType traceType = (TraceType) message.parameters.getOrDefault(ParameterType.TRACE_TYPE, TraceType.QUERY);
+                TraceType traceType = message.traceType();
                 trace(ByteBuffer.wrap(UUIDGen.decompose(sessionId)), logMessage, traceType.getTTL());
             }
             else

@@ -52,7 +52,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         long timeout = message.expiresAtNanos - message.createdAtNanos;
         command.setMonitoringTime(message.createdAtNanos, message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
 
-        if (message.parameters.containsKey(ParameterType.TRACK_REPAIRED_DATA))
+        if (message.trackRepairedData())
             command.trackRepairedStatus();
 
         ReadResponse response;
