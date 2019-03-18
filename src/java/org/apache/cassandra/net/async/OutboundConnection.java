@@ -273,13 +273,15 @@ public class OutboundConnection
                     case INSUFFICIENT_GLOBAL:
                         break loop;
                     case SUCCESS:
+                        unusedClaimedReserve += extraGlobalReserve;
                 }
             }
 
-            unusedClaimedReserve -= requiredReserve;
             if (success = queueSizeInBytesUpdater.compareAndSet(this, currentQueueSize, newQueueSize))
+            {
+                unusedClaimedReserve -= requiredReserve;
                 break;
-            unusedClaimedReserve += requiredReserve;
+            }
         }
 
         if (unusedClaimedReserve > 0)
