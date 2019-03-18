@@ -194,11 +194,6 @@ public class OutboundMessageQueue
         maybePruneExpired(System.nanoTime());
     }
 
-    void clear()
-    {
-        runEventually(() -> pruneWithLock(Long.MAX_VALUE));
-    }
-
     private void maybePruneExpired(long nowNanos)
     {
         if (nowNanos > earliestExpiresAt && !isEmpty())

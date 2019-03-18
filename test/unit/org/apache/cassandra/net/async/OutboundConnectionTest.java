@@ -24,9 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -44,6 +46,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
+import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -58,6 +61,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.MessagingService.current_version;
@@ -104,6 +108,11 @@ public class OutboundConnectionTest
     interface SendTest
     {
         void accept(InboundMessageHandlers inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
+    }
+
+    interface ManualSendTest
+    {
+        void accept(InboundConnections inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
     }
 
     static class Settings
@@ -158,7 +167,21 @@ public class OutboundConnectionTest
             doTest(s, test);
     }
 
+    private void testManual(ManualSendTest test) throws Throwable
+    {
+        for (Settings s : SETTINGS)
+            doTestManual(s, test);
+    }
+
     private void doTest(Settings settings, SendTest test) throws Throwable
+    {
+        doTestManual(settings, (inbound, outbound, endpoint) -> {
+            inbound.open();
+            test.accept(MessagingService.instance().getInbound(endpoint), outbound, endpoint);
+        });
+    }
+
+    private void doTestManual(Settings settings, ManualSendTest test) throws Throwable
     {
         InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
         InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
@@ -169,13 +192,14 @@ public class OutboundConnectionTest
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
         try
         {
-            inbound.open();
-            test.accept(MessagingService.instance().getInbound(endpoint), outbound, endpoint);
+            test.accept(inbound, outbound, endpoint);
         }
         finally
         {
-            inbound.close().await(1L, SECONDS);
-            outbound.close(false);
+            waitOrFail(inbound.close(), 10L, SECONDS);
+            waitOrFail(outbound.close(false), 10L, SECONDS);
+            resetVerbs();
+            MessagingService.instance().messageHandlers.clear();
         }
     }
 
@@ -317,7 +341,7 @@ public class OutboundConnectionTest
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
             Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
-                                        .withExpirationTime(System.nanoTime() + SECONDS.toNanos(30L))
+                                        .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
@@ -376,7 +400,7 @@ public class OutboundConnectionTest
             AtomicInteger delivered = new AtomicInteger();
             Verb._TEST_1.unsafeSetHandler(() -> msg -> delivered.incrementAndGet());
             Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
-                                        .withExpirationTime(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
+                                        .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
                                         .build();
             long sentSize = message.serializedSize(current_version);
             outbound.enqueue(message);
@@ -384,14 +408,14 @@ public class OutboundConnectionTest
             while (delivered.get() < 1);
             outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 1L, TimeUnit.DAYS));
             message = Message.builder(Verb._TEST_1, emptyMessage)
-                             .withExpirationTime(ApproximateTime.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
+                             .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
                              .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             Uninterruptibles.sleepUninterruptibly(timeoutMillis * 2, TimeUnit.MILLISECONDS);
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
-            deliveryDone.await(1L, TimeUnit.MINUTES);
+            deliveryDone.await(1L, MINUTES);
             Assert.assertEquals(1, delivered.get());
             Assert.assertEquals(11, outbound.submitted());
             Assert.assertEquals(0, outbound.pending());
@@ -407,113 +431,102 @@ public class OutboundConnectionTest
     }
 
     @Test
+    public void testCloseIfEndpointDown() throws Throwable
+    {
+        testManual((inbound, outbound, endpoint) -> {
+            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+                                        .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
+                                        .build();
+
+            for (int i = 0 ; i < 1000 ; ++i)
+                outbound.enqueue(message);
+
+            waitOrFail(outbound.close(true), 10L, MINUTES);
+        });
+    }
+
+    @Test
     public void testMessagePurging() throws Throwable
     {
-        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
-        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
-        MessagingService.instance().removeInbound(endpoint);
+        testManual((inbound, outbound, endpoint) -> {
+            Runnable testWhileDisconnected = () -> {
+                try
+                {
+                    for (int i = 0; i < 5; i++)
+                    {
+                        Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+                        outbound.enqueue(message);
+                        Assert.assertFalse(outbound.isConnected());
+                        Assert.assertEquals(outbound.queueSize(), 1);
+                        CompletableFuture.runAsync(() -> {
+                            while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
+                        }).get(10, SECONDS);
+                        // Message should have been purged
+                        Assert.assertEquals(outbound.queueSize(), 0);
+                    }
+                }
+                catch (Throwable t)
+                {
+                    throw new RuntimeException(t);
+                }
+            };
 
-        OutboundConnectionSettings settings = new OutboundConnectionSettings(endpoint);
-        settings = settings.withDefaults(SMALL_MESSAGE);
+            testWhileDisconnected.run();
 
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(
-            new ResourceLimits.Concurrent(settings.applicationReserveSendQueueEndpointCapacityInBytes),
-                settings.applicationReserveSendQueueGlobalCapacityInBytes);
-
-        OutboundConnection outbound = new OutboundConnection(SMALL_MESSAGE,
-                                                             settings,
-                                                             reserveCapacityInBytes);
-
-        Runnable testWhileDisconnected = () -> {
             try
             {
-                for (int i = 0; i < 5; i++)
-                {
-                    Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
-                    outbound.enqueue(message);
-                    Assert.assertFalse(outbound.isConnected());
-                    Assert.assertEquals(outbound.queueSize(), 1);
-                    CompletableFuture.runAsync(() -> {
-                        while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
-                    }).get(10, SECONDS);
-                    // Message should have been purged
-                    Assert.assertEquals(outbound.queueSize(), 0);
-                }
+                inbound.open();
+                CountDownLatch latch = new CountDownLatch(1);
+                unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+                Assert.assertEquals(outbound.queueSize(), 1);
+                latch.await(10, SECONDS);
             }
-            catch (Throwable t)
+            finally
             {
-                throw new RuntimeException(t);
+                waitOrFail(inbound.close(), 10, SECONDS);
+                // Wait until disconnected
+                CompletableFuture.runAsync(() -> {
+                    while (outbound.isConnected() && !Thread.interrupted()) {}
+                }).get(10, SECONDS);
             }
-        };
 
-        testWhileDisconnected.run();
-
-        try
-        {
-            inbound.open();
-            CountDownLatch latch = new CountDownLatch(1);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
-            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
-            Assert.assertEquals(outbound.queueSize(), 1);
-            latch.await(10, SECONDS);
-        }
-        finally
-        {
-            inbound.close().await(10, SECONDS);
-            // Wait until disconnected
-            CompletableFuture.runAsync(() -> {
-                while (outbound.isConnected() && !Thread.interrupted()) {}
-            }).get(10, SECONDS);
-        }
-
-        testWhileDisconnected.run();
+            testWhileDisconnected.run();
+        });
     }
 
     @Test
     public void testMessageDeliveryOnReconnect() throws Throwable
     {
-        MessagingService.instance().messageHandlers.clear();
-        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
-        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+        testManual((inbound, outbound, endpoint) -> {
+            try
+            {
+                inbound.open();
+                CountDownLatch latch = new CountDownLatch(1);
+                unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+                latch.await(10, SECONDS);
+                Assert.assertEquals(latch.getCount(), 0);
 
+                // Simulate disconnect
+                waitOrFail(inbound.close(), 10, SECONDS);
+                MessagingService.instance().removeInbound(endpoint);
+                inbound = new InboundConnections(new InboundConnectionSettings());
+                inbound.open();
 
-        OutboundConnectionSettings settings = new OutboundConnectionSettings(endpoint);
-        settings = settings.withDefaults(SMALL_MESSAGE);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(
-            new ResourceLimits.Concurrent(settings.applicationReserveSendQueueEndpointCapacityInBytes),
-                settings.applicationReserveSendQueueGlobalCapacityInBytes);
+                CountDownLatch latch2 = new CountDownLatch(1);
+                unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
+                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
 
-        OutboundConnection outbound = new OutboundConnection(SMALL_MESSAGE,
-                                                             settings,
-                                                             reserveCapacityInBytes);
-
-        try
-        {
-            inbound.open();
-            CountDownLatch latch = new CountDownLatch(1);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
-            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
-            latch.await(10, SECONDS);
-            Assert.assertEquals(latch.getCount(), 0);
-
-            // Simulate disconnect
-            inbound.close().await(10, SECONDS);
-            MessagingService.instance().removeInbound(endpoint);
-            inbound = new InboundConnections(new InboundConnectionSettings());
-            inbound.open();
-
-            CountDownLatch latch2 = new CountDownLatch(1);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
-            outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
-
-            latch2.await(10, SECONDS);
-            Assert.assertEquals(latch2.getCount(), 0);
-        }
-        finally
-        {
-            inbound.close().await(10, SECONDS);
-            outbound.close(false).await(10, SECONDS);
-        }
+                latch2.await(10, SECONDS);
+                Assert.assertEquals(latch2.getCount(), 0);
+            }
+            finally
+            {
+                waitOrFail(inbound.close(), 10, SECONDS);
+                waitOrFail(outbound.close(false), 10, SECONDS);
+            }
+        });
     }
 
     @Test
@@ -688,6 +701,18 @@ public class OutboundConnectionTest
         outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
         latch.await(10, SECONDS);
         Assert.assertTrue(outbound.isConnected());
+    }
+
+    private static void waitOrFail(Future<?> future, long timeout, TimeUnit unit) throws InterruptedException, TimeoutException, ExecutionException
+    {
+        future.await(timeout, unit);
+        Throwable cause = future.cause();
+        if (!future.isSuccess())
+        {
+            if (cause != null)
+                throw new ExecutionException(cause);
+            throw new TimeoutException();
+        }
     }
 
 }

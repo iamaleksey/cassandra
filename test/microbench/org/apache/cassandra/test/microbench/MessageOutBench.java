@@ -19,14 +19,12 @@
 package org.apache.cassandra.test.microbench;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.net.InetAddresses;
-import com.google.common.primitives.Shorts;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
@@ -100,7 +98,7 @@ public class MessageOutBench
     {
         try (DataOutputBuffer out = new DataOutputBuffer())
         {
-            Message.serializer.serialize(Message.builder(msgOut).withCreationTime(System.nanoTime()).withId(42).build(),
+            Message.serializer.serialize(Message.builder(msgOut).withCreatedAt(System.nanoTime()).withId(42).build(),
                                          out, messagingVersion);
             DataInputBuffer in = new DataInputBuffer(out.buffer(), false);
             Message.serializer.deserialize(in, addr, messagingVersion);

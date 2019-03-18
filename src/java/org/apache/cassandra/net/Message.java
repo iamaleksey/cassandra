@@ -168,7 +168,7 @@ public class Message<T>
             return this;
         }
 
-        public Builder<T> withCreationTime(long createdAtNanos)
+        public Builder<T> withCreatedAt(long createdAtNanos)
         {
             this.createdAtNanos = createdAtNanos;
             if (expiresAtNanos == 0 && verb != null)
@@ -176,7 +176,7 @@ public class Message<T>
             return this;
         }
 
-        public Builder<T> withExpirationTime(long expiresAtNanos)
+        public Builder<T> withExpiresAt(long expiresAtNanos)
         {
             this.expiresAtNanos = expiresAtNanos;
             return this;
@@ -262,15 +262,15 @@ public class Message<T>
                                .withPayload(message.payload)
                                .ofVerb(message.verb)
                                .withId(message.id)
-                               .withExpirationTime(message.expiresAtNanos)
-                               .withCreationTime(message.createdAtNanos)
+                               .withExpiresAt(message.expiresAtNanos)
+                               .withCreatedAt(message.createdAtNanos)
                                .withParameters(message.parameters);
     }
 
     public static <T> Builder<T> builder(Verb verb, T payload)
     {
         return new Builder<T>().ofVerb(verb)
-                               .withCreationTime(ApproximateTime.nanoTime())
+                               .withCreatedAt(ApproximateTime.nanoTime())
                                .withPayload(payload);
     }
 

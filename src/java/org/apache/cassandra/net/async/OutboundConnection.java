@@ -1188,6 +1188,9 @@ public class OutboundConnection
          *  To achieve all of this, we schedule a recurring operation on the delivery thread, executing while delivery
          *  is between messages, that checks if the queue is empty; if it is, it schedules cleanup on the eventLoop.
          */
+
+        Runnable clearQueue = () -> queue.runEventually(System.nanoTime(), withLock -> withLock.consume(this::onDroppedDueToClosing));
+        
         if (flushQueue)
         {
             // just keep scheduling on delivery executor a check to see if we're done; there should always be one
@@ -1201,7 +1204,7 @@ public class OutboundConnection
                     else
                         delivery.stopAndRun(() -> {
                             if (isFailingToConnect)
-                                queue.clear();  // if we cannot connect, clear the queue
+                                clearQueue.run();
                             run();
                         });
                 }
@@ -1212,7 +1215,7 @@ public class OutboundConnection
         else
         {
             delivery.stopAndRunOnEventLoop(() -> {
-                queue.runEventually(System.nanoTime(), withLock -> withLock.consume(this::onDroppedDueToClosing));
+                clearQueue.run();
                 eventLoopCleanup.run();
             });
         }
