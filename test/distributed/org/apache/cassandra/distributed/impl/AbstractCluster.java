@@ -323,23 +323,47 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster, 
     protected static <I extends IInstance, C extends AbstractCluster<I>> C
     create(int nodeCount, Factory<I, C> factory) throws Throwable
     {
-        return create(nodeCount, Files.createTempDirectory("dtests").toFile(), factory);
+        return create(nodeCount, 0, factory);
+    }
+
+    protected static <I extends IInstance, C extends AbstractCluster<I>> C
+    create(int nodeCount, int subnet, Factory<I, C> factory) throws Throwable
+    {
+        return create(nodeCount, subnet, Files.createTempDirectory("dtests").toFile(), factory);
     }
 
     protected static <I extends IInstance, C extends AbstractCluster<I>> C
     create(int nodeCount, File root, Factory<I, C> factory)
     {
-        return create(nodeCount, Versions.CURRENT, root, factory);
+        return create(nodeCount, 0, root, factory);
+    }
+
+    protected static <I extends IInstance, C extends AbstractCluster<I>> C
+    create(int nodeCount, int subnet, File root, Factory<I, C> factory)
+    {
+        return create(nodeCount, subnet, Versions.CURRENT, root, factory);
     }
 
     protected static <I extends IInstance, C extends AbstractCluster<I>> C
     create(int nodeCount, Versions.Version version, Factory<I, C> factory) throws IOException
     {
-        return create(nodeCount, version, Files.createTempDirectory("dtests").toFile(), factory);
+        return create(nodeCount, 0, version, factory);
+    }
+
+    protected static <I extends IInstance, C extends AbstractCluster<I>> C
+    create(int nodeCount, int subnet, Versions.Version version, Factory<I, C> factory) throws IOException
+    {
+        return create(nodeCount, subnet, version, Files.createTempDirectory("dtests").toFile(), factory);
     }
 
     protected static <I extends IInstance, C extends AbstractCluster<I>> C
     create(int nodeCount, Versions.Version version, File root, Factory<I, C> factory)
+    {
+        return create(nodeCount, 0, version, root, factory);
+    }
+
+    protected static <I extends IInstance, C extends AbstractCluster<I>> C
+    create(int nodeCount, int subnet, Versions.Version version, File root, Factory<I, C> factory)
     {
         root.mkdirs();
         setupLogging(root);
@@ -350,7 +374,7 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster, 
         long token = Long.MIN_VALUE + 1, increment = 2 * (Long.MAX_VALUE / nodeCount);
         for (int i = 0 ; i < nodeCount ; ++i)
         {
-            InstanceConfig config = InstanceConfig.generate(i + 1, root, String.valueOf(token));
+            InstanceConfig config = InstanceConfig.generate(i + 1, subnet, root, String.valueOf(token));
             configs.add(config);
             token += increment;
         }

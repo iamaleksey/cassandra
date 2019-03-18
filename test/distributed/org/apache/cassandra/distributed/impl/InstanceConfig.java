@@ -203,13 +203,14 @@ public class InstanceConfig implements IInstanceConfig
         return (String)params.get(name);
     }
 
-    public static InstanceConfig generate(int nodeNum, File root, String token)
+    public static InstanceConfig generate(int nodeNum, int subnet, File root, String token)
     {
+        String ipPrefix = "127.0." + subnet + ".";
         return new InstanceConfig(nodeNum,
-                                  "127.0.0." + nodeNum,
-                                  "127.0.0." + nodeNum,
-                                  "127.0.0." + nodeNum,
-                                  "127.0.0." + nodeNum,
+                                  ipPrefix + nodeNum,
+                                  ipPrefix + nodeNum,
+                                  ipPrefix + nodeNum,
+                                  ipPrefix + nodeNum,
                                   String.format("%s/node%d/saved_caches", root, nodeNum),
                                   new String[] { String.format("%s/node%d/data", root, nodeNum) },
                                   String.format("%s/node%d/commitlog", root, nodeNum),
