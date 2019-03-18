@@ -70,7 +70,7 @@ public class OutboundConnectionSettingsTest
         test(settings -> settings.withTcpUserTimeoutInMS(-1));
     }
 
-    @Test(expected = IllegalArgumentException.class)
+    @Test
     public void build_TcpUserTimeoutEqualsZero()
     {
         test(settings -> settings.withTcpUserTimeoutInMS(0));
