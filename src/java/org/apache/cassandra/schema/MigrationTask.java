@@ -37,7 +37,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.WrappedRunnable;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.SCHEMA_PULL_REQ;
 
 final class MigrationTask extends WrappedRunnable
@@ -80,7 +80,7 @@ final class MigrationTask extends WrappedRunnable
             return;
         }
 
-        Message message = Message.out(SCHEMA_PULL_REQ, emptyMessage);
+        Message message = Message.out(SCHEMA_PULL_REQ, noPayload);
 
         final CountDownLatch completionLatch = new CountDownLatch(1);
 

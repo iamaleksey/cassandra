@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.io.IOException;
@@ -24,32 +23,33 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
-public class EmptyMessage
+public class NoPayload
 {
-    public static final EmptyMessage emptyMessage = new EmptyMessage();
+    public static final NoPayload noPayload = new NoPayload();
     public static final Serializer serializer = new Serializer();
 
-    public static class Serializer implements IVersionedSerializer<EmptyMessage>
+    public static class Serializer implements IVersionedSerializer<NoPayload>
     {
-        private Serializer() {}
-
-        public void serialize(EmptyMessage emptyMessage, DataOutputPlus out, int version) throws IOException
+        private Serializer()
         {
-            if (emptyMessage != EmptyMessage.emptyMessage)
-                throw new IllegalStateException();
         }
 
-        public EmptyMessage deserialize(DataInputPlus in, int version) throws IOException
+        public void serialize(NoPayload noPayload, DataOutputPlus out, int version) throws IOException
         {
-            return emptyMessage;
+            if (noPayload != NoPayload.noPayload)
+                throw new IllegalArgumentException();
         }
 
-        public long serializedSize(EmptyMessage emptyMessage, int version)
+        public NoPayload deserialize(DataInputPlus in, int version) throws IOException
+        {
+            return noPayload;
+        }
+
+        public long serializedSize(NoPayload noPayload, int version)
         {
             return 0;
         }
     }
 
-    private EmptyMessage() {}
-
+    private NoPayload() {}
 }

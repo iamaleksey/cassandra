@@ -30,7 +30,7 @@ import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
 import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.*;
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.ParameterType.*;
 import static org.apache.cassandra.net.MessageFlag.IS_FAILURE_RESPONSE;
 
@@ -102,7 +102,7 @@ public class ProcessMessageTask implements Runnable
         if (message.callBackOnFailure())
         {
             RequestFailureReason reason = RequestFailureReason.forException(t);
-            Message response = Message.respondWithFlagAndParameter(message, emptyMessage, IS_FAILURE_RESPONSE, FAILURE_REASON, reason);
+            Message response = Message.respondWithFlagAndParameter(message, noPayload, IS_FAILURE_RESPONSE, FAILURE_REASON, reason);
             MessagingService.instance().sendResponse(response, message.from);
         }
     }

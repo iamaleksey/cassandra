@@ -77,7 +77,7 @@ import org.apache.cassandra.utils.AbstractIterator;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.BATCH_STORE_REQ;
 import static org.apache.cassandra.net.Verb.PAXOS_COMMIT_REQ;
 import static org.apache.cassandra.net.Verb.PAXOS_PREPARE_REQ;
@@ -2183,7 +2183,7 @@ public class StorageProxy implements StorageProxyMBean
             }
         };
         // an empty message acts as a request to the SchemaVersionVerbHandler.
-        Message message = Message.out(Verb.SCHEMA_VERSION_REQ, emptyMessage);
+        Message message = Message.out(Verb.SCHEMA_VERSION_REQ, noPayload);
         for (InetAddressAndPort endpoint : liveHosts)
             MessagingService.instance().sendRR(message, endpoint, cb);
 

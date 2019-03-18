@@ -55,7 +55,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundCallbacks;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
@@ -69,7 +68,7 @@ import org.apache.cassandra.utils.MerkleTrees;
 import org.apache.cassandra.utils.ObjectSizes;
 import org.apache.cassandra.utils.UUIDGen;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
@@ -813,7 +812,7 @@ public class RepairJobTest
                 switch (rm.messageType)
                 {
                     case SNAPSHOT:
-                        Message<?> messageIn = Message.respond(message, emptyMessage);
+                        Message<?> messageIn = Message.respond(message, noPayload);
                         MessagingService.instance().process(messageIn, 0, InboundCallbacks.OnMessageProcessed.NOOP, InboundCallbacks.OnMessageExpired.NOOP);
                         break;
                     case VALIDATION_REQUEST:

@@ -111,7 +111,7 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.stream.Collectors.toList;
 import static org.apache.cassandra.index.SecondaryIndexManager.getIndexName;
 import static org.apache.cassandra.index.SecondaryIndexManager.isIndexColumnFamily;
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
 
 /**
@@ -2795,7 +2795,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
     private void sendReplicationNotification(InetAddressAndPort remote)
     {
         // notify the remote token
-        Message msg = Message.out(REPLICATION_DONE_REQ, emptyMessage);
+        Message msg = Message.out(REPLICATION_DONE_REQ, noPayload);
         IFailureDetector failureDetector = FailureDetector.instance;
         if (logger.isDebugEnabled())
             logger.debug("Notifying {} of replication completion\n", remote);

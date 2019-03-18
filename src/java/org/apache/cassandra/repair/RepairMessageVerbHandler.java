@@ -32,7 +32,7 @@ import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 
 /**
  * Handles all repair related message.
@@ -87,7 +87,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                                                                              prepareMessage.timestamp,
                                                                              prepareMessage.isGlobal,
                                                                              prepareMessage.previewKind);
-                    MessagingService.instance().sendResponse(Message.respond(message, emptyMessage), message.from);
+                    MessagingService.instance().sendResponse(Message.respond(message, noPayload), message.from);
                     break;
 
                 case SNAPSHOT:
@@ -111,7 +111,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                         repairManager.snapshot(desc.parentSessionId.toString(), desc.ranges, true);
                     }
                     logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from);
-                    MessagingService.instance().sendResponse(Message.respond(message, emptyMessage), message.from);
+                    MessagingService.instance().sendResponse(Message.respond(message, noPayload), message.from);
                     break;
 
                 case VALIDATION_REQUEST:
@@ -166,7 +166,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     logger.debug("cleaning up repair");
                     CleanupMessage cleanup = (CleanupMessage) message.payload;
                     ActiveRepairService.instance.removeParentRepairSession(cleanup.parentRepairSession);
-                    MessagingService.instance().sendResponse(Message.respond(message, emptyMessage), message.from);
+                    MessagingService.instance().sendResponse(Message.respond(message, noPayload), message.from);
                     break;
 
                 case CONSISTENT_REQUEST:
@@ -220,7 +220,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     private void logErrorAndSendFailureResponse(String errorMessage, Message<?> respondTo)
     {
         logger.error(errorMessage);
-        Message reply = Message.respondWithFlag(respondTo, emptyMessage, MessageFlag.IS_FAILURE_RESPONSE);
+        Message reply = Message.respondWithFlag(respondTo, noPayload, MessageFlag.IS_FAILURE_RESPONSE);
         MessagingService.instance().sendResponse(reply, respondTo.from);
     }
 }

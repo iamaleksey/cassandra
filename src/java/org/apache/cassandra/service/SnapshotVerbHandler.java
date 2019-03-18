@@ -26,8 +26,7 @@ import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
-import static org.apache.cassandra.net.Verb.SNAPSHOT_RSP;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 
 public class SnapshotVerbHandler implements IVerbHandler<SnapshotCommand>
 {
@@ -45,6 +44,6 @@ public class SnapshotVerbHandler implements IVerbHandler<SnapshotCommand>
         else
             Keyspace.open(command.keyspace).getColumnFamilyStore(command.column_family).snapshot(command.snapshot_name);
         logger.debug("Enqueuing response to snapshot request {} to {}", command.snapshot_name, message.from);
-        MessagingService.instance().sendResponse(Message.respond(message, emptyMessage), message.from);
+        MessagingService.instance().sendResponse(Message.respond(message, noPayload), message.from);
     }
 }

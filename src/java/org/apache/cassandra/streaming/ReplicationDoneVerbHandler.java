@@ -23,10 +23,9 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.StorageService;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 
 public class ReplicationDoneVerbHandler implements IVerbHandler
 {
@@ -37,7 +36,7 @@ public class ReplicationDoneVerbHandler implements IVerbHandler
     public void doVerb(Message msg)
     {
         StorageService.instance.confirmReplication(msg.from);
-        Message response = Message.respond(msg, emptyMessage);
+        Message response = Message.respond(msg, noPayload);
         if (logger.isDebugEnabled())
             logger.debug("Replying to {}@{}", msg.id, msg.from);
         MessagingService.instance().sendResponse(response, msg.from);

@@ -49,7 +49,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
@@ -245,7 +245,7 @@ public class WriteResponseHandlerTest
 
     private static Message createDummyMessage(int target)
     {
-        return Message.builder(Verb.ECHO_REQ, emptyMessage)
+        return Message.builder(Verb.ECHO_REQ, noPayload)
                       .from(targets.get(target).endpoint())
                       .build();
     }

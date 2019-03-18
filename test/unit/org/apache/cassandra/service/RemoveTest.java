@@ -45,7 +45,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.REPLICATION_DONE_REQ;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -163,7 +163,7 @@ public class RemoveTest
 
         for (InetAddressAndPort host : hosts)
         {
-            Message msg = Message.builder(REPLICATION_DONE_REQ, emptyMessage)
+            Message msg = Message.builder(REPLICATION_DONE_REQ, noPayload)
                                  .from(host)
                                  .build();
             MessagingService.instance().sendRR(msg, FBUtilities.getBroadcastAddressAndPort());

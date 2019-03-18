@@ -30,7 +30,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing;
 
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.Verb.INTERNAL_RSP;
 import static org.apache.cassandra.net.ParameterType.TRACE_SESSION;
 
@@ -49,7 +49,7 @@ public class MessageOutTest
     @Test
     public void captureTracingInfo_ForceException()
     {
-        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, emptyMessage, Collections.emptySet(), TRACE_SESSION, new byte[9]);
+        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, Collections.emptySet(), TRACE_SESSION, new byte[9]);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -57,7 +57,7 @@ public class MessageOutTest
     public void captureTracingInfo_UnknownSession()
     {
         UUID uuid = UUID.randomUUID();
-        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, emptyMessage, Collections.emptySet(), TRACE_SESSION, uuid);
+        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, Collections.emptySet(), TRACE_SESSION, uuid);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -65,7 +65,7 @@ public class MessageOutTest
     public void captureTracingInfo_KnownSession()
     {
         Tracing.instance.newSession(new HashMap<>());
-        Message message = Message.outboundWithFlagsAndParameter(0, Verb.REQUEST_RSP, 0, emptyMessage, Collections.emptySet(), null, null);
+        Message message = Message.outboundWithFlagsAndParameter(0, Verb.REQUEST_RSP, 0, noPayload, Collections.emptySet(), null, null);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 }

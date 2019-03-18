@@ -53,7 +53,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.EmptyMessage;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -63,7 +63,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
+import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
@@ -210,7 +210,7 @@ public class OutboundConnectionTest
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
             unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
-            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+            Message<?> message = Message.out(Verb._TEST_1, noPayload);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
@@ -233,25 +233,25 @@ public class OutboundConnectionTest
         test((inbound, outbound, endpoint) -> {
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
-            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<EmptyMessage>()
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<NoPayload>()
             {
-                public void serialize(EmptyMessage emptyMessage, DataOutputPlus out, int version) throws IOException
+                public void serialize(NoPayload noPayload, DataOutputPlus out, int version) throws IOException
                 {
                     for (int i = 0 ; i < LARGE_MESSAGE_THRESHOLD + 1 ; ++i)
                         out.writeByte(i);
                 }
-                public EmptyMessage deserialize(DataInputPlus in, int version) throws IOException
+                public NoPayload deserialize(DataInputPlus in, int version) throws IOException
                 {
                     in.skipBytesFully(LARGE_MESSAGE_THRESHOLD + 1);
-                    return emptyMessage;
+                    return noPayload;
                 }
-                public long serializedSize(EmptyMessage emptyMessage, int version)
+                public long serializedSize(NoPayload noPayload, int version)
                 {
                     return LARGE_MESSAGE_THRESHOLD + 1;
                 }
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
-            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+            Message<?> message = Message.out(Verb._TEST_1, noPayload);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
@@ -277,7 +277,7 @@ public class OutboundConnectionTest
              (inbound, outbound, endpoint) -> {
 
             CountDownLatch done = new CountDownLatch(1);
-            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+            Message<?> message = Message.out(Verb._TEST_1, noPayload);
             long id = MessagingService.instance().callbacks.addWithExpiration(new IAsyncCallbackWithFailure()
             {
                 public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
@@ -340,7 +340,7 @@ public class OutboundConnectionTest
             int count = 100;
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
-            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+            Message<?> message = Message.builder(Verb._TEST_1, noPayload)
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
@@ -399,7 +399,7 @@ public class OutboundConnectionTest
             CountDownLatch deliveryDone = new CountDownLatch(1);
             AtomicInteger delivered = new AtomicInteger();
             Verb._TEST_1.unsafeSetHandler(() -> msg -> delivered.incrementAndGet());
-            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+            Message<?> message = Message.builder(Verb._TEST_1, noPayload)
                                         .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
                                         .build();
             long sentSize = message.serializedSize(current_version);
@@ -407,7 +407,7 @@ public class OutboundConnectionTest
             long timeoutMillis = 10L;
             while (delivered.get() < 1);
             outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 1L, TimeUnit.DAYS));
-            message = Message.builder(Verb._TEST_1, emptyMessage)
+            message = Message.builder(Verb._TEST_1, noPayload)
                              .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
                              .build();
             for (int i = 0 ; i < count ; ++i)
@@ -434,7 +434,7 @@ public class OutboundConnectionTest
     public void testCloseIfEndpointDown() throws Throwable
     {
         testManual((inbound, outbound, endpoint) -> {
-            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+            Message<?> message = Message.builder(Verb._TEST_1, noPayload)
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
 
@@ -454,7 +454,7 @@ public class OutboundConnectionTest
                 {
                     for (int i = 0; i < 5; i++)
                     {
-                        Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+                        Message<?> message = Message.out(Verb._TEST_1, noPayload);
                         outbound.enqueue(message);
                         Assert.assertFalse(outbound.isConnected());
                         Assert.assertEquals(outbound.queueSize(), 1);
@@ -478,7 +478,7 @@ public class OutboundConnectionTest
                 inbound.open();
                 CountDownLatch latch = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
-                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+                outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
                 Assert.assertEquals(outbound.queueSize(), 1);
                 latch.await(10, SECONDS);
             }
@@ -504,7 +504,7 @@ public class OutboundConnectionTest
                 inbound.open();
                 CountDownLatch latch = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
-                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+                outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
                 latch.await(10, SECONDS);
                 Assert.assertEquals(latch.getCount(), 0);
 
@@ -516,7 +516,7 @@ public class OutboundConnectionTest
 
                 CountDownLatch latch2 = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
-                outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
+                outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
 
                 latch2.await(10, SECONDS);
                 Assert.assertEquals(latch2.getCount(), 0);
