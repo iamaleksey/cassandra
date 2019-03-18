@@ -277,7 +277,7 @@ public class OutboundConnectionTest
              (inbound, outbound, endpoint) -> {
 
             CountDownLatch done = new CountDownLatch(1);
-            Message<?> message = Message.out(Verb._TEST_1, noPayload);
+            Message<?> message = Message.out(Verb._TEST_1, new Object());
             long id = MessagingService.instance().callbacks.addWithExpiration(new IAsyncCallbackWithFailure()
             {
                 public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
@@ -340,7 +340,7 @@ public class OutboundConnectionTest
             int count = 100;
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
-            Message<?> message = Message.builder(Verb._TEST_1, noPayload)
+            Message<?> message = Message.builder(Verb._TEST_1, new Object())
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
