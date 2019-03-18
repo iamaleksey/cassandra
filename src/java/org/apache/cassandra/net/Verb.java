@@ -203,8 +203,15 @@ public enum Verb
         this.expiration = expiration;
     }
 
-    public <T> IVersionedSerializer<T> serializer() { return (IVersionedSerializer<T>) serializer.get(); }
-    public <T> IVerbHandler<T> handler() { return (IVerbHandler<T>) handler.get(); }
+    public <T> IVersionedSerializer<T> serializer()
+    {
+        return (IVersionedSerializer<T>) serializer.get();
+    }
+
+    public <T> IVerbHandler<T> handler()
+    {
+        return (IVerbHandler<T>) handler.get();
+    }
 
     public long expiresAtNanos(long nowNanos)
     {
