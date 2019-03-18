@@ -28,11 +28,10 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.serializers.MarshalException;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.StorageService;
-
-import static org.apache.cassandra.net.Verb.HINT_RSP;
 
 /**
  * Verb handler used both for hint dispatch and streaming.
@@ -100,8 +99,8 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
         }
     }
 
-    private static void respond(Message<?> respondTo)
+    private static void respond(Message<HintMessage> respondTo)
     {
-        MessagingService.instance().sendResponse(Message.respond(respondTo, HintResponse.instance), respondTo.from);
+        MessagingService.instance().sendResponse(Message.respond(respondTo, NoPayload.noPayload), respondTo.from);
     }
 }

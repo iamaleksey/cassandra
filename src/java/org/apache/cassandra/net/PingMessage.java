@@ -38,7 +38,7 @@ public class PingMessage
 
     public static final PingMessage forSmall = new PingMessage(SMALL_MESSAGE);
     public static final PingMessage forLarge = new PingMessage(LARGE_MESSAGE);
-    public static final PingMessage forGossip = new PingMessage(URGENT);
+    public static final PingMessage forUrgent = new PingMessage(URGENT);
 
     public final OutboundConnection.Type connectionType;
 
@@ -62,7 +62,7 @@ public class PingMessage
                 case LARGE_MESSAGE:
                     return forLarge;
                 case URGENT:
-                    return forGossip;
+                    return forUrgent;
                 case SMALL_MESSAGE:
                     return forSmall;
                 default:

@@ -52,7 +52,6 @@ import org.apache.cassandra.gms.GossipDigestSyn;
 import org.apache.cassandra.gms.GossipDigestSynVerbHandler;
 import org.apache.cassandra.gms.GossipShutdownVerbHandler;
 import org.apache.cassandra.hints.HintMessage;
-import org.apache.cassandra.hints.HintResponse;
 import org.apache.cassandra.hints.HintVerbHandler;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.repair.RepairMessageVerbHandler;
@@ -83,7 +82,7 @@ public enum Verb
 {
     MUTATION_RSP         (60, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
     MUTATION_REQ         (0,  P3, writeTimeout,    MUTATION,          () -> Mutation.serializer,             () -> MutationVerbHandler.instance,        MUTATION_RSP        ),
-    HINT_RSP             (61, P1, writeTimeout,    REQUEST_RESPONSE,  () -> HintResponse.serializer,         () -> ResponseVerbHandler.instance                             ),
+    HINT_RSP             (61, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     HINT_REQ             (1,  P4, writeTimeout,    MUTATION,          () -> HintMessage.serializer,          () -> HintVerbHandler.instance,            HINT_RSP            ),
     READ_REPAIR_RSP      (62, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
     READ_REPAIR_REQ      (2,  P1, writeTimeout,    MUTATION,          () -> Mutation.serializer,             () -> ReadRepairVerbHandler.instance,      READ_REPAIR_RSP     ),

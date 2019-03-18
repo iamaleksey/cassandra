@@ -33,6 +33,7 @@ import org.junit.Test;
 import com.datastax.driver.core.utils.MoreFutures;
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.DecoratedKey;
@@ -182,7 +183,7 @@ public class HintsServiceTest
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
     {
         // create spy for hint messages, but only create responses for noOfResponses hints
-        Message<HintResponse> message = Message.respondInternal(HINT_RSP, HintResponse.instance);
+        Message<NoPayload> message = Message.respondInternal(HINT_RSP, NoPayload.noPayload);
 
         MockMessagingSpy spy;
         if (noOfResponses != -1)
