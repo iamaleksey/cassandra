@@ -17,8 +17,7 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.EnumSet;
-import java.util.Set;
+import com.google.common.collect.ImmutableList;
 
 public enum MessageFlag
 {
@@ -28,6 +27,8 @@ public enum MessageFlag
     CALL_BACK_ON_FAILURE (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
     IS_FAILURE_RESPONSE  (ParameterType.FAILURE_RESPONSE,    MessagingService.ONE_BYTE),
     TRACK_REPAIRED_DATA  (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
+
+    static final ImmutableList<MessageFlag> ALL_VALUES = ImmutableList.copyOf(values());
 
     final ParameterType legacyParam;
     final Object legacyValue;
@@ -42,23 +43,5 @@ public enum MessageFlag
         this.legacyParam = legacyParam;
         this.legacyValue = legacyValue;
     }
-
-    public static EnumSet<MessageFlag> deserialize(int flags)
-    {
-        EnumSet<MessageFlag> set = EnumSet.noneOf(MessageFlag.class);
-        for (int i = 0; i < ALL_VALUES.length; i++)
-            if ((flags & (1 << i)) != 0)
-                set.add(ALL_VALUES[i]);
-        return set;
-    }
-
-    public static int serialize(Set<MessageFlag> flags)
-    {
-        int i = 0;
-        for (MessageFlag flag : flags)
-            i |= 1 << flag.ordinal();
-        return i;
-    }
-
-    private static final MessageFlag[] ALL_VALUES = values();
 }
+

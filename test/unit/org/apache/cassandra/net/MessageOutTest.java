@@ -15,11 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.UUID;
 
@@ -49,7 +47,7 @@ public class MessageOutTest
     @Test
     public void captureTracingInfo_ForceException()
     {
-        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, Collections.emptySet(), TRACE_SESSION, new byte[9]);
+        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, 0, TRACE_SESSION, new byte[9]);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -57,7 +55,7 @@ public class MessageOutTest
     public void captureTracingInfo_UnknownSession()
     {
         UUID uuid = UUID.randomUUID();
-        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, Collections.emptySet(), TRACE_SESSION, uuid);
+        Message message = Message.outboundWithFlagsAndParameter(0, INTERNAL_RSP, 0, noPayload, 0, TRACE_SESSION, uuid);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -65,7 +63,7 @@ public class MessageOutTest
     public void captureTracingInfo_KnownSession()
     {
         Tracing.instance.newSession(new HashMap<>());
-        Message message = Message.outboundWithFlagsAndParameter(0, Verb.REQUEST_RSP, 0, noPayload, Collections.emptySet(), null, null);
+        Message message = Message.outboundWithFlagsAndParameter(0, Verb.REQUEST_RSP, 0, noPayload, 0, null, null);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 }

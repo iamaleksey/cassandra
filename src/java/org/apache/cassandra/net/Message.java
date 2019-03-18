@@ -21,13 +21,12 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.EnumMap;
-import java.util.EnumSet;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import javax.annotation.Nullable;
 
@@ -86,12 +85,12 @@ public class Message<T>
     public final Verb verb;
     public final T payload;
 
-    private final Set<MessageFlag> flags;
+    private final int flags;
     private final Map<ParameterType, Object> parameters;
 
     private Message(InetAddressAndPort from,
                     T payload,
-                    Set<MessageFlag> flags,
+                    int flags,
                     Map<ParameterType, Object> parameters,
                     Verb verb,
                     long createdAtNanos,
@@ -113,7 +112,7 @@ public class Message<T>
         private Verb verb;
         private InetAddressAndPort from;
         private T payload;
-        private final Set<MessageFlag> flags = EnumSet.noneOf(MessageFlag.class);
+        private int flags = emptyFlags();
         private final Map<ParameterType, Object> parameters = new EnumMap<>(ParameterType.class);
         private long createdAtNanos;
         private long expiresAtNanos;
@@ -137,13 +136,7 @@ public class Message<T>
 
         public Builder<T> withFlag(MessageFlag flag)
         {
-            flags.add(flag);
-            return this;
-        }
-
-        public Builder<T> withFlags(Set<MessageFlag> flags)
-        {
-            this.flags.addAll(flags);
+            flags = addFlag(flags, flag);
             return this;
         }
 
@@ -220,31 +213,31 @@ public class Message<T>
     public static <T> Message<T> respondInternal(Verb verb, T payload)
     {
         assert verb.isResponse();
-        return outboundWithFlagsAndParameter(0, verb, 0, payload, Collections.emptySet(), null, null);
+        return outboundWithFlagsAndParameter(0, verb, 0, payload, emptyFlags(), null, null);
     }
 
     public static <T> Message<T> outWithParameter(Verb verb, T payload, ParameterType parameterType, Object parameterValue)
     {
         assert !verb.isResponse();
-        return outboundWithFlagsAndParameter(0, verb, 0, payload, Collections.emptySet(), parameterType, parameterValue);
+        return outboundWithFlagsAndParameter(0, verb, 0, payload, emptyFlags(), parameterType, parameterValue);
     }
 
     public static <T> Message<T> respondWithFlag(Message<?> respondTo, T payload, MessageFlag flag)
     {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, EnumSet.of(flag), null, null);
+        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, singletonFlag(flag), null, null);
     }
 
     public static <T> Message<T> respondWithParameter(Message<?> respondTo, T payload, ParameterType parameterType, Object parameterValue)
     {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, Collections.emptySet(), parameterType, parameterValue);
+        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, emptyFlags(), parameterType, parameterValue);
     }
 
     public static <T> Message<T> respondWithFlagAndParameter(Message<?> respondTo, T payload, MessageFlag flag, ParameterType parameterType, Object parameterValue)
     {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, EnumSet.of(flag), parameterType, parameterValue);
+        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, singletonFlag(flag), parameterType, parameterValue);
     }
 
-    static <T> Message<T> outboundWithFlagsAndParameter(long id, Verb verb, long expiresAtNanos, T payload, Set<MessageFlag> flags, ParameterType parameterType, Object parameterValue)
+    static <T> Message<T> outboundWithFlagsAndParameter(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParameterType parameterType, Object parameterValue)
     {
         if (payload == null)
             throw new IllegalArgumentException();
@@ -290,16 +283,6 @@ public class Message<T>
         }
 
         return parameters;
-    }
-
-    private static Set<MessageFlag> addFlag(Set<MessageFlag> flags, MessageFlag flag)
-    {
-        if (flags.isEmpty())
-            return EnumSet.of(flag);
-
-        Set<MessageFlag> sum = EnumSet.copyOf(flags);
-        sum.add(flag);
-        return sum;
     }
 
     private static Map<ParameterType, Object> addParameter(Map<ParameterType, Object> parameters, ParameterType type, Object value)
@@ -373,17 +356,44 @@ public class Message<T>
 
     boolean callBackOnFailure()
     {
-        return flags.contains(MessageFlag.CALL_BACK_ON_FAILURE);
+        return containsFlag(flags, MessageFlag.CALL_BACK_ON_FAILURE);
     }
 
     boolean isFailureResponse()
     {
-        return flags.contains(MessageFlag.IS_FAILURE_RESPONSE);
+        return containsFlag(flags, MessageFlag.IS_FAILURE_RESPONSE);
     }
 
     public boolean trackRepairedData()
     {
-        return flags.contains(MessageFlag.TRACK_REPAIRED_DATA);
+        return containsFlag(flags, MessageFlag.TRACK_REPAIRED_DATA);
+    }
+
+    private static int singletonFlag(MessageFlag flag)
+    {
+        return 1 << flag.ordinal();
+    }
+
+    private static int emptyFlags()
+    {
+        return 0;
+    }
+
+    private static boolean containsFlag(int flags, MessageFlag flag)
+    {
+        return (flags & (1 << flag.ordinal())) != 0;
+    }
+
+    private static int addFlag(int flags, MessageFlag flag)
+    {
+        return flags | (1 << flag.ordinal());
+    }
+
+    private static void forEachFlag(int flags, Consumer<MessageFlag> consumer)
+    {
+        for (MessageFlag flag : MessageFlag.ALL_VALUES)
+            if (containsFlag(flags, flag))
+                consumer.accept(flag);
     }
 
     /*
@@ -469,7 +479,7 @@ public class Message<T>
      * - pre-4.0, expiry time wasn't encoded at all; in 4.0 it's an unsigned vint
      * - pre-4.0, message id was an int; in 4.0 and up it's an unsigned vint
      * - pre-4.0, messages included PROTOCOL MAGIC BYTES; post-4.0, we rely on frame CRCs instead
-     * - pre-4.0, messages would serialize boolean params as dummy ONE_BYTEs; post-4.0 we have a dedicated 'flags' byte
+     * - pre-4.0, messages would serialize boolean params as dummy ONE_BYTEs; post-4.0 we have a dedicated 'flags' vint
      *
      * <pre>
      * {@code
@@ -484,7 +494,7 @@ public class Message<T>
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * | Verb (vint)                   |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * | Flags (byte)                  |
+     * | Flags (vint)                  |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * | Param count (vint)            |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -563,7 +573,7 @@ public class Message<T>
             out.writeUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             out.writeUnsignedVInt(message.verb.id);
 
-            out.writeByte(MessageFlag.serialize(message.flags));
+            out.writeUnsignedVInt(message.flags);
             serializeParams(message.parameters, out, version);
 
             if (message.payload != null && message.payload != NoPayload.noPayload)
@@ -585,7 +595,7 @@ public class Message<T>
             long expiresAtNanos = creationTimeNanos + TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt());
             Verb verb = Verb.fromId(Ints.checkedCast(in.readUnsignedVInt()));
 
-            Set<MessageFlag> flags = MessageFlag.deserialize(in.readUnsignedByte());
+            int flags = Ints.checkedCast(in.readUnsignedVInt());
             Map<ParameterType, Object> parameters = deserializeParams(in, version);
 
             int payloadSize = Ints.checkedCast(VIntCoding.readUnsignedVInt(in));
@@ -603,7 +613,7 @@ public class Message<T>
             size += TypeSizes.sizeofUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             size += TypeSizes.sizeofUnsignedVInt(message.verb.id);
 
-            size += 1; // flags
+            size += TypeSizes.sizeofUnsignedVInt(message.flags);
             size += serializedParamsSize(message.parameters, version);
 
             int payloadSize = message.payloadSize(version);
@@ -634,7 +644,10 @@ public class Message<T>
                 return -1;
             index += verbIdSize;
 
-            index += 1; // flags
+            int flagsSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            if (flagsSize < 0)
+                return -1;
+            index += flagsSize;
 
             int paramsSize = serializedParamsSizePost40(buf, index);
             if (paramsSize < 0)
@@ -710,7 +723,7 @@ public class Message<T>
             Verb verb = Verb.fromId(in.readInt());
 
             Map<ParameterType, Object> parameters = deserializeParams(in, version);
-            Set<MessageFlag> flags = removeFlagsFromLegacyParams(parameters);
+            int flags = removeFlagsFromLegacyParams(parameters);
 
             IVersionedAsymmetricSerializer<?, T> payloadSerializer = verb.serializer();
             if (null == payloadSerializer)
@@ -804,32 +817,34 @@ public class Message<T>
          * param ser/deser
          */
 
-        private Map<ParameterType, Object> addFlagsToLegacyParams(Map<ParameterType, Object> params, Set<MessageFlag> flags)
+        private Map<ParameterType, Object> addFlagsToLegacyParams(Map<ParameterType, Object> params, int flags)
         {
-            if (flags.isEmpty())
+            if (flags == 0)
                 return params;
 
             Map<ParameterType, Object> extended = new EnumMap<>(ParameterType.class);
             extended.putAll(params);
-            for (MessageFlag flag : flags)
-                if (flag.legacyParam != null)
-                    extended.put(flag.legacyParam, flag.legacyValue);
+            forEachFlag(flags, f ->
+            {
+                if (f.legacyParam != null)
+                    extended.put(f.legacyParam, f.legacyValue);
+            });
             return extended;
         }
 
-        private Set<MessageFlag> removeFlagsFromLegacyParams(Map<ParameterType, Object> params)
+        private int removeFlagsFromLegacyParams(Map<ParameterType, Object> params)
         {
             if (params.isEmpty())
-                return Collections.emptySet();
+                return 0;
 
-            Set<MessageFlag> flags = EnumSet.noneOf(MessageFlag.class);
+            int flags = 0;
             Iterator<ParameterType> iter = params.keySet().iterator();
             while (iter.hasNext())
             {
                 ParameterType type = iter.next();
                 if (type.flagEquivalent != null)
                 {
-                    flags.add(type.flagEquivalent);
+                    flags = addFlag(flags, type.flagEquivalent);
                     iter.remove();
                 }
             }
@@ -964,7 +979,6 @@ public class Message<T>
                 // try to read length and skip to the end of the parameter value
                 index += 4;
                 if (index > limit)
-                    return -1;
                 index += buf.getInt(index - 4);
             }
 
