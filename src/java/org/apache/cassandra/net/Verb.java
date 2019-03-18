@@ -115,7 +115,7 @@ public enum Verb
 
     ECHO_RSP             (91, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     ECHO_REQ             (31, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> EchoVerbHandler.instance,            ECHO_RSP            ),
-    PING_RSP             (97, P1, pingTimeout,     GOSSIP,            () -> PongMessage.serializer,          () -> ResponseVerbHandler.instance                             ),
+    PING_RSP             (97, P1, pingTimeout,     GOSSIP,            () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     PING_REQ             (37, P1, pingTimeout,     GOSSIP,            () -> PingMessage.serializer,          () -> PingVerbHandler.instance,            PING_RSP            ),
 
     // P1 because messages can be arbitrarily large

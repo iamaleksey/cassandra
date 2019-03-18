@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 public class PingVerbHandler implements IVerbHandler<PingMessage>
@@ -25,7 +24,6 @@ public class PingVerbHandler implements IVerbHandler<PingMessage>
     @Override
     public void doVerb(Message<PingMessage> message)
     {
-        Message<PongMessage> msg = message.responseWith(PongMessage.instance);
-        MessagingService.instance().sendResponse(msg, message.from, message.payload.connectionType);
+        MessagingService.instance().sendResponse(message.emptyResponse(), message.from, message.payload.connectionType);
     }
 }
