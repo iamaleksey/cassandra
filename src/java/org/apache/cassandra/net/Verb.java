@@ -61,10 +61,12 @@ import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.schema.SchemaPullVerbHandler;
 import org.apache.cassandra.schema.SchemaPushVerbHandler;
 import org.apache.cassandra.schema.SchemaVersionVerbHandler;
+import org.apache.cassandra.utils.BooleanSerializer;
 import org.apache.cassandra.service.EchoVerbHandler;
 import org.apache.cassandra.service.SnapshotVerbHandler;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.CommitVerbHandler;
+import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.service.paxos.PrepareVerbHandler;
 import org.apache.cassandra.service.paxos.ProposeVerbHandler;
 import org.apache.cassandra.streaming.ReplicationDoneVerbHandler;
@@ -91,11 +93,11 @@ public enum Verb
     BATCH_REMOVE_RSP     (66, P1,  writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,       () -> ResponseVerbHandler.instance                                  ),
     BATCH_REMOVE_REQ     (6,  P3,  writeTimeout,    MUTATION,          () -> UUIDSerializer.serializer,      () -> BatchRemoveVerbHandler.instance,      BATCH_REMOVE_RSP        ),
 
-    PAXOS_PREPARE_RSP    (93, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> Commit.serializer,              () -> ResponseVerbHandler.instance                                  ),
+    PAXOS_PREPARE_RSP    (93, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> PrepareResponse.serializer,     () -> ResponseVerbHandler.instance                                  ),
     PAXOS_PREPARE_REQ    (33, P2,  writeTimeout,    MUTATION,          () -> Commit.serializer,              () -> PrepareVerbHandler.instance,          PAXOS_PREPARE_RSP       ),
-    PAXOS_PROPOSE_RSP    (94, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> Commit.serializer,              () -> ResponseVerbHandler.instance                                  ),
+    PAXOS_PROPOSE_RSP    (94, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> BooleanSerializer.serializer,   () -> ResponseVerbHandler.instance                                  ),
     PAXOS_PROPOSE_REQ    (34, P2,  writeTimeout,    MUTATION,          () -> Commit.serializer,              () -> ProposeVerbHandler.instance,          PAXOS_PROPOSE_RSP       ),
-    PAXOS_COMMIT_RSP     (95, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> Commit.serializer,              () -> ResponseVerbHandler.instance                                  ),
+    PAXOS_COMMIT_RSP     (95, P2,  writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,       () -> ResponseVerbHandler.instance                                  ),
     PAXOS_COMMIT_REQ     (35, P2,  writeTimeout,    MUTATION,          () -> Commit.serializer,              () -> CommitVerbHandler.instance,           PAXOS_COMMIT_RSP        ),
 
     TRUNCATE_RSP         (79, P0,  truncateTimeout, REQUEST_RESPONSE,  () -> TruncateResponse.serializer,    () -> ResponseVerbHandler.instance                                  ),
