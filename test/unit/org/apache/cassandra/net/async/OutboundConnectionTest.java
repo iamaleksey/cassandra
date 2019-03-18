@@ -48,6 +48,7 @@ import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -113,7 +114,7 @@ public class OutboundConnectionTest
 
     interface ManualSendTest
     {
-        void accept(InboundConnections inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
+        void accept(Settings settings, InboundConnections inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
     }
 
     static class Settings
@@ -150,7 +151,22 @@ public class OutboundConnectionTest
         }
     }
 
+    private static final EncryptionOptions.ServerEncryptionOptions encryptionOptions =
+            new EncryptionOptions.ServerEncryptionOptions()
+            .withEnabled(true)
+            .withInternodeEncryption(EncryptionOptions.ServerEncryptionOptions.InternodeEncryption.all)
+            .withKeyStore("test/conf/cassandra_ssl_test.keystore")
+            .withKeyStorePassword("cassandra")
+            .withTrustStore("test/conf/cassandra_ssl_test.truststore")
+            .withTrustStorePassword("cassandra")
+            .withRequireClientAuth(false)
+            .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
+
     private static final List<Settings> SETTINGS = ImmutableList.of(
+        Settings.SMALL.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+                      .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
+        Settings.LARGE.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+                      .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
         Settings.SMALL,
         Settings.LARGE,
         Settings.SMALL.outbound(outbound -> outbound.withCompression(true)),
@@ -176,7 +192,7 @@ public class OutboundConnectionTest
 
     private void doTest(Settings settings, SendTest test) throws Throwable
     {
-        doTestManual(settings, (inbound, outbound, endpoint) -> {
+        doTestManual(settings, (ignore, inbound, outbound, endpoint) -> {
             inbound.open();
             test.accept(MessagingService.instance().getInbound(endpoint), outbound, endpoint);
         });
@@ -184,7 +200,7 @@ public class OutboundConnectionTest
 
     private void doTestManual(Settings settings, ManualSendTest test) throws Throwable
     {
-        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings());
+        InboundConnections inbound = new InboundConnections(settings.inbound.apply(new InboundConnectionSettings()));
         InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
         MessagingService.instance().removeInbound(endpoint);
         OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
@@ -193,7 +209,7 @@ public class OutboundConnectionTest
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
         try
         {
-            test.accept(inbound, outbound, endpoint);
+            test.accept(settings, inbound, outbound, endpoint);
         }
         finally
         {
@@ -434,7 +450,7 @@ public class OutboundConnectionTest
     @Test
     public void testCloseIfEndpointDown() throws Throwable
     {
-        testManual((inbound, outbound, endpoint) -> {
+        testManual((settings, inbound, outbound, endpoint) -> {
             Message<?> message = Message.builder(Verb._TEST_1, noPayload)
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
@@ -449,7 +465,7 @@ public class OutboundConnectionTest
     @Test
     public void testMessagePurging() throws Throwable
     {
-        testManual((inbound, outbound, endpoint) -> {
+        testManual((settings, inbound, outbound, endpoint) -> {
             Runnable testWhileDisconnected = () -> {
                 try
                 {
@@ -503,7 +519,7 @@ public class OutboundConnectionTest
     @Test
     public void testMessageDeliveryOnReconnect() throws Throwable
     {
-        testManual((inbound, outbound, endpoint) -> {
+        testManual((settings, inbound, outbound, endpoint) -> {
             try
             {
                 inbound.open();
@@ -516,7 +532,7 @@ public class OutboundConnectionTest
                 // Simulate disconnect
                 inbound.close().get(10, SECONDS);
                 MessagingService.instance().removeInbound(endpoint);
-                inbound = new InboundConnections(new InboundConnectionSettings());
+                inbound = new InboundConnections(settings.inbound.apply(new InboundConnectionSettings()));
                 inbound.open();
 
                 CountDownLatch latch2 = new CountDownLatch(1);

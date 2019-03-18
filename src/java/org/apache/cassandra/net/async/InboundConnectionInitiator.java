@@ -197,10 +197,8 @@ public class InboundConnectionInitiator
          * On registration, immediately schedule a timeout to kill this connection if it does not handshake promptly,
          * and authenticate the remote address.
          */
-        public void channelRegistered(ChannelHandlerContext ctx) throws Exception
+        public void handlerAdded(ChannelHandlerContext ctx) throws Exception
         {
-            super.channelRegistered(ctx);
-
             handshakeTimeout = ctx.executor().schedule(() -> {
                 logger.error("Timeout handshaking with " + ctx.channel().remoteAddress());
                 failHandshake(ctx);
@@ -244,8 +242,6 @@ public class InboundConnectionInitiator
 
         void initiate(ChannelHandlerContext ctx, ByteBuf in) throws IOException
         {
-            // TODO: is this buggy? do we need to accumulate the ByteBuf if we don't consume it?
-            //       what happens to any bytes we end up not decoding?
             initiate = HandshakeProtocol.Initiate.maybeDecode(in);
             if (initiate == null)
                 return;
