@@ -196,8 +196,8 @@ public class OutboundConnectionTest
         }
         finally
         {
-            waitOrFail(inbound.close(), 10L, SECONDS);
-            waitOrFail(outbound.close(false), 10L, SECONDS);
+            inbound.close().get(10L, SECONDS);
+            outbound.close(false).get(10L, MINUTES);
             resetVerbs();
             MessagingService.instance().messageHandlers.clear();
         }
@@ -441,7 +441,7 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < 1000 ; ++i)
                 outbound.enqueue(message);
 
-            waitOrFail(outbound.close(true), 10L, MINUTES);
+            outbound.close(true).get(10L, MINUTES);
         });
     }
 
@@ -454,15 +454,17 @@ public class OutboundConnectionTest
                 {
                     for (int i = 0; i < 5; i++)
                     {
-                        Message<?> message = Message.out(Verb._TEST_1, noPayload);
+                        Message<?> message = Message.builder(Verb._TEST_1, noPayload)
+                                                    .withExpiresAt(System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(50L))
+                                                    .build();
                         outbound.enqueue(message);
                         Assert.assertFalse(outbound.isConnected());
-                        Assert.assertEquals(outbound.queueSize(), 1);
+                        Assert.assertEquals(1, outbound.queueSize());
                         CompletableFuture.runAsync(() -> {
                             while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
                         }).get(10, SECONDS);
                         // Message should have been purged
-                        Assert.assertEquals(outbound.queueSize(), 0);
+                        Assert.assertEquals(0, outbound.queueSize());
                     }
                 }
                 catch (Throwable t)
@@ -479,12 +481,14 @@ public class OutboundConnectionTest
                 CountDownLatch latch = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
                 outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
-                Assert.assertEquals(outbound.queueSize(), 1);
+                Assert.assertEquals(1, outbound.queueSize());
                 latch.await(10, SECONDS);
+                Assert.assertEquals(0, latch.getCount());
+                Assert.assertEquals(0, outbound.queueSize());
             }
             finally
             {
-                waitOrFail(inbound.close(), 10, SECONDS);
+                inbound.close().get(10, SECONDS);
                 // Wait until disconnected
                 CompletableFuture.runAsync(() -> {
                     while (outbound.isConnected() && !Thread.interrupted()) {}
@@ -509,7 +513,7 @@ public class OutboundConnectionTest
                 Assert.assertEquals(latch.getCount(), 0);
 
                 // Simulate disconnect
-                waitOrFail(inbound.close(), 10, SECONDS);
+                inbound.close().get(10, SECONDS);
                 MessagingService.instance().removeInbound(endpoint);
                 inbound = new InboundConnections(new InboundConnectionSettings());
                 inbound.open();
@@ -523,8 +527,8 @@ public class OutboundConnectionTest
             }
             finally
             {
-                waitOrFail(inbound.close(), 10, SECONDS);
-                waitOrFail(outbound.close(false), 10, SECONDS);
+                inbound.close().get(10, SECONDS);
+                outbound.close(false).get(10, SECONDS);
             }
         });
     }
@@ -701,18 +705,6 @@ public class OutboundConnectionTest
         outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
         latch.await(10, SECONDS);
         Assert.assertTrue(outbound.isConnected());
-    }
-
-    private static void waitOrFail(Future<?> future, long timeout, TimeUnit unit) throws InterruptedException, TimeoutException, ExecutionException
-    {
-        future.await(timeout, unit);
-        Throwable cause = future.cause();
-        if (!future.isSuccess())
-        {
-            if (cause != null)
-                throw new ExecutionException(cause);
-            throw new TimeoutException();
-        }
     }
 
 }

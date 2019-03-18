@@ -369,13 +369,7 @@ public class OutboundConnection
      */
     private void onNotEmpty()
     {
-        if (isClosed()) // prevent infinite loop with requestConnect() throwing exception
-            return;
-
-        if (isConnected())
-            delivery.schedule();
-        else
-            requestConnect().addListener(future -> onNotEmpty());
+        delivery.schedule();
     }
 
     /**
