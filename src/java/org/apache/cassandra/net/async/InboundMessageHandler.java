@@ -389,17 +389,17 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         catch (UnknownTableException e)
         {
-            noSpamLogger.info("UnknownTableException caught while reading a small message from {}: {}", peer, e);
+            noSpamLogger.info("UnknownTableException caught while reading a small message from {}", peer, e);
             onError.call(e, messageSize);
         }
         catch (UnknownColumnException e)
         {
-            noSpamLogger.info("UnknownColumnException caught while reading a small message from {}: {}", peer, e);
+            noSpamLogger.info("UnknownColumnException caught while reading a small message from {}", peer, e);
             onError.call(e, messageSize);
         }
         catch (IOException e)
         {
-            logger.error("Unexpected IOException caught while reading a small message from " + peer, e);
+            logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
             onError.call(e, messageSize);
         }
         catch (Throwable t)
@@ -657,7 +657,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (cause instanceof Message.InvalidLegacyProtocolMagic)
             logger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} - closing the connection", peer);
         else
-            logger.error("Unexpected exception caught while processing inbound messages from " + peer + "; terminating connection", cause);
+            logger.error("Unexpected exception caught while processing inbound messages from {}; terminating connection", peer, cause);
 
         channel.close();
     }
@@ -773,18 +773,18 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             catch (UnknownTableException e)
             {
-                noSpamLogger.info("UnknownTableException caught while reading a large message from {}: {}", peer, e);
+                noSpamLogger.info("UnknownTableException caught while reading a large message from {}", peer, e);
                 onError.call(e, messageSize);
             }
             catch (UnknownColumnException e)
             {
-                noSpamLogger.info("UnknownColumnException caught while reading a large message from {}: {}", peer, e);
+                noSpamLogger.info("UnknownColumnException caught while reading a large message from {}", peer, e);
                 onError.call(e, messageSize);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.error("Unexpected exception caught while reading a large message from " + peer, t);
+                logger.error("Unexpected exception caught while reading a large message from {}", peer, t);
                 onError.call(t, messageSize);
             }
             finally
