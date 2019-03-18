@@ -565,7 +565,7 @@ public class Message<T>
             out.writeByte(MessageFlag.serialize(message.flags));
             serializeParams(message.parameters, out, version);
 
-            if (message.payload != null)
+            if (message.payload != null && message.payload != EmptyMessage.emptyMessage)
             {
                 int payloadSize = message.payloadSize(version);
                 out.writeUnsignedVInt(payloadSize);
@@ -688,7 +688,7 @@ public class Message<T>
 
             serializeParams(addFlagsToLegacyParams(message.parameters, message.flags), out, version);
 
-            if (message.payload != null)
+            if (message.payload != null && message.payload != EmptyMessage.emptyMessage)
             {
                 int payloadSize = message.payloadSize(version);
                 out.writeInt(payloadSize);
@@ -989,7 +989,7 @@ public class Message<T>
 
         private <T> int payloadSize(Message<T> message, int version)
         {
-            long payloadSize = message.payload != null
+            long payloadSize = message.payload != null && message.payload != EmptyMessage.emptyMessage
                              ? message.verb.serializer().serializedSize(message.payload, version)
                              : 0;
             return Ints.checkedCast(payloadSize);
