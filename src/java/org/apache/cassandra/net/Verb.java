@@ -206,11 +206,6 @@ public enum Verb
     public <T> IVersionedSerializer<T> serializer() { return (IVersionedSerializer<T>) serializer.get(); }
     public <T> IVerbHandler<T> handler() { return (IVerbHandler<T>) handler.get(); }
 
-    public boolean isLegacyCallback()
-    {
-        return this == INTERNAL_RSP || this == REQUEST_RSP;
-    }
-
     public long expiresAtNanos(long nowNanos)
     {
         return nowNanos + expiresAfterNanos();
