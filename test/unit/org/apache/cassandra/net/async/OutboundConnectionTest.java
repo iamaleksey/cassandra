@@ -55,6 +55,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
@@ -170,7 +171,7 @@ public class OutboundConnectionTest
         }
         finally
         {
-            inbound.close().await(1L, TimeUnit.SECONDS);
+            inbound.close().await(1L, SECONDS);
             outbound.close(false);
         }
     }
@@ -185,7 +186,7 @@ public class OutboundConnectionTest
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            received.await(10L, TimeUnit.SECONDS);
+            received.await(10L, SECONDS);
             Assert.assertEquals(10, outbound.getSubmitted());
             Assert.assertEquals(0, outbound.getPending());
             Assert.assertEquals(10, outbound.getSent());
@@ -226,7 +227,7 @@ public class OutboundConnectionTest
             Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            received.await(10L, TimeUnit.SECONDS);
+            received.await(10L, SECONDS);
             Assert.assertEquals(10, outbound.getSubmitted());
             Assert.assertEquals(0, outbound.getPending());
             Assert.assertEquals(10, outbound.getSent());
@@ -290,7 +291,7 @@ public class OutboundConnectionTest
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> delivered.incrementAndGet());
             outbound.enqueue(message);
-            done.await(10L, TimeUnit.SECONDS);
+            done.await(10L, SECONDS);
             Assert.assertEquals(0, delivered.get());
             Assert.assertEquals(1, outbound.getSubmitted());
             Assert.assertEquals(0, outbound.getPending());
@@ -312,7 +313,9 @@ public class OutboundConnectionTest
             int count = 100;
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
-            Message<?> message = Message.out(Verb._TEST_1, emptyMessage);
+            Message<?> message = Message.builder(Verb._TEST_1, emptyMessage)
+                                        .withExpirationTime(System.nanoTime() + SECONDS.toNanos(30L))
+                                        .build();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object o, DataOutputPlus out, int version) throws IOException
@@ -345,7 +348,7 @@ public class OutboundConnectionTest
             unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            done.await(30L, TimeUnit.SECONDS);
+            done.await(30L, SECONDS);
             Assert.assertEquals(100, outbound.getSubmitted());
             Assert.assertEquals(0, outbound.getPending());
             Assert.assertEquals(90, outbound.getSent());
@@ -429,7 +432,7 @@ public class OutboundConnectionTest
                     Assert.assertEquals(outbound.queueSize(), 1);
                     CompletableFuture.runAsync(() -> {
                         while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
-                    }).get(10, TimeUnit.SECONDS);
+                    }).get(10, SECONDS);
                     // Message should have been purged
                     Assert.assertEquals(outbound.queueSize(), 0);
                 }
@@ -449,15 +452,15 @@ public class OutboundConnectionTest
             unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
             outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
             Assert.assertEquals(outbound.queueSize(), 1);
-            latch.await(10, TimeUnit.SECONDS);
+            latch.await(10, SECONDS);
         }
         finally
         {
-            inbound.close().await(10, TimeUnit.SECONDS);
+            inbound.close().await(10, SECONDS);
             // Wait until disconnected
             CompletableFuture.runAsync(() -> {
                 while (outbound.isConnected() && !Thread.interrupted()) {}
-            }).get(10, TimeUnit.SECONDS);
+            }).get(10, SECONDS);
         }
 
         testWhileDisconnected.run();
@@ -487,11 +490,11 @@ public class OutboundConnectionTest
             CountDownLatch latch = new CountDownLatch(1);
             unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
             outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
-            latch.await(10, TimeUnit.SECONDS);
+            latch.await(10, SECONDS);
             Assert.assertEquals(latch.getCount(), 0);
 
             // Simulate disconnect
-            inbound.close().await(10, TimeUnit.SECONDS);
+            inbound.close().await(10, SECONDS);
             MessagingService.instance().removeInbound(endpoint);
             inbound = new InboundConnections(new InboundConnectionSettings());
             inbound.open();
@@ -500,13 +503,13 @@ public class OutboundConnectionTest
             unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
             outbound.enqueue(Message.out(Verb._TEST_1, emptyMessage));
 
-            latch2.await(10, TimeUnit.SECONDS);
+            latch2.await(10, SECONDS);
             Assert.assertEquals(latch2.getCount(), 0);
         }
         finally
         {
-            inbound.close().await(10, TimeUnit.SECONDS);
-            outbound.close(false).await(10, TimeUnit.SECONDS);
+            inbound.close().await(10, SECONDS);
+            outbound.close(false).await(10, SECONDS);
         }
     }
 
@@ -544,7 +547,7 @@ public class OutboundConnectionTest
             for (int i = 0; i < 5; i++)
                 outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
 
-            latch.await(10, TimeUnit.SECONDS);
+            latch.await(10, SECONDS);
             Assert.assertEquals(latch.getCount(), 0);
             Assert.assertEquals(counter.get(), 6);
         });
@@ -581,7 +584,7 @@ public class OutboundConnectionTest
                 outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
             CompletableFuture.runAsync(() -> {
                 while (outbound.isConnected() && !Thread.interrupted()) {}
-            }).get(10, TimeUnit.SECONDS);
+            }).get(10, SECONDS);
             Assert.assertFalse(outbound.isConnected());
             Assert.assertEquals(inbound.errorCount(), 1);
 
@@ -623,7 +626,7 @@ public class OutboundConnectionTest
             outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
             CompletableFuture.runAsync(() -> {
                 while (outbound.isConnected() && !Thread.interrupted()) {}
-            }).get(10, TimeUnit.SECONDS);
+            }).get(10, SECONDS);
             Assert.assertFalse(outbound.isConnected());
             // TODO: count corruptions
 
@@ -636,7 +639,7 @@ public class OutboundConnectionTest
         CountDownLatch latch = new CountDownLatch(1);
         unsafeSetHandler(Verb._TEST_1, () -> message -> latch.countDown());
         outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
-        latch.await(10, TimeUnit.SECONDS);
+        latch.await(10, SECONDS);
         Assert.assertTrue(outbound.isConnected());
     }
 
