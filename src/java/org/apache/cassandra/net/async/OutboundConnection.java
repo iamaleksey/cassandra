@@ -1267,29 +1267,29 @@ public class OutboundConnection
         return id();
     }
 
-    public int getPending()
+    public int pending()
     {
         return queue.size();
     }
 
-    public long getPendingBytes()
+    public long pendingBytes()
     {
         return queueSizeInBytes;
     }
 
-    public long getSent()
+    public long sent()
     {
         // not volatile, but shouldn't matter
         return sent;
     }
 
-    public long getSentBytes()
+    public long sentBytes()
     {
         // not volatile, but shouldn't matter
         return sentBytes;
     }
 
-    public long getSubmitted()
+    public long submitted()
     {
         // not volatile, but shouldn't matter
         return submitted;
@@ -1421,6 +1421,18 @@ public class OutboundConnection
         this.closing.set(closed ? NettyFactory.instance.defaultGroup().next().newSucceededFuture(null) : null);
         this.isConnected = false;
         this.isClosed = true;
+    }
+
+    @VisibleForTesting
+    boolean unsafeAcquireCapacity(long amount)
+    {
+        return acquireCapacity(amount);
+    }
+
+    @VisibleForTesting
+    void unsafeReleaseCapacity(long amount)
+    {
+        releaseCapacity(amount);
     }
 
 }

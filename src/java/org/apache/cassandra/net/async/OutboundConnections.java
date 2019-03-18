@@ -217,9 +217,9 @@ public class OutboundConnections
             for (OutboundConnections connections : messagingService.channelManagers.values())
             {
                 Counts cur = new Counts(
-                    connections.small.getSubmitted(),
-                    connections.large.getSubmitted(),
-                    connections.urgent.getSubmitted()
+                    connections.small.submitted(),
+                    connections.large.submitted(),
+                    connections.urgent.submitted()
                 );
                 curEndpointToCounts.put(connections.template.endpoint, cur);
 

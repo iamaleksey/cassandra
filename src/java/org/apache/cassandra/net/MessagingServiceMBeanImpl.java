@@ -51,7 +51,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(false), entry.getValue().large.getPending());
+            pendingTasks.put(entry.getKey().toString(false), entry.getValue().large.pending());
         return pendingTasks;
     }
 
@@ -60,7 +60,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(false), entry.getValue().large.getSent());
+            completedTasks.put(entry.getKey().toString(false), entry.getValue().large.sent());
         return completedTasks;
     }
 
@@ -78,7 +78,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(false), entry.getValue().small.getPending());
+            pendingTasks.put(entry.getKey().toString(false), entry.getValue().small.pending());
         return pendingTasks;
     }
 
@@ -87,7 +87,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(false), entry.getValue().small.getSent());
+            completedTasks.put(entry.getKey().toString(false), entry.getValue().small.sent());
         return completedTasks;
     }
 
@@ -105,7 +105,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(false), entry.getValue().urgent.getPending());
+            pendingTasks.put(entry.getKey().toString(false), entry.getValue().urgent.pending());
         return pendingTasks;
     }
 
@@ -114,7 +114,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(false), entry.getValue().urgent.getSent());
+            completedTasks.put(entry.getKey().toString(false), entry.getValue().urgent.sent());
         return completedTasks;
     }
 
@@ -132,7 +132,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(), entry.getValue().large.getPending());
+            pendingTasks.put(entry.getKey().toString(), entry.getValue().large.pending());
         return pendingTasks;
     }
 
@@ -141,7 +141,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(), entry.getValue().large.getSent());
+            completedTasks.put(entry.getKey().toString(), entry.getValue().large.sent());
         return completedTasks;
     }
 
@@ -159,7 +159,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(), entry.getValue().small.getPending());
+            pendingTasks.put(entry.getKey().toString(), entry.getValue().small.pending());
         return pendingTasks;
     }
 
@@ -168,7 +168,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(), entry.getValue().small.getSent());
+            completedTasks.put(entry.getKey().toString(), entry.getValue().small.sent());
         return completedTasks;
     }
 
@@ -186,7 +186,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Integer> pendingTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            pendingTasks.put(entry.getKey().toString(), entry.getValue().urgent.getPending());
+            pendingTasks.put(entry.getKey().toString(), entry.getValue().urgent.pending());
         return pendingTasks;
     }
 
@@ -195,7 +195,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         Map<String, Long> completedTasks = new HashMap<>(channelManagers.size());
         for (Map.Entry<InetAddressAndPort, OutboundConnections> entry : channelManagers.entrySet())
-            completedTasks.put(entry.getKey().toString(), entry.getValue().urgent.getSent());
+            completedTasks.put(entry.getKey().toString(), entry.getValue().urgent.sent());
         return completedTasks;
     }
 

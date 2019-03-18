@@ -190,10 +190,10 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
-            Assert.assertEquals(10, outbound.getSubmitted());
-            Assert.assertEquals(0, outbound.getPending());
-            Assert.assertEquals(10, outbound.getSent());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.getSentBytes());
+            Assert.assertEquals(10, outbound.submitted());
+            Assert.assertEquals(0, outbound.pending());
+            Assert.assertEquals(10, outbound.sent());
+            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToError());
@@ -231,10 +231,10 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
-            Assert.assertEquals(10, outbound.getSubmitted());
-            Assert.assertEquals(0, outbound.getPending());
-            Assert.assertEquals(10, outbound.getSent());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.getSentBytes());
+            Assert.assertEquals(10, outbound.submitted());
+            Assert.assertEquals(0, outbound.pending());
+            Assert.assertEquals(10, outbound.sent());
+            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToError());
@@ -296,10 +296,10 @@ public class OutboundConnectionTest
             outbound.enqueue(message);
             done.await(10L, SECONDS);
             Assert.assertEquals(0, delivered.get());
-            Assert.assertEquals(1, outbound.getSubmitted());
-            Assert.assertEquals(0, outbound.getPending());
-            Assert.assertEquals(0, outbound.getSent());
-            Assert.assertEquals(0, outbound.getSentBytes());
+            Assert.assertEquals(1, outbound.submitted());
+            Assert.assertEquals(0, outbound.pending());
+            Assert.assertEquals(0, outbound.sent());
+            Assert.assertEquals(0, outbound.sentBytes());
             Assert.assertEquals(1, outbound.droppedDueToOverload());
             Assert.assertEquals(message.serializedSize(current_version), outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToError());
@@ -352,10 +352,10 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             done.await(30L, SECONDS);
-            Assert.assertEquals(100, outbound.getSubmitted());
-            Assert.assertEquals(0, outbound.getPending());
-            Assert.assertEquals(90, outbound.getSent());
-            Assert.assertEquals(90 * message.serializedSize(current_version), outbound.getSentBytes());
+            Assert.assertEquals(100, outbound.submitted());
+            Assert.assertEquals(0, outbound.pending());
+            Assert.assertEquals(90, outbound.sent());
+            Assert.assertEquals(90 * message.serializedSize(current_version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(10, outbound.droppedDueToError());
@@ -393,10 +393,10 @@ public class OutboundConnectionTest
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
             deliveryDone.await(1L, TimeUnit.MINUTES);
             Assert.assertEquals(1, delivered.get());
-            Assert.assertEquals(11, outbound.getSubmitted());
-            Assert.assertEquals(0, outbound.getPending());
-            Assert.assertEquals(1, outbound.getSent());
-            Assert.assertEquals(sentSize, outbound.getSentBytes());
+            Assert.assertEquals(11, outbound.submitted());
+            Assert.assertEquals(0, outbound.pending());
+            Assert.assertEquals(1, outbound.sent());
+            Assert.assertEquals(sentSize, outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToError());
@@ -651,7 +651,7 @@ public class OutboundConnectionTest
                 executor.submit(() -> {
                     for (int j = 0; j < 10000; j++)
                     {
-                        if (outbound.acquireCapacity(acquireStep))
+                        if (outbound.unsafeAcquireCapacity(acquireStep))
                             acquisitions.incrementAndGet();
                         else
                             acquisitionFailures.incrementAndGet();
@@ -665,7 +665,7 @@ public class OutboundConnectionTest
                 executor.submit(() -> {
                     for (int j = 0; j < 10000; j++)
                     {
-                        outbound.releaseCapacity(acquireStep);
+                        outbound.unsafeReleaseCapacity(acquireStep);
                         releases.incrementAndGet();
                     }
 
@@ -677,7 +677,7 @@ public class OutboundConnectionTest
 
             // We can release more than we acquire, which certainly should not happen in
             // real life, but since it's a test just for acquisition and release, it is fine
-            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.getPendingBytes());
+            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.pendingBytes());
         });
     }
 
