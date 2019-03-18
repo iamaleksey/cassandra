@@ -387,14 +387,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             message = serializer.deserialize(new DataInputBuffer(buf, false), peer, version);
         }
-        catch (UnknownTableException e)
+        catch (UnknownTableException | UnknownColumnException e)
         {
-            noSpamLogger.info("UnknownTableException caught while reading a small message from {}", peer, e);
-            onError.call(e, messageSize);
-        }
-        catch (UnknownColumnException e)
-        {
-            noSpamLogger.info("UnknownColumnException caught while reading a small message from {}", peer, e);
+            noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
             onError.call(e, messageSize);
         }
         catch (IOException e)
@@ -771,14 +766,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                  */
                 onError.call(e, messageSize);
             }
-            catch (UnknownTableException e)
+            catch (UnknownTableException | UnknownColumnException e)
             {
-                noSpamLogger.info("UnknownTableException caught while reading a large message from {}", peer, e);
+                noSpamLogger.info("{} caught while reading a large message from {}", e.getClass().getSimpleName(), peer, e);
                 onError.call(e, messageSize);
             }
-            catch (UnknownColumnException e)
+            catch (IOException e)
             {
-                noSpamLogger.info("UnknownColumnException caught while reading a large message from {}", peer, e);
+                logger.error("Unexpected IOException caught while reading a large message from {}", peer, e);
                 onError.call(e, messageSize);
             }
             catch (Throwable t)
