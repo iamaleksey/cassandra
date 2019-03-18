@@ -24,6 +24,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.service.StorageProxy;
 
 public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
@@ -48,7 +49,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  () -> MessagingService.instance().sendResponse(WriteResponse.createResponse(message), message.from),
+                                                  () -> MessagingService.instance().sendResponse(Message.respond(message, NoPayload.noPayload), message.from),
                                                   queryStartNanoTime);
     }
 }

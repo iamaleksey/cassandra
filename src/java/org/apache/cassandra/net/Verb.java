@@ -42,7 +42,6 @@ import org.apache.cassandra.db.SnapshotCommand;
 import org.apache.cassandra.db.TruncateResponse;
 import org.apache.cassandra.db.TruncateVerbHandler;
 import org.apache.cassandra.db.Truncation;
-import org.apache.cassandra.db.WriteResponse;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.GossipDigestAck;
 import org.apache.cassandra.gms.GossipDigestAck2;
@@ -80,28 +79,28 @@ import static org.apache.cassandra.schema.MigrationManager.MigrationsSerializer;
 
 public enum Verb
 {
-    MUTATION_RSP         (60, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    MUTATION_RSP         (60, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     MUTATION_REQ         (0,  P3, writeTimeout,    MUTATION,          () -> Mutation.serializer,             () -> MutationVerbHandler.instance,        MUTATION_RSP        ),
     HINT_RSP             (61, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     HINT_REQ             (1,  P4, writeTimeout,    MUTATION,          () -> HintMessage.serializer,          () -> HintVerbHandler.instance,            HINT_RSP            ),
-    READ_REPAIR_RSP      (62, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    READ_REPAIR_RSP      (62, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     READ_REPAIR_REQ      (2,  P1, writeTimeout,    MUTATION,          () -> Mutation.serializer,             () -> ReadRepairVerbHandler.instance,      READ_REPAIR_RSP     ),
-    BATCH_STORE_RSP      (65, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    BATCH_STORE_RSP      (65, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     BATCH_STORE_REQ      (5,  P3, writeTimeout,    MUTATION,          () -> Batch.serializer,                () -> BatchStoreVerbHandler.instance,      BATCH_STORE_RSP     ),
-    BATCH_REMOVE_RSP     (66, P1, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    BATCH_REMOVE_RSP     (66, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     BATCH_REMOVE_REQ     (6,  P3, writeTimeout,    MUTATION,          () -> UUIDSerializer.serializer,       () -> BatchRemoveVerbHandler.instance,     BATCH_REMOVE_RSP    ),
 
     PAXOS_PREPARE_RSP    (93, P2, writeTimeout,    REQUEST_RESPONSE,  () -> PrepareResponse.serializer,      () -> ResponseVerbHandler.instance                             ),
     PAXOS_PREPARE_REQ    (33, P2, writeTimeout,    MUTATION,          () -> Commit.serializer,               () -> PrepareVerbHandler.instance,         PAXOS_PREPARE_RSP   ),
     PAXOS_PROPOSE_RSP    (94, P2, writeTimeout,    REQUEST_RESPONSE,  () -> BooleanSerializer.serializer,    () -> ResponseVerbHandler.instance                             ),
     PAXOS_PROPOSE_REQ    (34, P2, writeTimeout,    MUTATION,          () -> Commit.serializer,               () -> ProposeVerbHandler.instance,         PAXOS_PROPOSE_RSP   ),
-    PAXOS_COMMIT_RSP     (95, P2, writeTimeout,    REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    PAXOS_COMMIT_RSP     (95, P2, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     PAXOS_COMMIT_REQ     (35, P2, writeTimeout,    MUTATION,          () -> Commit.serializer,               () -> CommitVerbHandler.instance,          PAXOS_COMMIT_RSP    ),
 
     TRUNCATE_RSP         (79, P0, truncateTimeout, REQUEST_RESPONSE,  () -> TruncateResponse.serializer,     () -> ResponseVerbHandler.instance                             ),
     TRUNCATE_REQ         (19, P0, truncateTimeout, MUTATION,          () -> Truncation.serializer,           () -> TruncateVerbHandler.instance,        TRUNCATE_RSP        ),
 
-    COUNTER_MUTATION_RSP (84, P1, counterTimeout,  REQUEST_RESPONSE,  () -> WriteResponse.serializer,        () -> ResponseVerbHandler.instance                             ),
+    COUNTER_MUTATION_RSP (84, P1, counterTimeout,  REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     COUNTER_MUTATION_REQ (24, P2, counterTimeout,  COUNTER_MUTATION,  () -> CounterMutation.serializer,      () -> CounterMutationVerbHandler.instance, COUNTER_MUTATION_RSP),
 
     READ_RSP             (63, P2, readTimeout,     REQUEST_RESPONSE,  () -> ReadResponse.serializer,         () -> ResponseVerbHandler.instance                             ),
@@ -134,6 +133,7 @@ public enum Verb
     SNAPSHOT_RSP         (87, P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     SNAPSHOT_REQ         (27, P0, rpcTimeout,      MISC,              () -> SnapshotCommand.serializer,      () -> SnapshotVerbHandler.instance,        SNAPSHOT_RSP        ),
 
+    // generic failure response
     FAILURE_RSP          (99, P0, noTimeout,       REQUEST_RESPONSE,  () -> RequestFailureReason.serializer, () -> ResponseVerbHandler.instance                             ),
 
     // dummy verbs

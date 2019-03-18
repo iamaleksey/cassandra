@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 
 public class ReadRepairVerbHandler implements IVerbHandler<Mutation>
 {
@@ -28,6 +29,6 @@ public class ReadRepairVerbHandler implements IVerbHandler<Mutation>
     public void doVerb(Message<Mutation> message)
     {
         message.payload.apply();
-        MessagingService.instance().sendResponse(WriteResponse.createResponse(message), message.from);
+        MessagingService.instance().sendResponse(Message.respond(message, NoPayload.noPayload), message.from);
     }
 }

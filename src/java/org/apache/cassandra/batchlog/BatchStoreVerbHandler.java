@@ -17,10 +17,10 @@
  */
 package org.apache.cassandra.batchlog;
 
-import org.apache.cassandra.db.WriteResponse;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 
 public final class BatchStoreVerbHandler implements IVerbHandler<Batch>
 {
@@ -29,6 +29,6 @@ public final class BatchStoreVerbHandler implements IVerbHandler<Batch>
     public void doVerb(Message<Batch> message)
     {
         BatchlogManager.store(message.payload);
-        MessagingService.instance().sendResponse(WriteResponse.createResponse(message), message.from);
+        MessagingService.instance().sendResponse(Message.respond(message, NoPayload.noPayload), message.from);
     }
 }
