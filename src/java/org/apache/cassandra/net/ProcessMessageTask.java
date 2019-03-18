@@ -99,8 +99,7 @@ public class ProcessMessageTask implements Runnable
         if (message.callBackOnFailure())
         {
             RequestFailureReason reason = RequestFailureReason.forException(t);
-            Message response = Message.respondWithFailure(message, reason);
-            MessagingService.instance().sendResponse(response, message.from);
+            MessagingService.instance().sendResponse(message.failureResponse(reason), message.from);
         }
     }
 }

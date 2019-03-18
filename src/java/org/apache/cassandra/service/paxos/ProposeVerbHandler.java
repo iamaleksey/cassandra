@@ -19,12 +19,9 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
-
-
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
 
 public class ProposeVerbHandler implements IVerbHandler<Commit>
 {
@@ -37,7 +34,7 @@ public class ProposeVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
-        Message<Boolean> reply = Message.respond(message, doPropose(message.payload));
+        Message<Boolean> reply = message.responseWith(doPropose(message.payload));
         MessagingService.instance().sendResponse(reply, message.from);
     }
 }

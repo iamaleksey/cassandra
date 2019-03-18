@@ -26,25 +26,22 @@ import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.NoPayload;
 
 /**
  * Sends it's current schema state in form of mutations in respond to the remote node's request.
  * Such a request is made when one of the nodes, by means of Gossip, detects schema disagreement in the ring.
  */
-public final class SchemaPullVerbHandler implements IVerbHandler
+public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
 {
     public static final SchemaPullVerbHandler instance = new SchemaPullVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(SchemaPullVerbHandler.class);
 
-    public void doVerb(Message message)
+    public void doVerb(Message<NoPayload> message)
     {
         logger.trace("Received schema pull request from {}", message.from);
-
-        Message<Collection<Mutation>> response =
-            Message.respond(message, SchemaKeyspace.convertSchemaToMutations());
-
+        Message<Collection<Mutation>> response = message.responseWith(SchemaKeyspace.convertSchemaToMutations());
         MessagingService.instance().sendResponse(response, message.from);
     }
 }

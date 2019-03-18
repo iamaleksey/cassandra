@@ -183,7 +183,7 @@ public class HintsServiceTest
     private MockMessagingSpy sendHintsAndResponses(int noOfHints, int noOfResponses)
     {
         // create spy for hint messages, but only create responses for noOfResponses hints
-        Message<NoPayload> message = Message.respondInternal(HINT_RSP, NoPayload.noPayload);
+        Message<NoPayload> message = Message.internalResponse(HINT_RSP, NoPayload.noPayload);
 
         MockMessagingSpy spy;
         if (noOfResponses != -1)

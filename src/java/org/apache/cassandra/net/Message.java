@@ -206,22 +206,6 @@ public class Message<T>
         return outWithParameter(verb, payload, null, null);
     }
 
-    public static <T> Message<T> respond(Message<?> respondTo, T payload)
-    {
-        return outWithParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, null, null);
-    }
-
-    public static Message<RequestFailureReason> respondWithFailure(Message<?> respondTo, RequestFailureReason reason)
-    {
-        return outWithParameter(respondTo.id, Verb.FAILURE_RSP, respondTo.expiresAtNanos, reason, null, null);
-    }
-
-    public static <T> Message<T> respondInternal(Verb verb, T payload)
-    {
-        assert verb.isResponse();
-        return outWithParameter(0, verb, 0, payload, null, null);
-    }
-
     public static <T> Message<T> outWithParameter(Verb verb, T payload, ParameterType parameterType, Object parameterValue)
     {
         assert !verb.isResponse();
@@ -239,6 +223,27 @@ public class Message<T>
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
         return new Message<>(from, payload, emptyFlags(), buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
+    }
+
+    public static <T> Message<T> internalResponse(Verb verb, T payload)
+    {
+        assert verb.isResponse();
+        return outWithParameter(0, verb, 0, payload, null, null);
+    }
+
+    public <T> Message<T> responseWith(T payload)
+    {
+        return outWithParameter(id, verb.responseVerb, expiresAtNanos, payload, null, null);
+    }
+
+    public Message<NoPayload> emptyResponse()
+    {
+        return responseWith(NoPayload.noPayload);
+    }
+
+    public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
+    {
+        return outWithParameter(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
     }
 
     public static <T> Builder<T> builder(Message<T> message)

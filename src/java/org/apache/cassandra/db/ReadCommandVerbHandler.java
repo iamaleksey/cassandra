@@ -27,7 +27,6 @@ import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.ParameterType;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -70,7 +69,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         }
 
         Tracing.trace("Enqueuing response to {}", message.from);
-        Message<ReadResponse> reply = Message.respond(message, response);
+        Message<ReadResponse> reply = message.responseWith(response);
         MessagingService.instance().sendResponse(reply, message.from);
     }
 

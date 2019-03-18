@@ -812,7 +812,7 @@ public class RepairJobTest
                 switch (rm.messageType)
                 {
                     case SNAPSHOT:
-                        Message<?> messageIn = Message.respond(message, noPayload);
+                        Message<?> messageIn = message.emptyResponse();
                         MessagingService.instance().process(messageIn, 0, InboundCallbacks.OnMessageProcessed.NOOP, InboundCallbacks.OnMessageExpired.NOOP);
                         break;
                     case VALIDATION_REQUEST:

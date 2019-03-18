@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.service.reads;
 
-import java.util.Collections;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -148,7 +147,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void response(ReadResponse result)
     {
         Verb kind = command.isRangeRequest() ? Verb.RANGE_RSP : Verb.READ_RSP;
-        Message<ReadResponse> message = Message.respondInternal(kind, result);
+        Message<ReadResponse> message = Message.internalResponse(kind, result);
         response(message);
     }
 

@@ -67,7 +67,6 @@ import org.apache.cassandra.net.*;
 import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.PrepareCallback;
-import org.apache.cassandra.service.paxos.PrepareResponse;
 import org.apache.cassandra.service.paxos.ProposeCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.tracing.Tracing;
@@ -450,8 +449,7 @@ public class StorageProxy implements StorageProxyMBean
                 StageManager.getStage(PAXOS_PREPARE_REQ.stage).execute(() -> {
                     try
                     {
-                        Message<PrepareResponse> response = Message.respond(message, doPrepare(toPrepare));
-                        callback.response(response);
+                        callback.response(message.responseWith(doPrepare(toPrepare)));
                     }
                     catch (Exception ex)
                     {
@@ -480,7 +478,7 @@ public class StorageProxy implements StorageProxyMBean
                 StageManager.getStage(PAXOS_PROPOSE_REQ.stage).execute(() -> {
                     try
                     {
-                        Message<Boolean> response = Message.respond(message, doPropose(proposal));
+                        Message<Boolean> response = message.responseWith(doPropose(proposal));
                         callback.response(response);
                     }
                     catch (Exception ex)

@@ -19,13 +19,9 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
-
-
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-
-import static org.apache.cassandra.net.Verb.PAXOS_PREPARE_RSP;
 
 public class PrepareVerbHandler implements IVerbHandler<Commit>
 {
@@ -38,7 +34,7 @@ public class PrepareVerbHandler implements IVerbHandler<Commit>
 
     public void doVerb(Message<Commit> message)
     {
-        Message<PrepareResponse> reply = Message.respond(message, doPrepare(message.payload));
+        Message<PrepareResponse> reply = message.responseWith(doPrepare(message.payload));
         MessagingService.instance().sendResponse(reply, message.from);
     }
 }

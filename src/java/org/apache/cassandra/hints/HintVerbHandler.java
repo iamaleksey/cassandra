@@ -101,6 +101,6 @@ public final class HintVerbHandler implements IVerbHandler<HintMessage>
 
     private static void respond(Message<HintMessage> respondTo)
     {
-        MessagingService.instance().sendResponse(Message.respond(respondTo, NoPayload.noPayload), respondTo.from);
+        MessagingService.instance().sendResponse(respondTo.emptyResponse(), respondTo.from);
     }
 }

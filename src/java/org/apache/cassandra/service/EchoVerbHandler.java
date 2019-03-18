@@ -35,8 +35,7 @@ public class EchoVerbHandler implements IVerbHandler<NoPayload>
 
     public void doVerb(Message<NoPayload> message)
     {
-        Message<NoPayload> echoMessage = Message.respond(message, NoPayload.noPayload);
         logger.trace("Sending ECHO_RSP to {}", message.from);
-        MessagingService.instance().sendResponse(echoMessage, message.from);
+        MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
     }
 }

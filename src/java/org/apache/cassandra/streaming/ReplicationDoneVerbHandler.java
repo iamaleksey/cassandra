@@ -25,8 +25,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 
-import static org.apache.cassandra.net.NoPayload.noPayload;
-
 public class ReplicationDoneVerbHandler implements IVerbHandler
 {
     public static ReplicationDoneVerbHandler instance = new ReplicationDoneVerbHandler();
@@ -36,9 +34,7 @@ public class ReplicationDoneVerbHandler implements IVerbHandler
     public void doVerb(Message msg)
     {
         StorageService.instance.confirmReplication(msg.from);
-        Message response = Message.respond(msg, noPayload);
-        if (logger.isDebugEnabled())
-            logger.debug("Replying to {}@{}", msg.id, msg.from);
-        MessagingService.instance().sendResponse(response, msg.from);
+        logger.debug("Replying to {}@{}", msg.id, msg.from);
+        MessagingService.instance().sendResponse(msg.emptyResponse(), msg.from);
     }
 }

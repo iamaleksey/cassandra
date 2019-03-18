@@ -31,7 +31,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
     {
         Tracing.trace("Enqueuing response to {}", respondToAddress);
-        MessagingService.instance().sendResponse(Message.respond(respondTo, NoPayload.noPayload), respondToAddress);
+        MessagingService.instance().sendResponse(respondTo.emptyResponse(), respondToAddress);
     }
 
     private void failed()
