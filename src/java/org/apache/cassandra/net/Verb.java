@@ -54,6 +54,7 @@ import org.apache.cassandra.gms.GossipShutdownVerbHandler;
 import org.apache.cassandra.hints.HintMessage;
 import org.apache.cassandra.hints.HintResponse;
 import org.apache.cassandra.hints.HintVerbHandler;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.repair.RepairMessageVerbHandler;
 import org.apache.cassandra.repair.messages.RepairMessage;
@@ -171,8 +172,8 @@ public enum Verb
      *
      * NOTE: we use a Supplier to avoid loading the dependent classes until necessary.
      */
-    private final Supplier<IVersionedSerializer<?>> serializer;
-    private final Supplier<IVerbHandler<?>> handler;
+    private final Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer;
+    private final Supplier<? extends IVerbHandler<?>> handler;
 
     public final Verb responseVerb;
 
@@ -184,12 +185,12 @@ public enum Verb
      * all correspond to client requests or something triggered by them; we don't want to
      * drop internal messages like bootstrap or repair notifications.
      */
-    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler)
+    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer, Supplier<? extends IVerbHandler<?>> handler)
     {
         this(id, priority, expiration, stage, serializer, handler, null);
     }
 
-    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler, Verb responseVerb)
+    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer, Supplier<? extends IVerbHandler<?>> handler, Verb responseVerb)
     {
         this.stage = stage;
         if (id < 0)
@@ -203,9 +204,9 @@ public enum Verb
         this.expiration = expiration;
     }
 
-    public <T> IVersionedSerializer<T> serializer()
+    public <In, Out> IVersionedAsymmetricSerializer<In, Out> serializer()
     {
-        return (IVersionedSerializer<T>) serializer.get();
+        return (IVersionedAsymmetricSerializer<In, Out>) serializer.get();
     }
 
     public <T> IVerbHandler<T> handler()
@@ -239,9 +240,9 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public Supplier<IVerbHandler<?>> unsafeSetHandler(Supplier<IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
+    public Supplier<? extends IVerbHandler<?>> unsafeSetHandler(Supplier<? extends IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
     {
-        Supplier<IVerbHandler<?>> original = this.handler;
+        Supplier<? extends IVerbHandler<?>> original = this.handler;
         Field field = Verb.class.getDeclaredField("handler");
         field.setAccessible(true);
         Field modifiers = Field.class.getDeclaredField("modifiers");
@@ -252,9 +253,9 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public Supplier<IVersionedSerializer<?>> unsafeSetSerializer(Supplier<IVersionedSerializer<?>> serializer) throws NoSuchFieldException, IllegalAccessException
+    public Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> unsafeSetSerializer(Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer) throws NoSuchFieldException, IllegalAccessException
     {
-        Supplier<IVersionedSerializer<?>> original = this.serializer;
+        Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> original = this.serializer;
         Field field = Verb.class.getDeclaredField("serializer");
         field.setAccessible(true);
         Field modifiers = Field.class.getDeclaredField("modifiers");

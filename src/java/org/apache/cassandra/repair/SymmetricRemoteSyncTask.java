@@ -28,6 +28,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
@@ -36,6 +37,8 @@ import org.apache.cassandra.streaming.SessionSummary;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
+
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * SymmetricRemoteSyncTask sends {@link SyncRequest} to remote(non-coordinator) node
@@ -54,7 +57,7 @@ public class SymmetricRemoteSyncTask extends SyncTask implements CompletableRemo
 
     void sendRequest(RepairMessage request, InetAddressAndPort to)
     {
-        MessagingService.instance().sendOneWay(request.createMessage(), to);
+        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, request), to);
     }
 
     @Override

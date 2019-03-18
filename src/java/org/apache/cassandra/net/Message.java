@@ -37,6 +37,7 @@ import com.google.common.primitives.Ints;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -711,7 +712,7 @@ public class Message<T>
             Map<ParameterType, Object> parameters = deserializeParams(in, version);
             Set<MessageFlag> flags = removeFlagsFromLegacyParams(parameters);
 
-            IVersionedSerializer<T> payloadSerializer = verb.serializer();
+            IVersionedAsymmetricSerializer<?, T> payloadSerializer = verb.serializer();
             if (null == payloadSerializer)
             {
                 CallbackInfo callback = instance().callbacks.get(messageId);
@@ -974,7 +975,7 @@ public class Message<T>
          * helpers
          */
 
-        private <T> T deserializePayload(DataInputPlus in, int version, IVersionedSerializer<T> serializer, int payloadSize) throws IOException
+        private <T> T deserializePayload(DataInputPlus in, int version, IVersionedAsymmetricSerializer<?, T> serializer, int payloadSize) throws IOException
         {
             if (payloadSize == 0 || serializer == null)
             {

@@ -94,12 +94,6 @@ public abstract class RepairMessage
         this.desc = desc;
     }
 
-    public Message<RepairMessage> createMessage()
-    {
-        return Message.out(REPAIR_REQ, this);
-    }
-
-
     public static class RepairMessageSerializer implements MessageSerializer<RepairMessage>
     {
         public void serialize(RepairMessage message, DataOutputPlus out, int version) throws IOException

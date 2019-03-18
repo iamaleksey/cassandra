@@ -24,7 +24,9 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.RepairException;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.messages.AsymmetricSyncRequest;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -32,6 +34,8 @@ import org.apache.cassandra.streaming.SessionSummary;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTrees;
+
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * AsymmetricRemoteSyncTask sends {@link AsymmetricSyncRequest} to target node to repair(stream)
@@ -52,7 +56,7 @@ public class AsymmetricRemoteSyncTask extends SyncTask implements CompletableRem
         AsymmetricSyncRequest request = new AsymmetricSyncRequest(desc, local, nodePair.coordinator, nodePair.peer, rangesToSync, previewKind);
         String message = String.format("Forwarding streaming repair of %d ranges to %s (to be streamed with %s)", request.ranges.size(), request.fetchingNode, request.fetchFrom);
         Tracing.traceRepair(message);
-        MessagingService.instance().sendOneWay(request.createMessage(), request.fetchingNode);
+        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, request), request.fetchingNode);
     }
 
     public void syncComplete(boolean success, List<SessionSummary> summaries)

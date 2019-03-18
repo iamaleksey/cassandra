@@ -67,6 +67,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
@@ -79,6 +80,7 @@ import static com.google.common.collect.Iterables.transform;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternal;
 import static org.apache.cassandra.cql3.QueryProcessor.executeInternalWithPaging;
+import static org.apache.cassandra.net.Verb.MUTATION_REQ;
 
 public class BatchlogManager implements BatchlogManagerMBean
 {
@@ -490,7 +492,7 @@ public class BatchlogManager implements BatchlogManagerMBean
             ReplicaPlan.ForTokenWrite replicaPlan = new ReplicaPlan.ForTokenWrite(keyspace, ConsistencyLevel.ONE,
                     liveRemoteOnly.pending(), liveRemoteOnly.all(), liveRemoteOnly.all(), liveRemoteOnly.all());
             ReplayWriteResponseHandler<Mutation> handler = new ReplayWriteResponseHandler<>(replicaPlan, System.nanoTime());
-            Message<Mutation> message = mutation.createMessage();
+            Message<Mutation> message = Message.out(MUTATION_REQ, mutation);
             for (Replica replica : liveRemoteOnly.all())
                 MessagingService.instance().sendWriteRR(message, replica, handler, false);
             return handler;

@@ -41,11 +41,6 @@ public class Truncation
         this.columnFamily = columnFamily;
     }
 
-    public Message<Truncation> createMessage()
-    {
-        return Message.out(Verb.TRUNCATE_REQ, this);
-    }
-
     public String toString()
     {
         return "Truncation(" + "keyspace='" + keyspace + '\'' + ", cf='" + columnFamily + "\')";

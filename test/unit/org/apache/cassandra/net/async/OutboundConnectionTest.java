@@ -49,6 +49,7 @@ import io.netty.channel.ChannelPromise;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -71,15 +72,15 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 
 public class OutboundConnectionTest
 {
-    private final Map<Verb, Supplier<IVersionedSerializer<?>>> serializers = new HashMap<>();
-    private final Map<Verb, Supplier<IVerbHandler<?>>> handlers = new HashMap<>();
+    private final Map<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> serializers = new HashMap<>();
+    private final Map<Verb, Supplier<? extends IVerbHandler<?>>> handlers = new HashMap<>();
 
-    private void unsafeSetSerializer(Verb verb, Supplier<IVersionedSerializer<?>> supplier) throws Throwable
+    private void unsafeSetSerializer(Verb verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> supplier) throws Throwable
     {
         serializers.putIfAbsent(verb, verb.unsafeSetSerializer(supplier));
     }
 
-    private void unsafeSetHandler(Verb verb, Supplier<IVerbHandler<?>> supplier) throws Throwable
+    private void unsafeSetHandler(Verb verb, Supplier<? extends IVerbHandler<?>> supplier) throws Throwable
     {
         handlers.putIfAbsent(verb, verb.unsafeSetHandler(supplier));
     }
@@ -87,9 +88,9 @@ public class OutboundConnectionTest
     @After
     public void resetVerbs() throws Throwable
     {
-        for (Map.Entry<Verb, Supplier<IVersionedSerializer<?>>> e : serializers.entrySet())
+        for (Map.Entry<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> e : serializers.entrySet())
             e.getKey().unsafeSetSerializer(e.getValue());
-        for (Map.Entry<Verb, Supplier<IVerbHandler<?>>> e : handlers.entrySet())
+        for (Map.Entry<Verb, Supplier<? extends IVerbHandler<?>>> e : handlers.entrySet())
             e.getKey().unsafeSetHandler(e.getValue());
     }
 

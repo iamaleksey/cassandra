@@ -212,16 +212,6 @@ public class Mutation implements IMutation
         apply(false);
     }
 
-    public Message<Mutation> createMessage()
-    {
-        return createMessage(Verb.MUTATION_REQ);
-    }
-
-    public Message<Mutation> createMessage(Verb verb)
-    {
-        return Message.out(verb, this);
-    }
-
     public long getTimeout(TimeUnit unit)
     {
         return DatabaseDescriptor.getWriteRpcTimeout(unit);

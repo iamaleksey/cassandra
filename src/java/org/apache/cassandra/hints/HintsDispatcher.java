@@ -37,10 +37,12 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
+import static org.apache.cassandra.net.Verb.HINT_REQ;
+
 /**
  * Dispatches a single hints file to a specified node in a batched manner.
  *
- * Uses either {@link EncodedHintMessage} - when dispatching hints into a node with the same messaging version as the hints file,
+ * Uses either {@link HintMessage.Encoded} - when dispatching hints into a node with the same messaging version as the hints file,
  * or {@link HintMessage}, when conversion is required.
  */
 final class HintsDispatcher implements AutoCloseable
@@ -187,8 +189,8 @@ final class HintsDispatcher implements AutoCloseable
     private Callback sendHint(Hint hint)
     {
         Callback callback = new Callback(hint.creationTime);
-        HintMessage message = new HintMessage(hostId, hint);
-        MessagingService.instance().sendRRWithFailure(message.createMessageOut(), address, callback);
+        Message<?> message = Message.out(HINT_REQ, new HintMessage(hostId, hint));
+        MessagingService.instance().sendRRWithFailure(message, address, callback);
         return callback;
     }
 
@@ -198,9 +200,9 @@ final class HintsDispatcher implements AutoCloseable
 
     private Callback sendEncodedHint(ByteBuffer hint)
     {
-        EncodedHintMessage message = new EncodedHintMessage(hostId, hint, messagingVersion);
+        HintMessage.Encoded message = new HintMessage.Encoded(hostId, hint, messagingVersion);
         Callback callback = new Callback(message.getHintCreationTime());
-        MessagingService.instance().sendRRWithFailure(message.createMessageOut(), address, callback);
+        MessagingService.instance().sendRRWithFailure(Message.out(HINT_REQ, message), address, callback);
         return callback;
     }
 
@@ -223,7 +225,7 @@ final class HintsDispatcher implements AutoCloseable
             boolean timedOut;
             try
             {
-                timedOut = !condition.awaitUntil(Verb.HINT_REQ.expiresAtNanos(start));
+                timedOut = !condition.awaitUntil(HINT_REQ.expiresAtNanos(start));
             }
             catch (InterruptedException e)
             {

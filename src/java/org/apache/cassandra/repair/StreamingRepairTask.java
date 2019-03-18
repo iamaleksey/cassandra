@@ -29,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SyncComplete;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -37,6 +38,8 @@ import org.apache.cassandra.streaming.StreamEventHandler;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.streaming.StreamOperation;
+
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * StreamingRepairTask performs data streaming between two remote replicas, neither of which is repair coordinator.
@@ -100,7 +103,7 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
     public void onSuccess(StreamState state)
     {
         logger.info("[repair #{}] streaming task succeed, returning response to {}", desc.sessionId, initiator);
-        MessagingService.instance().sendOneWay(new SyncComplete(desc, src, dst, true, state.createSummaries()).createMessage(), initiator);
+        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new SyncComplete(desc, src, dst, true, state.createSummaries())), initiator);
     }
 
     /**
@@ -108,6 +111,6 @@ public class StreamingRepairTask implements Runnable, StreamEventHandler
      */
     public void onFailure(Throwable t)
     {
-        MessagingService.instance().sendOneWay(new SyncComplete(desc, src, dst, false, Collections.emptyList()).createMessage(), initiator);
+        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new SyncComplete(desc, src, dst, false, Collections.emptyList())), initiator);
     }
 }

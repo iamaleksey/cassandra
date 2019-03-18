@@ -33,6 +33,7 @@ import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
 
 import static org.apache.cassandra.net.NoPayload.noPayload;
+import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
  * Handles all repair related message.
@@ -122,7 +123,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     if (store == null)
                     {
                         logger.error("Table {}.{} was dropped during snapshot phase of repair", desc.keyspace, desc.columnFamily);
-                        MessagingService.instance().sendOneWay(new ValidationComplete(desc).createMessage(), message.from);
+                        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc)), message.from);
                         return;
                     }
 

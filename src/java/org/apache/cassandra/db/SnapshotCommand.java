@@ -42,11 +42,6 @@ public class SnapshotCommand
         this.clear_snapshot = clearSnapshot;
     }
 
-    public Message createMessage()
-    {
-        return Message.out(Verb.SNAPSHOT_REQ, this);
-    }
-
     @Override
     public String toString()
     {
