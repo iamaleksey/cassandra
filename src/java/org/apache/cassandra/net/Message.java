@@ -162,7 +162,7 @@ public class Message<T>
         {
             this.verb = verb;
             if (expiresAtNanos == 0 && verb != null && createdAtNanos != 0)
-                expiresAtNanos = verb.expirationTimeNanos(createdAtNanos);
+                expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
             if (!this.verb.isResponse() && from == null) // default to sending from self if we're a request verb
                 from = FBUtilities.getBroadcastAddressAndPort();
             return this;
@@ -172,7 +172,7 @@ public class Message<T>
         {
             this.createdAtNanos = createdAtNanos;
             if (expiresAtNanos == 0 && verb != null)
-                expiresAtNanos = verb.expirationTimeNanos(createdAtNanos);
+                expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
             return this;
         }
 
@@ -251,7 +251,7 @@ public class Message<T>
         InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
         long createdAtNanos = ApproximateTime.nanoTime();
         if (expiresAtNanos == 0)
-            expiresAtNanos = verb.expirationTimeNanos(createdAtNanos);
+            expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
         return new Message<>(from, payload, flags, buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
     }
@@ -721,7 +721,7 @@ public class Message<T>
             int payloadSize = in.readInt();
             T payload = deserializePayload(in, version, payloadSerializer, payloadSize);
 
-            return new Message<>(from, payload, flags, parameters, verb, creationTimeNanos, verb.expirationTimeNanos(creationTimeNanos), messageId);
+            return new Message<>(from, payload, flags, parameters, verb, creationTimeNanos, verb.expiresAtNanos(creationTimeNanos), messageId);
         }
 
         private <T> int serializedSizePre40(Message<T> message, int version)
@@ -786,7 +786,7 @@ public class Message<T>
 
         private long getExpiresAtNanosPre40(ByteBuffer buf, long createdAtNanos)
         {
-            return getVerbPre40(buf).expirationTimeNanos(createdAtNanos);
+            return getVerbPre40(buf).expiresAtNanos(createdAtNanos);
         }
 
         private Verb getVerbPre40(ByteBuffer buf)

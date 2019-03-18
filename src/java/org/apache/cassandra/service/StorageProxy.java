@@ -81,9 +81,7 @@ import static org.apache.cassandra.net.EmptyMessage.emptyMessage;
 import static org.apache.cassandra.net.Verb.BATCH_STORE_REQ;
 import static org.apache.cassandra.net.Verb.PAXOS_COMMIT_REQ;
 import static org.apache.cassandra.net.Verb.PAXOS_PREPARE_REQ;
-import static org.apache.cassandra.net.Verb.PAXOS_PREPARE_RSP;
 import static org.apache.cassandra.net.Verb.PAXOS_PROPOSE_REQ;
-import static org.apache.cassandra.net.Verb.PAXOS_PROPOSE_RSP;
 import static org.apache.cassandra.service.BatchlogResponseHandler.BatchlogCleanup;
 import static org.apache.cassandra.service.paxos.PrepareVerbHandler.doPrepare;
 import static org.apache.cassandra.service.paxos.ProposeVerbHandler.doPropose;
@@ -1768,8 +1766,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             try
             {
-                long timeoutNanos = verb.expirationTimeNanos(constructionTimeNanos);
-                command.setMonitoringTime(constructionTimeNanos, false, timeoutNanos, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
+                command.setMonitoringTime(constructionTimeNanos, false, verb.expiresAfterNanos(), DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController();
@@ -2444,7 +2441,7 @@ public class StorageProxy implements StorageProxyMBean
         public final void run()
         {
             long nowNanos = ApproximateTime.nanoTime();
-            long expirationTimeNanos = verb.expirationTimeNanos(constructionTimeNanos);
+            long expirationTimeNanos = verb.expiresAtNanos(constructionTimeNanos);
             if (nowNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = nowNanos - constructionTimeNanos;
@@ -2483,7 +2480,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             final Verb verb = verb();
             long nowNanos = ApproximateTime.nanoTime();
-            long expirationTimeNanos = verb.expirationTimeNanos(constructionTimeNanos);
+            long expirationTimeNanos = verb.expiresAtNanos(constructionTimeNanos);
             if (nowNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = nowNanos - constructionTimeNanos;

@@ -223,7 +223,7 @@ final class HintsDispatcher implements AutoCloseable
             boolean timedOut;
             try
             {
-                timedOut = !condition.awaitUntil(Verb.HINT_REQ.expirationTimeNanos(start));
+                timedOut = !condition.awaitUntil(Verb.HINT_REQ.expiresAtNanos(start));
             }
             catch (InterruptedException e)
             {

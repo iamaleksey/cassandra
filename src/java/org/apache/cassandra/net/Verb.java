@@ -20,7 +20,6 @@ package org.apache.cassandra.net;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.concurrent.TimeUnit;
-import java.util.function.LongUnaryOperator;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
@@ -178,7 +177,7 @@ public enum Verb
 
     public final Verb responseVerb;
 
-    final LongUnaryOperator expiration;
+    private final ToLongFunction<TimeUnit> expiration;
 
 
     /**
@@ -186,12 +185,12 @@ public enum Verb
      * all correspond to client requests or something triggered by them; we don't want to
      * drop internal messages like bootstrap or repair notifications.
      */
-    Verb(int id, Priority priority, LongUnaryOperator expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler)
+    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler)
     {
         this(id, priority, expiration, stage, serializer, handler, null);
     }
 
-    Verb(int id, Priority priority, LongUnaryOperator expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler, Verb responseVerb)
+    Verb(int id, Priority priority, ToLongFunction<TimeUnit> expiration, Stage stage, Supplier<IVersionedSerializer<?>> serializer, Supplier<IVerbHandler<?>> handler, Verb responseVerb)
     {
         this.stage = stage;
         if (id < 0)
@@ -213,9 +212,14 @@ public enum Verb
         return this == INTERNAL_RSP || this == REQUEST_RSP;
     }
 
-    public long expirationTimeNanos(long nowNanos)
+    public long expiresAtNanos(long nowNanos)
     {
-        return expiration.applyAsLong(nowNanos);
+        return nowNanos + expiresAfterNanos();
+    }
+
+    public long expiresAfterNanos()
+    {
+        return expiration.applyAsLong(NANOSECONDS);
     }
 
     // this is a little hacky, but reduces the number of parameters up top
@@ -290,16 +294,12 @@ public enum Verb
 
 class VerbTimeouts
 {
-    static LongUnaryOperator expiresAt(ToLongFunction<TimeUnit> timeout)
-    {
-        return nowNanos -> nowNanos + timeout.applyAsLong(NANOSECONDS);
-    }
-    static final LongUnaryOperator rpcTimeout = expiresAt(DatabaseDescriptor::getRpcTimeout);
-    static final LongUnaryOperator writeTimeout = expiresAt(DatabaseDescriptor::getWriteRpcTimeout);
-    static final LongUnaryOperator readTimeout = expiresAt(DatabaseDescriptor::getReadRpcTimeout);
-    static final LongUnaryOperator rangeTimeout = expiresAt(DatabaseDescriptor::getRangeRpcTimeout);
-    static final LongUnaryOperator counterTimeout = expiresAt(DatabaseDescriptor::getCounterWriteRpcTimeout);
-    static final LongUnaryOperator truncateTimeout = expiresAt(DatabaseDescriptor::getTruncateRpcTimeout);
-    static final LongUnaryOperator pingTimeout = expiresAt(DatabaseDescriptor::getPingTimeout);
-    static final LongUnaryOperator longTimeout = expiresAt(units -> Math.max(DatabaseDescriptor.getRpcTimeout(units), units.convert(5L, TimeUnit.MINUTES)));
+    static final ToLongFunction<TimeUnit> rpcTimeout      = DatabaseDescriptor::getRpcTimeout;
+    static final ToLongFunction<TimeUnit> writeTimeout    = DatabaseDescriptor::getWriteRpcTimeout;
+    static final ToLongFunction<TimeUnit> readTimeout     = DatabaseDescriptor::getReadRpcTimeout;
+    static final ToLongFunction<TimeUnit> rangeTimeout    = DatabaseDescriptor::getRangeRpcTimeout;
+    static final ToLongFunction<TimeUnit> counterTimeout  = DatabaseDescriptor::getCounterWriteRpcTimeout;
+    static final ToLongFunction<TimeUnit> truncateTimeout = DatabaseDescriptor::getTruncateRpcTimeout;
+    static final ToLongFunction<TimeUnit> pingTimeout     = DatabaseDescriptor::getPingTimeout;
+    static final ToLongFunction<TimeUnit> longTimeout     = units -> Math.max(DatabaseDescriptor.getRpcTimeout(units), units.convert(5L, TimeUnit.MINUTES));
 }
