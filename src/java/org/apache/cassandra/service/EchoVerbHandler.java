@@ -19,24 +19,24 @@ package org.apache.cassandra.service;
  * under the License.
  *
  */
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class EchoVerbHandler implements IVerbHandler<EchoMessage>
+public class EchoVerbHandler implements IVerbHandler<NoPayload>
 {
     public static final EchoVerbHandler instance = new EchoVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(EchoVerbHandler.class);
 
-    public void doVerb(Message<EchoMessage> message)
+    public void doVerb(Message<NoPayload> message)
     {
-        Message<EchoMessage> echoMessage = Message.respond(message, EchoMessage.instance);
-        logger.trace("Sending a EchoMessage respond {}", message.from);
+        Message<NoPayload> echoMessage = Message.respond(message, NoPayload.noPayload);
+        logger.trace("Sending ECHO_RSP to {}", message.from);
         MessagingService.instance().sendResponse(echoMessage, message.from);
     }
 }

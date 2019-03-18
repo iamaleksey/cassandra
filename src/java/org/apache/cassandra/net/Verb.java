@@ -44,7 +44,6 @@ import org.apache.cassandra.db.TruncateVerbHandler;
 import org.apache.cassandra.db.Truncation;
 import org.apache.cassandra.db.WriteResponse;
 import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.gms.GossipDigestAck;
 import org.apache.cassandra.gms.GossipDigestAck2;
 import org.apache.cassandra.gms.GossipDigestAck2VerbHandler;
@@ -116,8 +115,8 @@ public enum Verb
     GOSSIP_DIGEST_ACK2   (16, P0, longTimeout,     GOSSIP,            () -> GossipDigestAck2.serializer,     () -> GossipDigestAck2VerbHandler.instance                     ),
     GOSSIP_SHUTDOWN      (29, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> GossipShutdownVerbHandler.instance                       ),
 
-    ECHO_RSP             (91, P0, rpcTimeout,      GOSSIP,            () -> EchoMessage.serializer,          () -> ResponseVerbHandler.instance                             ),
-    ECHO_REQ             (31, P0, rpcTimeout,      GOSSIP,            () -> EchoMessage.serializer,          () -> EchoVerbHandler.instance,            ECHO_RSP            ),
+    ECHO_RSP             (91, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
+    ECHO_REQ             (31, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> EchoVerbHandler.instance,            ECHO_RSP            ),
     PING_RSP             (97, P1, pingTimeout,     GOSSIP,            () -> PongMessage.serializer,          () -> ResponseVerbHandler.instance                             ),
     PING_REQ             (37, P1, pingTimeout,     GOSSIP,            () -> PingMessage.serializer,          () -> PingVerbHandler.instance,            PING_RSP            ),
 
@@ -140,7 +139,7 @@ public enum Verb
 
     // dummy verbs
     _TRACE               (30, P1, rpcTimeout,      TRACING,           () -> NoPayload.serializer,            () -> null                                                     ),
-    _SAMPLE              (42, P1, rpcTimeout,      INTERNAL_RESPONSE, () -> null,                            () -> null                                                     ),
+    _SAMPLE              (42, P1, rpcTimeout,      INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
     _TEST_1              (10, P0, writeTimeout,    INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
     _TEST_2              (11, P1, rpcTimeout,      INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
 

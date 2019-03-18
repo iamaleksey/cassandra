@@ -30,8 +30,7 @@ import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSA
 import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 
 /**
- * Conceptually the same as {@link org.apache.cassandra.gms.EchoMessage}, but indicates to the recipient which
- * {@link OutboundConnection.Type} should be used for the response.
+ * Indicates to the recipient which {@link OutboundConnection.Type} should be used for the response.
  */
 public class PingMessage
 {

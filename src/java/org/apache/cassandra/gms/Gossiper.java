@@ -37,6 +37,7 @@ import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.CassandraVersion;
 import org.apache.cassandra.utils.MBeanWrapper;
@@ -1075,8 +1076,8 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
     {
         localState.markDead();
 
-        Message<EchoMessage> echoMessage = Message.out(ECHO_REQ, EchoMessage.instance);
-        logger.trace("Sending a EchoMessage to {}", addr);
+        Message<NoPayload> echoMessage = Message.out(ECHO_REQ, noPayload);
+        logger.trace("Sending ECHO_REQ to {}", addr);
         IAsyncCallback echoHandler = new IAsyncCallback()
         {
             public boolean isLatencyForSnitch()

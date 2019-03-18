@@ -42,7 +42,6 @@ import com.codahale.metrics.Timer;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundConnections;
 import org.apache.cassandra.utils.ApproximateTime;
@@ -429,7 +428,7 @@ public class MessagingServiceTest
         InetAddressAndPort address = InetAddressAndPort.getByName("127.0.0.250");
 
         //Should return null
-        Message messageOut = Message.out(Verb.ECHO_REQ, EchoMessage.instance);
+        Message messageOut = Message.out(Verb.ECHO_REQ, NoPayload.noPayload);
         assertFalse(ms.isConnected(address, messageOut));
 
         //Should tolerate null

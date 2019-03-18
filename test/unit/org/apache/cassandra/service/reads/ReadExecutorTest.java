@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.junit.Before;
 import org.junit.BeforeClass;
@@ -40,6 +39,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.EndpointsForToken;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.KeyspaceParams;
 
@@ -211,7 +211,7 @@ public class ReadExecutorTest
         @Override
         public Message createMessage()
         {
-            return Message.out(Verb.ECHO_REQ, EchoMessage.instance);
+            return Message.out(Verb.ECHO_REQ, NoPayload.noPayload);
         }
 
     }

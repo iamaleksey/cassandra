@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net;
 
-import java.util.Collections;
 import java.util.concurrent.ExecutionException;
 
 import org.junit.Before;
@@ -26,7 +25,6 @@ import org.junit.Test;
 
 import org.apache.cassandra.SchemaLoader;
 import org.apache.cassandra.exceptions.ConfigurationException;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
 
@@ -57,7 +55,7 @@ public class MockMessagingServiceTest
     public void testRequestResponse() throws InterruptedException, ExecutionException
     {
         // echo message that we like to mock as incoming respond for outgoing echo message
-        Message<EchoMessage> echoMessage = Message.out(ECHO_REQ, EchoMessage.instance);
+        Message<NoPayload> echoMessage = Message.out(ECHO_REQ, NoPayload.noPayload);
         MockMessagingSpy spy = MockMessagingService
                 .when(
                         all(
@@ -67,7 +65,7 @@ public class MockMessagingServiceTest
                 )
                 .respond(echoMessage);
 
-        Message<EchoMessage> echoMessageOut = Message.out(ECHO_REQ, EchoMessage.instance);
+        Message<NoPayload> echoMessageOut = Message.out(ECHO_REQ, NoPayload.noPayload);
         MessagingService.instance().sendRR(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new IAsyncCallback()
         {
             public void response(Message msg)

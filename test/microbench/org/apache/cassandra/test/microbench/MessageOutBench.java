@@ -29,12 +29,12 @@ import com.google.common.net.InetAddresses;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParameterType;
 import org.apache.cassandra.utils.UUIDGen;
 import org.openjdk.jmh.annotations.Benchmark;
@@ -80,7 +80,7 @@ public class MessageOutBench
         }
 
         addr = InetAddressAndPort.getByAddress(InetAddresses.forString("127.0.73.101"));
-        msgOut = Message.builder(ECHO_REQ, EchoMessage.instance)
+        msgOut = Message.builder(ECHO_REQ, NoPayload.noPayload)
                         .from(addr)
                         .build();
         buf = Unpooled.buffer(1024, 1024); // 1k should be enough for everybody!
