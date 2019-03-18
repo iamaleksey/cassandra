@@ -370,7 +370,7 @@ public class Message<T>
      * Flags
      */
 
-    boolean doCallbackOnFailure()
+    boolean callBackOnFailure()
     {
         return flags.contains(MessageFlag.CALL_BACK_ON_FAILURE);
     }

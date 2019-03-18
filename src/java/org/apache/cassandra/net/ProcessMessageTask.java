@@ -99,7 +99,7 @@ public class ProcessMessageTask implements Runnable
 
     private void handleFailure(Throwable t)
     {
-        if (message.doCallbackOnFailure())
+        if (message.callBackOnFailure())
         {
             RequestFailureReason reason = RequestFailureReason.forException(t);
             Message response = Message.respondWithFlagAndParameter(message, emptyMessage, IS_FAILURE_RESPONSE, FAILURE_REASON, reason);
