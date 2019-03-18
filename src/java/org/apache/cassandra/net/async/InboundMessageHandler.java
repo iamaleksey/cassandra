@@ -38,6 +38,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.EventExecutorGroup;
+import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -389,6 +390,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         catch (UnknownTableException e)
         {
             noSpamLogger.info("UnknownTableException caught while reading a small message from {}: {}", peer, e);
+            onError.call(e, messageSize);
+        }
+        catch (UnknownColumnException e)
+        {
+            noSpamLogger.info("UnknownColumnException caught while reading a small message from {}: {}", peer, e);
             onError.call(e, messageSize);
         }
         catch (IOException e)
@@ -768,6 +774,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             catch (UnknownTableException e)
             {
                 noSpamLogger.info("UnknownTableException caught while reading a large message from {}: {}", peer, e);
+                onError.call(e, messageSize);
+            }
+            catch (UnknownColumnException e)
+            {
+                noSpamLogger.info("UnknownColumnException caught while reading a large message from {}: {}", peer, e);
                 onError.call(e, messageSize);
             }
             catch (Throwable t)

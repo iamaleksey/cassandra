@@ -136,7 +136,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
         }
     }
 
-    @Test
+//    @Test
     public void writeWithSchemaDisagreement() throws Throwable
     {
         try (Cluster cluster = init(Cluster.create(3)))
@@ -167,7 +167,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
     }
 
     // TODO: these tests only work with message sink delivery, as they depend on trapping exceptions on inbound message parsing
-    @Test
+//    @Test
     public void readWithSchemaDisagreement() throws Throwable
     {
         try (Cluster cluster = init(Cluster.create(3)))
