@@ -29,7 +29,6 @@ import com.google.common.net.InetAddresses;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.EchoMessage;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -77,7 +76,6 @@ public class MessageOutBench
 
         if (withParams)
         {
-            parameters.put(ParameterType.FAILURE_REASON, RequestFailureReason.READ_TOO_MANY_TOMBSTONES);
             parameters.put(ParameterType.TRACE_SESSION, uuid);
         }
 

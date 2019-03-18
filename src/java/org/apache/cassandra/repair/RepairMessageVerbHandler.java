@@ -23,6 +23,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
@@ -221,7 +222,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     private void logErrorAndSendFailureResponse(String errorMessage, Message<?> respondTo)
     {
         logger.error(errorMessage);
-        Message reply = Message.respondWithFlag(respondTo, noPayload, MessageFlag.IS_FAILURE_RESPONSE);
+        Message reply = Message.respondWithFailure(respondTo, RequestFailureReason.UNKNOWN);
         MessagingService.instance().sendResponse(reply, respondTo.from);
     }
 }

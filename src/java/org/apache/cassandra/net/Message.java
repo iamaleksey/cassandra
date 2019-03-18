@@ -50,6 +50,7 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.net.MessagingService.ONE_BYTE;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -207,37 +208,27 @@ public class Message<T>
 
     public static <T> Message<T> respond(Message<?> respondTo, T payload)
     {
-        return respondWithParameter(respondTo, payload, null, null);
+        return outWithParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, null, null);
+    }
+
+    public static Message<RequestFailureReason> respondWithFailure(Message<?> respondTo, RequestFailureReason reason)
+    {
+        return outWithParameter(respondTo.id, Verb.FAILURE_RSP, respondTo.expiresAtNanos, reason, null, null);
     }
 
     public static <T> Message<T> respondInternal(Verb verb, T payload)
     {
         assert verb.isResponse();
-        return outboundWithFlagsAndParameter(0, verb, 0, payload, emptyFlags(), null, null);
+        return outWithParameter(0, verb, 0, payload, null, null);
     }
 
     public static <T> Message<T> outWithParameter(Verb verb, T payload, ParameterType parameterType, Object parameterValue)
     {
         assert !verb.isResponse();
-        return outboundWithFlagsAndParameter(0, verb, 0, payload, emptyFlags(), parameterType, parameterValue);
+        return outWithParameter(0, verb, 0, payload, parameterType, parameterValue);
     }
 
-    public static <T> Message<T> respondWithFlag(Message<?> respondTo, T payload, MessageFlag flag)
-    {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, singletonFlag(flag), null, null);
-    }
-
-    public static <T> Message<T> respondWithParameter(Message<?> respondTo, T payload, ParameterType parameterType, Object parameterValue)
-    {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, emptyFlags(), parameterType, parameterValue);
-    }
-
-    public static <T> Message<T> respondWithFlagAndParameter(Message<?> respondTo, T payload, MessageFlag flag, ParameterType parameterType, Object parameterValue)
-    {
-        return outboundWithFlagsAndParameter(respondTo.id, respondTo.verb.responseVerb, respondTo.expiresAtNanos, payload, singletonFlag(flag), parameterType, parameterValue);
-    }
-
-    static <T> Message<T> outboundWithFlagsAndParameter(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParameterType parameterType, Object parameterValue)
+    static <T> Message<T> outWithParameter(long id, Verb verb, long expiresAtNanos, T payload, ParameterType parameterType, Object parameterValue)
     {
         if (payload == null)
             throw new IllegalArgumentException();
@@ -247,7 +238,7 @@ public class Message<T>
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
-        return new Message<>(from, payload, flags, buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
+        return new Message<>(from, payload, emptyFlags(), buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
     }
 
     public static <T> Builder<T> builder(Message<T> message)
@@ -350,6 +341,11 @@ public class Message<T>
         return !from.equals(FBUtilities.getBroadcastAddressAndPort());
     }
 
+    boolean isFailureResponse()
+    {
+        return verb == Verb.FAILURE_RSP;
+    }
+
     /*
      * Flags
      */
@@ -357,11 +353,6 @@ public class Message<T>
     boolean callBackOnFailure()
     {
         return containsFlag(flags, MessageFlag.CALL_BACK_ON_FAILURE);
-    }
-
-    boolean isFailureResponse()
-    {
-        return containsFlag(flags, MessageFlag.IS_FAILURE_RESPONSE);
     }
 
     public boolean trackRepairedData()
@@ -567,6 +558,7 @@ public class Message<T>
         private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
             out.writeUnsignedVInt(message.id);
+
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
             out.writeInt((int) ApproximateTime.toCurrentTimeMillis(message.createdAtNanos));
@@ -576,21 +568,15 @@ public class Message<T>
             out.writeUnsignedVInt(message.flags);
             serializeParams(message.parameters, out, version);
 
-            if (message.payload != null && message.payload != NoPayload.noPayload)
-            {
-                int payloadSize = message.payloadSize(version);
-                out.writeUnsignedVInt(payloadSize);
-                message.verb.serializer().serialize(message.payload, out, version);
-            }
-            else
-            {
-                out.writeUnsignedVInt(0);
-            }
+            int payloadSize = message.payloadSize(version);
+            out.writeUnsignedVInt(payloadSize);
+            message.verb.serializer().serialize(message.payload, out, version);
         }
 
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            long messageId = in.readUnsignedVInt();
+            long id = in.readUnsignedVInt();
+
             long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
             long expiresAtNanos = creationTimeNanos + TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt());
             Verb verb = Verb.fromId(Ints.checkedCast(in.readUnsignedVInt()));
@@ -598,10 +584,10 @@ public class Message<T>
             int flags = Ints.checkedCast(in.readUnsignedVInt());
             Map<ParameterType, Object> parameters = deserializeParams(in, version);
 
-            int payloadSize = Ints.checkedCast(VIntCoding.readUnsignedVInt(in));
-            T payload = deserializePayload(in, version, verb.serializer(), payloadSize);
+            VIntCoding.readUnsignedVInt(in); // payload size, not used here
+            T payload = (T) verb.serializer().deserialize(in, version); // TODO: any chance it breaks any serializer at 0 size?
 
-            return new Message<>(peer, payload, flags, parameters, verb, creationTimeNanos, expiresAtNanos, messageId);
+            return new Message<>(peer, payload, flags, parameters, verb, creationTimeNanos, expiresAtNanos, id);
         }
 
         private <T> int serializedSizePost40(Message<T> message, int version)
@@ -692,6 +678,9 @@ public class Message<T>
 
         private <T> void serializePre40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
+            if (message.isFailureResponse())
+                message = (Message<T>) toPre40FailureResponse((Message<RequestFailureReason>) message);
+
             out.writeInt(PROTOCOL_MAGIC);
             out.writeInt(Ints.checkedCast(message.id));
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
@@ -733,13 +722,32 @@ public class Message<T>
                     payloadSerializer = callback.verb.responseVerb.serializer();
             }
             int payloadSize = in.readInt();
-            T payload = deserializePayload(in, version, payloadSerializer, payloadSize);
+            T payload = deserializePayloadPre40(in, version, payloadSerializer, payloadSize);
 
-            return new Message<>(from, payload, flags, parameters, verb, creationTimeNanos, verb.expiresAtNanos(creationTimeNanos), messageId);
+            Message<T> message = new Message<>(from, payload, flags, parameters, verb, creationTimeNanos, verb.expiresAtNanos(creationTimeNanos), messageId);
+            return message.parameters.containsKey(ParameterType.FAILURE_RESPONSE)
+                 ? (Message<T>) toPost40FailureResponse(message)
+                 : message;
+        }
+
+        private <T> T deserializePayloadPre40(DataInputPlus in, int version, IVersionedAsymmetricSerializer<?, T> serializer, int payloadSize) throws IOException
+        {
+            if (payloadSize == 0 || serializer == null)
+            {
+                // if there's no deserializer for the verb, skip the payload bytes to leave
+                // the stream in a clean state (for the next message)
+                in.skipBytesFully(payloadSize);
+                return null;
+            }
+
+            return serializer.deserialize(in, version);
         }
 
         private <T> int serializedSizePre40(Message<T> message, int version)
         {
+            if (message.isFailureResponse())
+                message = (Message<T>) toPre40FailureResponse((Message<RequestFailureReason>) message);
+
             long size = 0;
 
             size += PRE_40_MESSAGE_PREFIX_SIZE;
@@ -811,6 +819,31 @@ public class Message<T>
             index += 4;                  // creation time
             index += 1 + buf.get(index); // from
             return Verb.fromId(buf.getInt(index));
+        }
+
+        private Message<?> toPre40FailureResponse(Message<RequestFailureReason> post40)
+        {
+            Map<ParameterType, Object> params = new EnumMap<>(ParameterType.class);
+            params.putAll(post40.parameters);
+
+            params.put(ParameterType.FAILURE_RESPONSE, ONE_BYTE);
+            params.put(ParameterType.FAILURE_REASON, post40.payload);
+
+            return new Message<>(post40.from, NoPayload.noPayload, emptyFlags(), params, post40.verb.toPre40Verb(), post40.createdAtNanos, post40.expiresAtNanos, post40.id);
+        }
+
+        private Message<RequestFailureReason> toPost40FailureResponse(Message<?> pre40)
+        {
+            Map<ParameterType, Object> params = new EnumMap<>(ParameterType.class);
+            params.putAll(pre40.parameters);
+
+            params.remove(ParameterType.FAILURE_RESPONSE);
+
+            RequestFailureReason reason = (RequestFailureReason) params.remove(ParameterType.FAILURE_REASON);
+            if (null == reason)
+                reason = RequestFailureReason.UNKNOWN;
+
+            return new Message<>(pre40.from, reason, pre40.flags, params, Verb.FAILURE_RSP, pre40.createdAtNanos, pre40.expiresAtNanos, pre40.id);
         }
 
         /*
@@ -988,19 +1021,6 @@ public class Message<T>
         /*
          * helpers
          */
-
-        private <T> T deserializePayload(DataInputPlus in, int version, IVersionedAsymmetricSerializer<?, T> serializer, int payloadSize) throws IOException
-        {
-            if (payloadSize == 0 || serializer == null)
-            {
-                // if there's no deserializer for the verb, skip the payload bytes to leave
-                // the stream in a clean state (for the next message)
-                in.skipBytesFully(payloadSize);
-                return null;
-            }
-
-            return serializer.deserialize(in, version);
-        }
 
         private <T> int payloadSize(Message<T> message, int version)
         {

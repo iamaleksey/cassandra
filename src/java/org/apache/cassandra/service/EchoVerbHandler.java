@@ -19,18 +19,13 @@ package org.apache.cassandra.service;
  * under the License.
  *
  */
-
-
 import org.apache.cassandra.gms.EchoMessage;
-import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import static org.apache.cassandra.net.NoPayload.noPayload;
 
 public class EchoVerbHandler implements IVerbHandler<EchoMessage>
 {
@@ -40,7 +35,7 @@ public class EchoVerbHandler implements IVerbHandler<EchoMessage>
 
     public void doVerb(Message<EchoMessage> message)
     {
-        Message<NoPayload> echoMessage = Message.respond(message, noPayload);
+        Message<EchoMessage> echoMessage = Message.respond(message, EchoMessage.instance);
         logger.trace("Sending a EchoMessage respond {}", message.from);
         MessagingService.instance().sendResponse(echoMessage, message.from);
     }

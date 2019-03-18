@@ -39,7 +39,8 @@ public enum ParameterType
     FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
 
     @Deprecated
-    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance, MessageFlag.IS_FAILURE_RESPONSE),
+    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance),
+    @Deprecated
     FAILURE_REASON      (3, "FAIL_REASON",   RequestFailureReason.serializer),
     @Deprecated
     FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance, MessageFlag.CALL_BACK_ON_FAILURE),

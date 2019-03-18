@@ -20,6 +20,7 @@ package org.apache.cassandra.net;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 
@@ -48,7 +49,7 @@ public class ResponseVerbHandler implements IVerbHandler
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, message.failureReason());
+            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, (RequestFailureReason) message.payload);
         }
         else
         {
