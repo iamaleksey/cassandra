@@ -19,6 +19,7 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
+import java.net.ConnectException;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -869,7 +870,10 @@ public class OutboundConnection
          */
         void onFailure(Throwable cause)
         {
-            noSpamLogger.error("{} failed to connect", id(), cause);
+            if (cause instanceof ConnectException)
+                noSpamLogger.info("{} failed to connect", id(), cause);
+            else
+                noSpamLogger.error("{} failed to connect", id(), cause);
 
             JVMStabilityInspector.inspectThrowable(cause);
             isFailingToConnect = true;
@@ -1391,7 +1395,6 @@ public class OutboundConnection
         return whileDisconnected;
     }
 
-
     @VisibleForTesting
     void unsafeRunOnDelivery(Runnable run)
     {
@@ -1402,6 +1405,12 @@ public class OutboundConnection
     void unsafeSetChannel(Channel channel)
     {
         this.channel = channel;
+    }
+
+    @VisibleForTesting
+    Channel unsafeGetChannel()
+    {
+        return channel;
     }
 
     @VisibleForTesting
