@@ -120,20 +120,20 @@ public enum Verb
     PING_RSP             (97, P1, pingTimeout,     GOSSIP,            () -> PongMessage.serializer,        () -> ResponseVerbHandler.instance                             ),
     PING_REQ             (37, P1, pingTimeout,     GOSSIP,            () -> PingMessage.serializer,        () -> PingVerbHandler.instance,            PING_RSP            ),
 
-    SCHEMA_PUSH_RSP      (98, P0, rpcTimeout,      MIGRATION,         () -> MigrationsSerializer.instance, () -> ResponseVerbHandler.instance                             ),
-    SCHEMA_PUSH_REQ      (18, P0, rpcTimeout,      MIGRATION,         () -> MigrationsSerializer.instance, () -> SchemaPushVerbHandler.instance,      SCHEMA_PUSH_RSP     ),
-    SCHEMA_PULL_RSP      (88, P0, rpcTimeout,      MIGRATION,         () -> MigrationsSerializer.instance, () -> ResponseVerbHandler.instance                             ),
-    SCHEMA_PULL_REQ      (28, P0, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,          () -> SchemaPullVerbHandler.instance,      SCHEMA_PULL_RSP     ),
+    // P1 because messages can be arbitrarily large
+    SCHEMA_PUSH_RSP      (98, P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,          () -> ResponseVerbHandler.instance                             ),
+    SCHEMA_PUSH_REQ      (18, P1, rpcTimeout,      MIGRATION,         () -> MigrationsSerializer.instance, () -> SchemaPushVerbHandler.instance,      SCHEMA_PUSH_RSP     ),
+    SCHEMA_PULL_RSP      (88, P1, rpcTimeout,      MIGRATION,         () -> MigrationsSerializer.instance, () -> ResponseVerbHandler.instance                             ),
+    SCHEMA_PULL_REQ      (28, P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,          () -> SchemaPullVerbHandler.instance,      SCHEMA_PULL_RSP     ),
     SCHEMA_VERSION_RSP   (80, P0, rpcTimeout,      MIGRATION,         () -> UUIDSerializer.serializer,     () -> ResponseVerbHandler.instance                             ),
     SCHEMA_VERSION_REQ   (20, P0, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,          () -> SchemaVersionVerbHandler.instance,   SCHEMA_VERSION_RSP  ),
+    REPAIR_RSP           (92, P1, rpcTimeout,      REQUEST_RESPONSE,  () -> NoPayload.serializer,          () -> ResponseVerbHandler.instance                             ),
+    REPAIR_REQ           (32, P1, rpcTimeout,      ANTI_ENTROPY,      () -> RepairMessage.serializer,      () -> RepairMessageVerbHandler.instance,   REPAIR_RSP          ),
 
     REPLICATION_DONE_RSP (82, P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,          () -> ResponseVerbHandler.instance                             ),
     REPLICATION_DONE_REQ (22, P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,          () -> ReplicationDoneVerbHandler.instance, REPLICATION_DONE_RSP),
     SNAPSHOT_RSP         (87, P0, rpcTimeout,      MISC,              () -> NoPayload.serializer,          () -> ResponseVerbHandler.instance                             ),
     SNAPSHOT_REQ         (27, P0, rpcTimeout,      MISC,              () -> SnapshotCommand.serializer,    () -> SnapshotVerbHandler.instance,        SNAPSHOT_RSP        ),
-
-    REPAIR_RSP           (92, P0, rpcTimeout,      REQUEST_RESPONSE,  () -> NoPayload.serializer,          () -> ResponseVerbHandler.instance                             ),
-    REPAIR_REQ           (32, P0, rpcTimeout,      ANTI_ENTROPY,      () -> RepairMessage.serializer,      () -> RepairMessageVerbHandler.instance,   REPAIR_RSP          ),
 
     // dummy verbs
     _TRACE               (30, P1, rpcTimeout,      TRACING,           () -> NoPayload.serializer,          () -> null                                                     ),
