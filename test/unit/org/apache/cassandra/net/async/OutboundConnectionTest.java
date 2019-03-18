@@ -677,7 +677,7 @@ public class OutboundConnectionTest
 
             // We can release more than we acquire, which certainly should not happen in
             // real life, but since it's a test just for acquisition and release, it is fine
-            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.queueSizeInBytes());
+            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.getPendingBytes());
         });
     }
 

@@ -246,7 +246,8 @@ public class OutboundConnection
      *
      * In the happy path, this is still efficient as we simply CAS
      */
-    private boolean acquireCapacity(long amount)
+    @VisibleForTesting
+    boolean acquireCapacity(long amount)
     {
         long unusedClaimedReserve = 0;
         boolean success = false;
@@ -294,7 +295,8 @@ public class OutboundConnection
     /**
      * Mark a number of pending bytes as flushed to the network, releasing their capacity for new outbound messages.
      */
-    private void releaseCapacity(long amount)
+    @VisibleForTesting
+    void releaseCapacity(long amount)
     {
         long prevQueueSize = queueSizeInBytesUpdater.getAndAdd(this, -amount);
         if (prevQueueSize > queueCapacityInBytes)
