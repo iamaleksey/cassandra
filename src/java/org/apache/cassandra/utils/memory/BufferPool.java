@@ -161,19 +161,30 @@ public class BufferPool
 
     public static void put(ByteBuffer buffer)
     {
+        put(buffer, true);
+    }
+
+    public static void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
+    {
         if (!(DISABLED || buffer.hasArray()))
-            localPool.get().put(buffer);
+            localPool.get().put(buffer, returnChunkToGlobalPoolIfFree);
     }
 
     public static void putUnusedPortion(ByteBuffer buffer)
     {
+        putUnusedPortion(buffer, true);
+    }
+
+    public static void putUnusedPortion(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
+    {
+
         if (!(DISABLED || buffer.hasArray()))
         {
             LocalPool pool = localPool.get();
             if (buffer.limit() > 0)
                 pool.putUnusedPortion(buffer);
             else
-                pool.put(buffer);
+                pool.put(buffer, returnChunkToGlobalPoolIfFree);
         }
     }
 
@@ -466,27 +477,27 @@ public class BufferPool
             return null;
         }
 
-        public void put(ByteBuffer buffer)
+        public void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
         {
             Chunk chunk = Chunk.getParentChunk(buffer);
             if (chunk == null)
                 FileUtils.clean(buffer);
             else
-                put(buffer, chunk);
+                put(buffer, chunk, returnChunkToGlobalPoolIfFree);
         }
 
-        public void put(ByteBuffer buffer, Chunk chunk)
+        public void put(ByteBuffer buffer, Chunk chunk, boolean returnChunkToGlobalPoolIfFree)
         {
             LocalPool owner = chunk.owner;
             if (owner != null && owner == tinyPool)
             {
-                tinyPool.put(buffer, chunk);
+                tinyPool.put(buffer, chunk, returnChunkToGlobalPoolIfFree);
                 return;
             }
 
             // ask the free method to take exclusive ownership of the act of recycling
             // if we are either: already not owned by anyone, or owned by ourselves
-            long free = chunk.free(buffer, owner == null | owner == this);
+            long free = chunk.free(buffer, owner == null | (returnChunkToGlobalPoolIfFree & owner == this));
             if (free == 0L)
             {
                 // 0L => we own recycling responsibility, so must recycle;
@@ -908,24 +919,15 @@ public class BufferPool
             if (!releaseAttachment(buffer))
                 return 1L;
 
-            long address = MemoryUtil.getAddress(buffer);
-            assert (address >= baseAddress) & (address <= baseAddress + capacity());
-
-            int position = (int)(address - baseAddress);
             int size = roundUp(buffer.capacity());
+            long address = MemoryUtil.getAddress(buffer);
+            assert (address >= baseAddress) & (address + size <= baseAddress + capacity());
 
-            position >>= shift;
+            int position = ((int)(address - baseAddress)) >> shift;
+
             int slotCount = size >> shift;
-
-            long slotBits = (1L << slotCount) - 1;
+            long slotBits = 0xffffffffffffffffL >>> (64 - slotCount);
             long shiftedSlotBits = (slotBits << position);
-
-            if (slotCount == 64)
-            {
-                assert size == capacity();
-                assert position == 0;
-                shiftedSlotBits = -1L;
-            }
 
             long next;
             while (true)
@@ -948,14 +950,13 @@ public class BufferPool
                 return;
 
             long address = MemoryUtil.getAddress(buffer);
-            assert (address >= baseAddress) & (address <= baseAddress + capacity());
+            assert (address >= baseAddress) & (address + size <= baseAddress + capacity());
 
             // free any spare slots above the size we are using
-            int position = (int)(address + size - baseAddress);
-            position >>= shift;
+            int position = ((int)(address + size - baseAddress)) >> shift;
             int slotCount = (capacity - size) >> shift;
 
-            long slotBits = (1L << slotCount) - 1;
+            long slotBits = 0xffffffffffffffffL >>> (64 - slotCount);
             long shiftedSlotBits = (slotBits << position);
 
             long next;

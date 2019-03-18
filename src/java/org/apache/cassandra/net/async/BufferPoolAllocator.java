@@ -73,7 +73,7 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
         public void deallocate()
         {
             if (wrapped != null)
-                BufferPool.put(wrapped);
+                BufferPool.put(wrapped, false);
         }
 
         ByteBuffer adopt()

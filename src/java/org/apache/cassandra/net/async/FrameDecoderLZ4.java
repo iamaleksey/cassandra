@@ -125,7 +125,7 @@ final class FrameDecoderLZ4 extends FrameDecoder
                 }
                 catch (Throwable t)
                 {
-                    BufferPool.put(out);
+                    BufferPool.put(out, false);
                     throw t;
                 }
             }

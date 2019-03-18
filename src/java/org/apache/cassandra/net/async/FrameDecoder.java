@@ -121,7 +121,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             {
                 if (owners == UNSHARED)
                     ownersUpdater.lazySet(owner, RELEASED);
-                BufferPool.put(bytes);
+                BufferPool.put(bytes, false);
             }
         }
 
@@ -372,7 +372,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         ByteBuffer newBuffer = BufferPool.get(capacity, BufferType.OFF_HEAP);
         buffer.flip();
         newBuffer.put(buffer);
-        BufferPool.put(buffer);
+        BufferPool.put(buffer, false);
         return newBuffer;
     }
 
@@ -398,7 +398,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         if (put != null)
         {
             stash = null;
-            BufferPool.put(put);
+            BufferPool.put(put, false);
         }
     }
 

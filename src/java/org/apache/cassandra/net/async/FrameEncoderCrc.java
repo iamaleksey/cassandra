@@ -90,7 +90,7 @@ public class FrameEncoderCrc extends FrameEncoder
         }
         catch (Throwable t)
         {
-            BufferPool.put(frame);
+            BufferPool.put(frame, false);
             throw t;
         }
     }
