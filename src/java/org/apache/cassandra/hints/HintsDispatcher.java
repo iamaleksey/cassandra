@@ -20,7 +20,6 @@ package org.apache.cassandra.hints;
 import java.io.File;
 import java.nio.ByteBuffer;
 import java.util.*;
-import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 
@@ -221,11 +220,10 @@ final class HintsDispatcher implements AutoCloseable
 
         Outcome await()
         {
-            long deadline = Verb.HINT_REQ.expirationTimeNanos(start);
             boolean timedOut;
             try
             {
-                timedOut = !condition.await(deadline, TimeUnit.NANOSECONDS);
+                timedOut = !condition.awaitUntil(Verb.HINT_REQ.expirationTimeNanos(start));
             }
             catch (InterruptedException e)
             {

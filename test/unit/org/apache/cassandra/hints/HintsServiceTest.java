@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.hints;
 
-import java.util.Collections;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
