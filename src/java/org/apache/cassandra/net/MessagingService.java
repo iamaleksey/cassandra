@@ -112,7 +112,7 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
     public final MessageSink messageSink = new MessageSink();
     public final Callbacks callbacks = new Callbacks(this);
     public final InboundConnections inbound = new InboundConnections();
-    public final ResourceLimits.Limit reserveSendQueueLimitInBytes =
+    public final ResourceLimits.Limit reserveSendQueueGlobalLimitInBytes =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
     public final ResourceLimits.Limit reserveReceiveQueueGlobalLimitInBytes =

@@ -291,7 +291,7 @@ public class OutboundConnectionSettings
         if (applicationReserveSendQueueEndpointCapacityInBytes == null)
             applicationReserveSendQueueEndpointCapacityInBytes = DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes();
         if (applicationReserveSendQueueGlobalCapacityInBytes == null)
-            applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().reserveSendQueueLimitInBytes;
+            applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().reserveSendQueueGlobalLimitInBytes;
 
         return withApplicationReserveSendQueueCapacityInBytes(applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes);
     }
@@ -361,7 +361,7 @@ public class OutboundConnectionSettings
             applicationSendQueueCapacityInBytes = DatabaseDescriptor.getInternodeApplicationSendQueueCapacityInBytes();
 
         if (applicationReserveSendQueueGlobalCapacityInBytes == null)
-            applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().reserveSendQueueLimitInBytes;
+            applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().reserveSendQueueGlobalLimitInBytes;
 
         if (applicationReserveSendQueueEndpointCapacityInBytes == null)
             applicationReserveSendQueueEndpointCapacityInBytes = DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes();
