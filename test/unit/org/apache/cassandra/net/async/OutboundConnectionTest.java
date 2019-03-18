@@ -24,8 +24,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -631,6 +634,50 @@ public class OutboundConnectionTest
             // TODO: count corruptions
 
             connect(outbound);
+        });
+    }
+
+    @Test
+    public void testAcquireRelease() throws Throwable
+    {
+        test((inbound, outbound, endpoint) -> {
+            ExecutorService executor = Executors.newFixedThreadPool(100);
+            int acquireStep = 123;
+            AtomicLong acquisitions = new AtomicLong();
+            AtomicLong releases = new AtomicLong();
+            AtomicLong acquisitionFailures = new AtomicLong();
+            for (int i = 0; i < 100; i++)
+            {
+                executor.submit(() -> {
+                    for (int j = 0; j < 10000; j++)
+                    {
+                        if (outbound.acquireCapacity(acquireStep))
+                            acquisitions.incrementAndGet();
+                        else
+                            acquisitionFailures.incrementAndGet();
+                    }
+
+                });
+            }
+
+            for (int i = 0; i < 100; i++)
+            {
+                executor.submit(() -> {
+                    for (int j = 0; j < 10000; j++)
+                    {
+                        outbound.releaseCapacity(acquireStep);
+                        releases.incrementAndGet();
+                    }
+
+                });
+            }
+
+            executor.shutdown();
+            executor.awaitTermination(10, TimeUnit.SECONDS);
+
+            // We can release more than we acquire, which certainly should not happen in
+            // real life, but since it's a test just for acquisition and release, it is fine
+            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.queueSizeInBytes());
         });
     }
 
