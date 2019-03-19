@@ -104,6 +104,20 @@ public class OutboundConnections
      *
      * @param flushQueues {@code true} if existing messages in the queue should be sent before closing.
      */
+    public synchronized Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueues)
+    {
+        // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
+        metrics.release();
+        return new FutureCombiner(
+            apply(c -> c.scheduleClose(time, unit, flushQueues))
+        );
+    }
+
+    /**
+     * Close the connections permanently
+     *
+     * @param flushQueues {@code true} if existing messages in the queue should be sent before closing.
+     */
     public synchronized Future<Void> close(boolean flushQueues)
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
@@ -234,7 +248,7 @@ public class OutboundConnections
                     && !Gossiper.instance.isKnownEndpoint(connections.template.endpoint))
                 {
                     // close entirely if no traffic and the endpoint is unknown
-                    messagingService.closeOutbound(connections);
+                    messagingService.closeOutboundNow(connections);
                     continue;
                 }
 

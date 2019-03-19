@@ -209,25 +209,25 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
 
     /**
      * Only to be invoked once we believe the endpoint will never be contacted again.
+     *
+     * We close the connection after a five minute delay, to give asynchronous operations a chance to terminate
      */
     public void closeOutbound(InetAddressAndPort to)
     {
         OutboundConnections pool = channelManagers.get(to);
         if (pool != null)
-        {
-            // we must close then remove to avoid a race to register metrics
-            pool.close(true);
-            channelManagers.remove(to, pool);
-        }
+            pool.scheduleClose(5L, TimeUnit.MINUTES, true)
+                .addListener(future -> channelManagers.remove(to, pool));
     }
 
     /**
      * Only to be invoked once we believe the connections will never be used again.
      */
-    public void closeOutbound(OutboundConnections connections)
+    public void closeOutboundNow(OutboundConnections connections)
     {
-        connections.close(true);
-        channelManagers.remove(connections.template().endpoint, connections);
+        connections.close(true).addListener(
+            future -> channelManagers.remove(connections.template().endpoint, connections)
+        );
     }
 
     /**

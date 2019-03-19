@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -106,6 +107,8 @@ public class OutboundConnection
     private static final AtomicLongFieldUpdater<OutboundConnection> queueSizeInBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "queueSizeInBytes");
     private static final AtomicLongFieldUpdater<OutboundConnection> droppedDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "droppedDueToOverload");
     private static final AtomicLongFieldUpdater<OutboundConnection> droppedBytesDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "droppedBytesDueToOverload");
+    private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> closingUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "closing");
+    private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> scheduledCloseUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "scheduledClose");
 
     private final EventLoop eventLoop;
     private final Delivery delivery;
@@ -171,7 +174,9 @@ public class OutboundConnection
     /** True => connection is permanently closed. */
     private volatile boolean isClosed;
     /** The connection is being permanently closed */
-    private final AtomicReference<Future<Void>> closing = new AtomicReference<>();
+    private volatile Future<Void> closing;
+    /** The connection is being permanently closed in the near future */
+    private volatile Future<Void> scheduledClose;
 
     /** Periodic message expiry scheduled while we are disconnected; this will be cancelled and cleared each time we connect */
     private Future<?> whileDisconnected;
@@ -1094,6 +1099,20 @@ public class OutboundConnection
     }
 
     /**
+     * Schedule this connection to be permanently closed; only one close may be scheduled,
+     * any future scheduled closes are referred to the original triggering one (which may have a different schedule)
+     */
+    public Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueue)
+    {
+        Promise<Void> scheduledClose = AsyncPromise.uncancellable(eventLoop);
+        if (!scheduledCloseUpdater.compareAndSet(this, null, scheduledClose))
+            return this.scheduledClose;
+
+        eventLoop.schedule(() -> close(flushQueue).addListener(new PromiseNotifier<>(scheduledClose)), time, unit);
+        return scheduledClose;
+    }
+
+    /**
      * Permanently close this connection.
      *
      * Immediately prevent any new messages from being enqueued - these will throw ClosedChannelException.
@@ -1113,8 +1132,8 @@ public class OutboundConnection
     {
         // ensure only one close attempt can be in flight
         Promise<Void> closing = AsyncPromise.uncancellable(eventLoop);
-        if (!this.closing.compareAndSet(null, closing))
-            return this.closing.get();
+        if (!closingUpdater.compareAndSet(this, null, closing))
+            return this.closing;
 
         /**
          * Now define a cleanup closure, that will be deferred until it is safe to do so.
@@ -1250,11 +1269,6 @@ public class OutboundConnection
     boolean isClosed()
     {
         return isClosed;
-    }
-
-    boolean isClosing()
-    {
-        return null != closing.get();
     }
 
     private String id()
@@ -1423,7 +1437,7 @@ public class OutboundConnection
     @VisibleForTesting
     void unsafeSetClosed(boolean closed)
     {
-        this.closing.set(closed ? NettyFactory.instance.defaultGroup().next().newSucceededFuture(null) : null);
+        closingUpdater.set(this, closed ? NettyFactory.instance.defaultGroup().next().newSucceededFuture(null) : null);
         this.isConnected = false;
         this.isClosed = true;
     }
