@@ -313,7 +313,9 @@ public class OutboundConnections
     @VisibleForTesting
     public static OutboundConnections unsafeCreate(OutboundConnectionSettings template, BackPressureState backPressureState)
     {
-        return new OutboundConnections(template, backPressureState);
+        OutboundConnections connections = new OutboundConnections(template, backPressureState);
+        connections.metricsReady.signalAll();
+        return connections;
     }
 
 }
