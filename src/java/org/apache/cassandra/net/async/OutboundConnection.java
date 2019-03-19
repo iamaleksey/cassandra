@@ -478,10 +478,9 @@ public class OutboundConnection
                 logger.debug("{} channel closed by provider", id(), cause);
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
-            GenericFutureListener<Future<Object>> scheduleOnCompletion = scheduleOnCompletion();
-            closeChannel(channel).addListener(
-                f1 -> requestConnect()
-                      .addListener(scheduleOnCompletion));
+
+            // the delivery loop will pick up again immediately after closeChannel completes, since it depends on stopAndRunOnEventLoop
+            closeChannel(channel);
         }
 
         /**
@@ -904,11 +903,17 @@ public class OutboundConnection
                     payloadAllocator = success.allocator;
                     channel = success.channel;
 
-                    // Make sure
-                    channel.pipeline().addLast("handleUnregistered", new ChannelInboundHandlerAdapter() {
+                    channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
                         @Override
                         public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
                             super.channelUnregistered(ctx);
+                            closeChannel(channel);
+                        }
+
+                        @Override
+                        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                        {
+                            logger.error("Unexpected error in channel pipeline for {}; closing", id(), cause);
                             closeChannel(channel);
                         }
                     });
@@ -1059,6 +1064,9 @@ public class OutboundConnection
         if (!done.setUncancellable())
             throw new IllegalStateException();
 
+        // delivery will immediately continue after this, triggering a reconnect if necessary;
+        // this might mean a slight delay for large message delivery, as the connect will be scheduled
+        // asynchronously, so we must wait for a second turn on the eventLoop
         delivery.stopAndRunOnEventLoop(() -> {
             if (closeIfIs != null && channel == closeIfIs)
             {

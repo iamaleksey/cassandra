@@ -348,10 +348,9 @@ public class InboundConnectionInitiator
         }
 
         @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
         {
             exceptionCaught(ctx.channel(), cause);
-            super.exceptionCaught(ctx, cause);
         }
 
         private void exceptionCaught(Channel channel, Throwable cause)

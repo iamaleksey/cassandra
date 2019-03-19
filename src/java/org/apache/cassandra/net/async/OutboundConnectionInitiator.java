@@ -338,9 +338,9 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
         {
             JVMStabilityInspector.inspectThrowable(cause);
+            resultPromise.tryFailure(cause);
             logger.error("Failed to properly handshake with peer {}. Closing the channel.", settings.endpoint, cause);
             ctx.close();
-            resultPromise.tryFailure(cause);
         }
     }
 
