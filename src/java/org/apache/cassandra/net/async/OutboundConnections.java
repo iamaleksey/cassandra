@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.nio.channels.ClosedChannelException;
 import java.util.List;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -37,6 +38,7 @@ import org.apache.cassandra.net.BackPressureState;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.*;
@@ -54,7 +56,8 @@ public class OutboundConnections
     @VisibleForTesting
     public static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
 
-    private final InternodeOutboundMetrics metrics;
+    private final SimpleCondition metricsReady = new SimpleCondition();
+    private volatile InternodeOutboundMetrics metrics;
     private final BackPressureState backPressureState;
 
     private OutboundConnectionSettings template;
@@ -62,7 +65,7 @@ public class OutboundConnections
     public final OutboundConnection large;
     public final OutboundConnection urgent;
 
-    public OutboundConnections(OutboundConnectionSettings template, BackPressureState backPressureState)
+    private OutboundConnections(OutboundConnectionSettings template, BackPressureState backPressureState)
     {
         this.backPressureState = backPressureState;
         this.template = template = template.withDefaultReserveLimits();
@@ -71,7 +74,29 @@ public class OutboundConnections
         this.small = new OutboundConnection(SMALL_MESSAGE, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGE, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT, template, reserveCapacityInBytes);
-        this.metrics = new InternodeOutboundMetrics(template.endpoint, this);
+    }
+
+    public static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
+    {
+        OutboundConnections connections = in.get(key);
+        if (connections == null)
+        {
+            connections = new OutboundConnections(template, backPressureState);
+            OutboundConnections existing = in.putIfAbsent(key, connections);
+
+            if (existing == null)
+            {
+                connections.metrics = new InternodeOutboundMetrics(template.endpoint, connections);
+                connections.metricsReady.signalAll();
+            }
+            else
+            {
+                connections.metricsReady.signalAll();
+                connections.close(false);
+                connections = existing;
+            }
+        }
+        return connections;
     }
 
     public BackPressureState getBackPressureState()
@@ -107,7 +132,7 @@ public class OutboundConnections
     public synchronized Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueues)
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
-        metrics.release();
+        releaseMetrics();
         return new FutureCombiner(
             apply(c -> c.scheduleClose(time, unit, flushQueues))
         );
@@ -121,10 +146,24 @@ public class OutboundConnections
     public synchronized Future<Void> close(boolean flushQueues)
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
-        metrics.release();
+        releaseMetrics();
         return new FutureCombiner(
             apply(c -> c.close(flushQueues))
         );
+    }
+
+    private void releaseMetrics()
+    {
+        try
+        {
+            metricsReady.await();
+        }
+        catch (InterruptedException e)
+        {
+            throw new RuntimeException(e);
+        }
+        if (metrics != null)
+            metrics.release();
     }
 
     /**
@@ -269,6 +308,12 @@ public class OutboundConnections
     public static void scheduleUnusedConnectionMonitoring(MessagingService messagingService, ScheduledExecutorService executor, long delay, TimeUnit units)
     {
         executor.scheduleWithFixedDelay(new UnusedConnectionMonitor(messagingService)::closeUnusedSinceLastRun, 0L, delay, units);
+    }
+
+    @VisibleForTesting
+    public static OutboundConnections unsafeCreate(OutboundConnectionSettings template, BackPressureState backPressureState)
+    {
+        return new OutboundConnections(template, backPressureState);
     }
 
 }

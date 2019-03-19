@@ -485,19 +485,10 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
 
     private OutboundConnections getOutbound(InetAddressAndPort to)
     {
-        OutboundConnections pool = channelManagers.get(to);
-        if (pool == null)
-        {
-            OutboundConnectionSettings template = new OutboundConnectionSettings(to);
-            pool = new OutboundConnections(template, backPressure.newState(to));
-            OutboundConnections existing = channelManagers.putIfAbsent(to, pool);
-            if (existing != null)
-            {
-                pool.close(false); // don't wait for it to complete, since it was never used
-                pool = existing;
-            }
-        }
-        return pool;
+        OutboundConnections connections = channelManagers.get(to);
+        if (connections == null)
+            connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to), backPressure.newState(to));
+        return connections;
     }
 
     public InboundMessageHandlers getInbound(InetAddressAndPort from)
