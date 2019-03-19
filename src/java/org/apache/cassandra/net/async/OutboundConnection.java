@@ -479,6 +479,19 @@ public class OutboundConnection
         }
 
         /**
+         * Invalidate the channel if the exception indicates the channel is in a bad state
+         */
+        boolean maybeInvalidateChannel(Channel channel, Throwable cause)
+        {
+            if (cause instanceof ClosedChannelException || cause instanceof Errors.NativeIoException)
+            {
+                invalidateChannel(channel, cause);
+                return true;
+            }
+            return false;
+        }
+
+        /**
          * Handle a failure during delivery that invalidates the channel
          */
         void invalidateChannel(Channel channel, Throwable cause)
@@ -825,8 +838,11 @@ public class OutboundConnection
                 onDroppedDueToError(send, t);
                 out.discard();
                 if (out.flushed() > 0)
+                {
                     invalidateChannel(channel, t);
-                return out.flushed() == 0;
+                    return false;
+                }
+                return !maybeInvalidateChannel(channel, t);
             }
         }
 
@@ -917,7 +933,7 @@ public class OutboundConnection
                         @Override
                         public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
                             super.channelUnregistered(ctx);
-                            logger.info("{} notified unregistered");
+                            logger.info("{} channel closed by provider", id());
                             closeChannel(ctx.channel());
                         }
 
