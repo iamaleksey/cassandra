@@ -915,7 +915,8 @@ public class OutboundConnection
                         @Override
                         public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
                             super.channelUnregistered(ctx);
-                            closeChannel(channel);
+                            logger.info("{} notified unregistered");
+                            closeChannel(ctx.channel());
                         }
 
                         @Override

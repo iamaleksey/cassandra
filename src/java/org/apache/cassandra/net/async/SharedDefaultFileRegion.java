@@ -71,6 +71,8 @@ public class SharedDefaultFileRegion extends DefaultFileRegion
     {
         super(shared.ref.get(), position, count);
         this.shared = shared;
+        if (1 >= this.shared.refCount.incrementAndGet())
+            throw new IllegalStateException();
     }
 
     @Override
