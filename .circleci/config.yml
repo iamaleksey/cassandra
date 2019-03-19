@@ -218,7 +218,7 @@ jobs:
           name: Clone Cassandra dtest Repository (via git)
           command: |
             export LANG=en_US.UTF-8
-            git clone --single-branch --branch master --depth 1 git://github.com/belliottsmith/cassandra-dtest.git ~/cassandra-dtest
+            git clone --single-branch --branch messaging-improvements --depth 1 git://github.com/iamaleksey/cassandra-dtest.git ~/cassandra-dtest
       - run:
           name: Configure virtualenv and python Dependencies
           command: |
@@ -296,7 +296,7 @@ jobs:
           name: Clone Cassandra dtest Repository (via git)
           command: |
             export LANG=en_US.UTF-8
-            git clone --single-branch --branch master --depth 1 git://github.com/belliottsmith/cassandra-dtest.git ~/cassandra-dtest
+            git clone --single-branch --branch messaging-improvements --depth 1 git://github.com/iamaleksey/cassandra-dtest.git ~/cassandra-dtest
       - run:
           name: Configure virtualenv and python Dependencies
           command: |
@@ -372,7 +372,7 @@ jobs:
           name: Clone Cassandra dtest Repository (via git)
           command: |
             export LANG=en_US.UTF-8
-            git clone --single-branch --branch master --depth 1 git://github.com/belliottsmith/cassandra-dtest.git ~/cassandra-dtest
+            git clone --single-branch --branch messaging-improvements --depth 1 git://github.com/iamaleksey/cassandra-dtest.git ~/cassandra-dtest
       - run:
           name: Configure virtualenv and python Dependencies
           command: |
