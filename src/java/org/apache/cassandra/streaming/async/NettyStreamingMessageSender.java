@@ -490,7 +490,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     /**
      * For testing purposes only.
      */
-    void setClosed()
+    public void setClosed()
     {
         closed = true;
     }
@@ -508,7 +508,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     @Override
     public boolean connected()
     {
-        return !closed;
+        return !closed && (controlMessageChannel == null || controlMessageChannel.isOpen());
     }
 
     @Override
