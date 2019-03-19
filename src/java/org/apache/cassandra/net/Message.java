@@ -113,7 +113,7 @@ public class Message<T>
         private Verb verb;
         private InetAddressAndPort from;
         private T payload;
-        private int flags = emptyFlags();
+        private int flags = noFlags();
         private final Map<ParameterType, Object> parameters = new EnumMap<>(ParameterType.class);
         private long createdAtNanos;
         private long expiresAtNanos;
@@ -222,7 +222,7 @@ public class Message<T>
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
-        return new Message<>(from, payload, emptyFlags(), buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
+        return new Message<>(from, payload, noFlags(), buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
     }
 
     public static <T> Message<T> internalResponse(Verb verb, T payload)
@@ -365,12 +365,7 @@ public class Message<T>
         return containsFlag(flags, MessageFlag.TRACK_REPAIRED_DATA);
     }
 
-    private static int singletonFlag(MessageFlag flag)
-    {
-        return 1 << flag.ordinal();
-    }
-
-    private static int emptyFlags()
+    private static int noFlags()
     {
         return 0;
     }
@@ -418,12 +413,6 @@ public class Message<T>
     public TraceType traceType()
     {
         return (TraceType) parameters.getOrDefault(ParameterType.TRACE_TYPE, TraceType.QUERY);
-    }
-
-    public RequestFailureReason failureReason()
-    {
-        // FIXME: in C* 5, simplify, since reason will always be set to something in a failure response.
-        return (RequestFailureReason) parameters.getOrDefault(ParameterType.FAILURE_REASON, RequestFailureReason.UNKNOWN);
     }
 
     public long getSlowQueryTimeout(TimeUnit units)
@@ -590,7 +579,7 @@ public class Message<T>
             Map<ParameterType, Object> parameters = deserializeParams(in, version);
 
             VIntCoding.readUnsignedVInt(in); // payload size, not used here
-            T payload = (T) verb.serializer().deserialize(in, version); // TODO: any chance it breaks any serializer at 0 size?
+            T payload = (T) verb.serializer().deserialize(in, version);
 
             return new Message<>(peer, payload, flags, parameters, verb, creationTimeNanos, expiresAtNanos, id);
         }
@@ -834,7 +823,7 @@ public class Message<T>
             params.put(ParameterType.FAILURE_RESPONSE, ONE_BYTE);
             params.put(ParameterType.FAILURE_REASON, post40.payload);
 
-            return new Message<>(post40.from, NoPayload.noPayload, emptyFlags(), params, post40.verb.toPre40Verb(), post40.createdAtNanos, post40.expiresAtNanos, post40.id);
+            return new Message<>(post40.from, NoPayload.noPayload, noFlags(), params, post40.verb.toPre40Verb(), post40.createdAtNanos, post40.expiresAtNanos, post40.id);
         }
 
         private Message<RequestFailureReason> toPost40FailureResponse(Message<?> pre40)
