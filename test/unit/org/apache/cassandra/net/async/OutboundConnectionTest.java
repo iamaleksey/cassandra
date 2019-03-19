@@ -250,25 +250,25 @@ public class OutboundConnectionTest
         test((inbound, outbound, endpoint) -> {
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
-            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<NoPayload>()
+            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
-                public void serialize(NoPayload noPayload, DataOutputPlus out, int version) throws IOException
+                public void serialize(Object noPayload, DataOutputPlus out, int version) throws IOException
                 {
                     for (int i = 0 ; i < LARGE_MESSAGE_THRESHOLD + 1 ; ++i)
                         out.writeByte(i);
                 }
-                public NoPayload deserialize(DataInputPlus in, int version) throws IOException
+                public Object deserialize(DataInputPlus in, int version) throws IOException
                 {
                     in.skipBytesFully(LARGE_MESSAGE_THRESHOLD + 1);
                     return noPayload;
                 }
-                public long serializedSize(NoPayload noPayload, int version)
+                public long serializedSize(Object noPayload, int version)
                 {
                     return LARGE_MESSAGE_THRESHOLD + 1;
                 }
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
-            Message<?> message = Message.out(Verb._TEST_1, noPayload);
+            Message<?> message = Message.out(Verb._TEST_1, new Object());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
