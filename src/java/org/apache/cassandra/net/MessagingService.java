@@ -212,9 +212,13 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
      */
     public void closeOutbound(InetAddressAndPort to)
     {
-        OutboundConnections pool = channelManagers.remove(to);
+        OutboundConnections pool = channelManagers.get(to);
         if (pool != null)
+        {
+            // we must close then remove to avoid a race to register metrics
             pool.close(true);
+            channelManagers.remove(to, pool);
+        }
     }
 
     /**
@@ -222,8 +226,8 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
      */
     public void closeOutbound(OutboundConnections connections)
     {
-        if (channelManagers.remove(connections.template().endpoint, connections))
-            connections.close(true);
+        connections.close(true);
+        channelManagers.remove(connections.template().endpoint, connections);
     }
 
     /**
