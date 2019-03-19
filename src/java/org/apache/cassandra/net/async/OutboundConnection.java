@@ -37,6 +37,7 @@ import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
+import io.netty.channel.unix.Errors;
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
@@ -54,6 +55,8 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
+import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
+import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -918,7 +921,18 @@ public class OutboundConnection
                         @Override
                         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
                         {
-                            logger.error("Unexpected error in channel pipeline for {}; closing", id(), cause);
+                            boolean error = true;
+                            if (cause instanceof Errors.NativeIoException)
+                            {
+                                int errorCode = ((Errors.NativeIoException) cause).expectedErr();
+                                error = errorCode != ERRNO_ECONNRESET_NEGATIVE
+                                     && errorCode != ERROR_ECONNREFUSED_NEGATIVE;
+                            }
+                            if (error)
+                                logger.error("{} unexpected error; closing", id(), cause);
+                            else
+                                logger.info("{} channel closed by provider", id(), cause);;
+
                             closeChannel(channel);
                         }
                     });
