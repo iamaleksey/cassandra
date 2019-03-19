@@ -30,9 +30,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -57,7 +54,6 @@ import org.apache.cassandra.distributed.api.IMessageFilters;
 import org.apache.cassandra.distributed.api.ICluster;
 import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -320,68 +316,74 @@ public abstract class AbstractCluster<I extends IInstance> implements ICluster, 
         C newCluster(File root, Versions.Version version, List<InstanceConfig> configs, ClassLoader sharedClassLoader);
     }
 
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, Factory<I, C> factory) throws Throwable
+    public static class Builder<I extends IInstance, C extends AbstractCluster<I>>
     {
-        return create(nodeCount, 0, factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, int subnet, Factory<I, C> factory) throws Throwable
-    {
-        return create(nodeCount, subnet, Files.createTempDirectory("dtests").toFile(), factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, File root, Factory<I, C> factory)
-    {
-        return create(nodeCount, 0, root, factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, int subnet, File root, Factory<I, C> factory)
-    {
-        return create(nodeCount, subnet, Versions.CURRENT, root, factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, Versions.Version version, Factory<I, C> factory) throws IOException
-    {
-        return create(nodeCount, 0, version, factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, int subnet, Versions.Version version, Factory<I, C> factory) throws IOException
-    {
-        return create(nodeCount, subnet, version, Files.createTempDirectory("dtests").toFile(), factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, Versions.Version version, File root, Factory<I, C> factory)
-    {
-        return create(nodeCount, 0, version, root, factory);
-    }
-
-    protected static <I extends IInstance, C extends AbstractCluster<I>> C
-    create(int nodeCount, int subnet, Versions.Version version, File root, Factory<I, C> factory)
-    {
-        root.mkdirs();
-        setupLogging(root);
-
-        ClassLoader sharedClassLoader = Thread.currentThread().getContextClassLoader();
-
-        List<InstanceConfig> configs = new ArrayList<>();
-        long token = Long.MIN_VALUE + 1, increment = 2 * (Long.MAX_VALUE / nodeCount);
-        for (int i = 0 ; i < nodeCount ; ++i)
+        private final int nodeCount;
+        private final Factory<I, C> factory;
+        private int subnet;
+        private File root;
+        private Versions.Version version;
+        private Consumer<InstanceConfig> configUpdater;
+        public Builder(int nodeCount, Factory<I, C> factory)
         {
-            InstanceConfig config = InstanceConfig.generate(i + 1, subnet, root, String.valueOf(token));
-            configs.add(config);
-            token += increment;
+            this.nodeCount = nodeCount;
+            this.factory = factory;
         }
 
-        C cluster = factory.newCluster(root, version, configs, sharedClassLoader);
-        cluster.startup();
-        return cluster;
+        public Builder<I, C> withSubnet(int subnet)
+        {
+            this.subnet = subnet;
+            return this;
+        }
+
+        public Builder<I, C> withRoot(File root)
+        {
+            this.root = root;
+            return this;
+        }
+
+        public Builder<I, C> withVersion(Versions.Version version)
+        {
+            this.version = version;
+            return this;
+        }
+
+        public Builder<I, C> withConfig(Consumer<InstanceConfig> updater)
+        {
+            this.configUpdater = updater;
+            return this;
+        }
+
+        public C start() throws IOException
+        {
+            File root = this.root;
+            Versions.Version version = this.version;
+
+            if (root == null)
+                root = Files.createTempDirectory("dtests").toFile();
+            if (version == null)
+                version = Versions.CURRENT;
+
+            root.mkdirs();
+            setupLogging(root);
+
+            ClassLoader sharedClassLoader = Thread.currentThread().getContextClassLoader();
+
+            List<InstanceConfig> configs = new ArrayList<>();
+            long token = Long.MIN_VALUE + 1, increment = 2 * (Long.MAX_VALUE / nodeCount);
+            for (int i = 0 ; i < nodeCount ; ++i)
+            {
+                InstanceConfig config = InstanceConfig.generate(i + 1, subnet, root, String.valueOf(token));
+                if (configUpdater != null)
+                    configUpdater.accept(config);
+                configs.add(config);
+                token += increment;
+            }
+
+            C cluster = factory.newCluster(root, version, configs, sharedClassLoader);
+            cluster.startup();
+            return cluster;
+        }
     }
 
     private static void setupLogging(File root)

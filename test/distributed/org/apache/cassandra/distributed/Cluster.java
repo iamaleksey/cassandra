@@ -45,22 +45,14 @@ public class Cluster extends AbstractCluster<IInvokableInstance> implements IClu
         return new Wrapper(version, config);
     }
 
-    public static Cluster create(int nodeCount) throws Throwable
+    public static Builder<IInvokableInstance, Cluster> build(int nodeCount)
     {
-        return create(nodeCount, Cluster::new);
-    }
-    public static Cluster create(int nodeCount, File root)
-    {
-        return create(nodeCount, Versions.CURRENT, root, Cluster::new);
+        return new Builder<>(nodeCount, Cluster::new);
     }
 
-    public static Cluster create(int nodeCount, int subnet) throws Throwable
+    public static Cluster create(int nodeCount) throws Throwable
     {
-        return create(nodeCount, subnet, Cluster::new);
-    }
-    public static Cluster create(int nodeCount, int subnet, File root)
-    {
-        return create(nodeCount, subnet, Versions.CURRENT, root, Cluster::new);
+        return build(nodeCount).start();
     }
 }
 

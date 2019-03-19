@@ -118,7 +118,7 @@ public abstract class ResourceLimits
 
         public void release(long amount)
         {
-            usingUpdater.addAndGet(this, amount);
+            usingUpdater.addAndGet(this, -amount);
         }
     }
 

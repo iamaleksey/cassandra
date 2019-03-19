@@ -260,8 +260,8 @@ public class DistributedReadWritePathTest extends DistributedTestBase
     @Test
     public void pagingTests() throws Throwable
     {
-        try (Cluster cluster = init(Cluster.create(3, 0));
-             Cluster singleNode = init(Cluster.create(1, 1)))
+        try (Cluster cluster = init(Cluster.create(3));
+             Cluster singleNode = init(Cluster.build(1).withSubnet(1).start()))
         {
             cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
             singleNode.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v int, PRIMARY KEY (pk, ck))");
