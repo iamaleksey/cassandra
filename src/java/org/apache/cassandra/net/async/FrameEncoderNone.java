@@ -33,7 +33,7 @@ class FrameEncoderNone extends FrameEncoder
 
     ByteBuf encode(boolean isSelfContained, ByteBuffer buffer)
     {
-        return BufferPoolAllocator.wrapUnshared(buffer);
+        return BufferPoolAllocator.wrap(buffer);
     }
 
     void addLastTo(ChannelPipeline pipeline)

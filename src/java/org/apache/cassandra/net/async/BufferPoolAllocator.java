@@ -56,11 +56,6 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
         return new Wrapped(buffer);
     }
 
-    public static ByteBuf wrapUnshared(ByteBuffer buffer)
-    {
-        return new WrappedUnshared(buffer);
-    }
-
     static class Wrapped extends UnpooledUnsafeDirectByteBuf
     {
         private ByteBuffer wrapped;
@@ -84,32 +79,6 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
             adopt.position(readerIndex()).limit(writerIndex());
             wrapped = null;
             return adopt;
-        }
-    }
-
-    static class WrappedUnshared extends Wrapped
-    {
-        public WrappedUnshared(ByteBuffer wrap) { super(wrap); }
-        public void deallocate()
-        {
-            throw new IllegalStateException();
-        }
-        public ByteBuf retain()
-        {
-            throw new UnsupportedOperationException();
-        }
-        public ByteBuf retain(int count)
-        {
-            throw new UnsupportedOperationException();
-        }
-        public boolean release()
-        {
-            super.deallocate();
-            return true;
-        }
-        public boolean release(int count)
-        {
-            throw new UnsupportedOperationException();
         }
     }
 

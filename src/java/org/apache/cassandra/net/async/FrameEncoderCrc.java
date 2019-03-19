@@ -86,7 +86,7 @@ public class FrameEncoderCrc extends FrameEncoder
             frame.limit(frameLength);
             frame.putInt(frameLength - TRAILER_LENGTH, frameCrc);
             frame.position(0);
-            return BufferPoolAllocator.wrapUnshared(frame);
+            return BufferPoolAllocator.wrap(frame);
         }
         catch (Throwable t)
         {

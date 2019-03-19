@@ -100,7 +100,7 @@ class FrameEncoderLZ4 extends FrameEncoder
             frame.position(0);
 
             BufferPool.putUnusedPortion(frame, false);
-            return BufferPoolAllocator.wrapUnshared(frame);
+            return BufferPoolAllocator.wrap(frame);
         }
         catch (Throwable t)
         {
