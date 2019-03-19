@@ -43,7 +43,7 @@ import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
-import org.apache.cassandra.net.async.InboundConnections;
+import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -543,7 +543,7 @@ public class MessagingServiceTest
 
         InboundConnectionSettings settings = new InboundConnectionSettings()
                                              .withEncryption(serverEncryptionOptions);
-        InboundConnections connections = new InboundConnections(settings);
+        InboundSockets connections = new InboundSockets(settings);
         try
         {
             connections.open().await();
@@ -563,7 +563,7 @@ public class MessagingServiceTest
             Assert.assertEquals(expect.size(), connections.sockets().size());
 
             final int legacySslPort = DatabaseDescriptor.getSSLStoragePort();
-            for (InboundConnections.InboundSocket socket : connections.sockets())
+            for (InboundSockets.InboundSocket socket : connections.sockets())
             {
                 Assert.assertEquals(serverEncryptionOptions.enabled, socket.settings.encryption.enabled);
                 Assert.assertEquals(serverEncryptionOptions.optional, socket.settings.encryption.optional);

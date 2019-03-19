@@ -24,11 +24,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
@@ -46,7 +44,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
-import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -55,7 +52,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
@@ -114,7 +110,7 @@ public class OutboundConnectionTest
 
     interface ManualSendTest
     {
-        void accept(Settings settings, InboundConnections inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
+        void accept(Settings settings, InboundSockets inbound, OutboundConnection outbound, InetAddressAndPort endpoint) throws Throwable;
     }
 
     static class Settings
@@ -200,7 +196,7 @@ public class OutboundConnectionTest
 
     private void doTestManual(Settings settings, ManualSendTest test) throws Throwable
     {
-        InboundConnections inbound = new InboundConnections(settings.inbound.apply(new InboundConnectionSettings()));
+        InboundSockets inbound = new InboundSockets(settings.inbound.apply(new InboundConnectionSettings()));
         InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
         MessagingService.instance().removeInbound(endpoint);
         OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
@@ -532,7 +528,7 @@ public class OutboundConnectionTest
                 // Simulate disconnect
                 inbound.close().get(10, SECONDS);
                 MessagingService.instance().removeInbound(endpoint);
-                inbound = new InboundConnections(settings.inbound.apply(new InboundConnectionSettings()));
+                inbound = new InboundSockets(settings.inbound.apply(new InboundConnectionSettings()));
                 inbound.open();
 
                 CountDownLatch latch2 = new CountDownLatch(1);

@@ -46,7 +46,7 @@ import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.async.FutureCombiner;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
 import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
-import org.apache.cassandra.net.async.InboundConnections;
+import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
 import org.apache.cassandra.net.async.OutboundConnection;
@@ -111,7 +111,7 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
     public final LatencySubscribers latency = new LatencySubscribers();
     public final MessageSink messageSink = new MessageSink();
     public final Callbacks callbacks = new Callbacks(this);
-    public final InboundConnections inbound = new InboundConnections();
+    public final InboundSockets inbound = new InboundSockets();
     public final ResourceLimits.Limit reserveSendQueueGlobalLimitInBytes =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 

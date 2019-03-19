@@ -38,7 +38,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
 
-public class InboundConnections
+public class InboundSockets
 {
     /**
      * A simple struct to wrap up the components needed for each listening socket.
@@ -140,12 +140,12 @@ public class InboundConnections
 
     private final List<InboundSocket> sockets;
 
-    public InboundConnections()
+    public InboundSockets()
     {
         this.sockets = defaultBindings(new InboundConnectionSettings());
     }
 
-    public InboundConnections(InboundConnectionSettings template)
+    public InboundSockets(InboundConnectionSettings template)
     {
         this.sockets = defaultBindings(template);
     }

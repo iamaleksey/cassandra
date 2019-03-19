@@ -65,7 +65,7 @@ public class HandshakeTest
     }
     private Result handshake(int req, AcceptVersions acceptOutbound, AcceptVersions acceptInbound) throws ExecutionException, InterruptedException
     {
-        InboundConnections inbound = new InboundConnections(new InboundConnectionSettings().withAcceptMessaging(acceptInbound));
+        InboundSockets inbound = new InboundSockets(new InboundConnectionSettings().withAcceptMessaging(acceptInbound));
         try
         {
             inbound.open();
