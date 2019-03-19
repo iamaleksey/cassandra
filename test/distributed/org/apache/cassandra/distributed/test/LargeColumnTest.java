@@ -21,6 +21,7 @@ package org.apache.cassandra.distributed.test;
 import java.util.Random;
 import java.util.concurrent.ThreadLocalRandom;
 
+import org.junit.Assert;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +32,9 @@ import org.apache.cassandra.distributed.Cluster;
 public class LargeColumnTest extends DistributedTestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(LargeColumnTest.class);
-    private static String str(int length, Random random)
+    private static String str(int length, Random random, long seed)
     {
+        random.setSeed(seed);
         char[] chars = new char[length];
         int i = 0;
         int s = 0;
@@ -57,7 +59,6 @@ public class LargeColumnTest extends DistributedTestBase
         Random random = new Random();
         long seed = ThreadLocalRandom.current().nextLong();
         logger.info("Using seed {}", seed);
-        random.setSeed(seed);
 
         try (Cluster cluster = init(Cluster.build(nodes)
                                            .withConfig(config ->
@@ -69,14 +70,13 @@ public class LargeColumnTest extends DistributedTestBase
             cluster.schemaChange(String.format("CREATE TABLE %s.cf (k int, c text, PRIMARY KEY (k))", KEYSPACE));
 
             for (int i = 0 ; i < rowCount ; ++i)
-                cluster.coordinator(1).execute(String.format("INSERT INTO %s.cf (k, c) VALUES (?, ?);", KEYSPACE), ConsistencyLevel.ALL, i, str(columnSize, random));
+                cluster.coordinator(1).execute(String.format("INSERT INTO %s.cf (k, c) VALUES (?, ?);", KEYSPACE), ConsistencyLevel.ALL, i, str(columnSize, random, seed | i));
 
             for (int i = 0 ; i < rowCount ; ++i)
             {
-                Object[][] results = cluster.coordinator(1).execute(String.format("SELECT k, c FROM %s.cf;", KEYSPACE), ConsistencyLevel.ALL);
+                Object[][] results = cluster.coordinator(1).execute(String.format("SELECT k, c FROM %s.cf WHERE k = ?;", KEYSPACE), ConsistencyLevel.ALL, i);
+                Assert.assertTrue(str(columnSize, random, seed | i).equals(results[0][1]));
             }
-
-            System.out.println("Done");
         }
     }
 
