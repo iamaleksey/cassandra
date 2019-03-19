@@ -1,7 +1,9 @@
 package org.apache.cassandra.net.async;
 
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +31,7 @@ import io.netty.channel.epoll.EpollSocketChannel;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
+import io.netty.channel.unix.Errors;
 import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
@@ -45,6 +48,8 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
+import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 /**
@@ -183,6 +188,21 @@ public final class NettyFactory
             group.shutdownGracefully(0, 2, TimeUnit.SECONDS);
         for (EventLoopGroup group : groups)
             group.awaitTermination(60, TimeUnit.SECONDS);
+    }
+
+    public static boolean isConnectionResetException(Throwable t)
+    {
+        if (t instanceof ClosedChannelException)
+            return true;
+        if (t instanceof ConnectException)
+            return true;
+        if (t instanceof Errors.NativeIoException)
+        {
+            int errorCode = ((Errors.NativeIoException) t).expectedErr();
+            return    errorCode == ERRNO_ECONNRESET_NEGATIVE
+                   || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
+        }
+        return false;
     }
 
 }

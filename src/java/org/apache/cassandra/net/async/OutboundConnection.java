@@ -61,6 +61,7 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.net.async.NettyFactory.isConnectionResetException;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateMessaging;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
@@ -483,7 +484,7 @@ public class OutboundConnection
          */
         boolean maybeInvalidateChannel(Channel channel, Throwable cause)
         {
-            if (cause instanceof ClosedChannelException || cause instanceof Errors.NativeIoException)
+            if (isConnectionResetException(cause) || cause instanceof Errors.NativeIoException)
             {
                 invalidateChannel(channel, cause);
                 return true;
@@ -497,7 +498,7 @@ public class OutboundConnection
         void invalidateChannel(Channel channel, Throwable cause)
         {
             JVMStabilityInspector.inspectThrowable(cause);
-            if (cause instanceof ClosedChannelException)
+            if (isConnectionResetException(cause))
                 logger.debug("{} channel closed by provider", id(), cause);
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
@@ -940,17 +941,10 @@ public class OutboundConnection
                         @Override
                         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
                         {
-                            boolean error = true;
-                            if (cause instanceof Errors.NativeIoException)
-                            {
-                                int errorCode = ((Errors.NativeIoException) cause).expectedErr();
-                                error = errorCode != ERRNO_ECONNRESET_NEGATIVE
-                                     && errorCode != ERROR_ECONNREFUSED_NEGATIVE;
-                            }
-                            if (error)
-                                logger.error("{} unexpected error; closing", id(), cause);
+                            if (isConnectionResetException(cause))
+                                logger.info("{} channel closed by provider", id(), cause);
                             else
-                                logger.info("{} channel closed by provider", id(), cause);;
+                                logger.error("{} unexpected error; closing", id(), cause);
 
                             closeChannel(channel);
                         }

@@ -62,6 +62,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.async.HandshakeProtocol.*;
+import static org.apache.cassandra.net.async.NettyFactory.*;
 import static org.apache.cassandra.net.async.NettyFactory.newSslHandler;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.incompatible;
@@ -169,7 +170,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      */
     private Bootstrap createBootstrap(EventLoop eventLoop)
     {
-        Bootstrap bootstrap = NettyFactory.instance.newBootstrap(eventLoop, settings.tcpUserTimeoutInMS)
+        Bootstrap bootstrap = instance.newBootstrap(eventLoop, settings.tcpUserTimeoutInMS)
                               .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, settings.tcpConnectTimeoutInMS)
                               .option(ChannelOption.SO_KEEPALIVE, true)
                               .option(ChannelOption.SO_REUSEADDR, true)
@@ -204,7 +205,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 pipeline.addFirst("ssl", sslHandler);
             }
 
-            if (NettyFactory.WIRETRACE)
+            if (WIRETRACE)
                 pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
 
             pipeline.addLast("handshake", new Handler());
@@ -339,7 +340,10 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             JVMStabilityInspector.inspectThrowable(cause);
             resultPromise.tryFailure(cause);
-            logger.error("Failed to properly handshake with peer {}. Closing the channel.", settings.endpoint, cause);
+            if (isConnectionResetException(cause))
+                logger.info("Failed to connect to peer {}", settings.endpoint, cause);
+            else
+                logger.error("Failed to handshake with peer {}", settings.endpoint, cause);
             ctx.close();
         }
     }
