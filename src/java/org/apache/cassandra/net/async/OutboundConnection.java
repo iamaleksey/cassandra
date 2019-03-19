@@ -321,8 +321,9 @@ public class OutboundConnection
     {
         droppedDueToOverloadUpdater.incrementAndGet(this);
         droppedBytesDueToOverloadUpdater.addAndGet(this, canonicalSize(msg));
-        noSpamLogger.warn("{} queue critically long ({} local, {} endpoint, {} global); dropping outbound messages",
+        noSpamLogger.warn("{} overloaded; dropping {} message (queue: {} local, {} endpoint, {} global)",
                           id(),
+                          FBUtilities.prettyPrintMemory(canonicalSize(msg)),
                           FBUtilities.prettyPrintMemory(queueSizeInBytes),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
