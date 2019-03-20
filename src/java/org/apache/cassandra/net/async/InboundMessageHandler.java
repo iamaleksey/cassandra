@@ -123,20 +123,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
      * and bound processing to just one message. This is the case when we go beyond either per-endpoing reserve capacity
      * or global reserve capacity.
      */
-    private static class ProcessingContext
+    private static class NextReadContext
     {
-        private final boolean pauseAfterOneMessage;
-        private final Limit endpointReserve;
-        private final Limit globalReserve;
-
-        private ProcessingContext(boolean pauseAfterOneMessage, Limit endpointReserve, Limit globalReserve)
-        {
-            this.pauseAfterOneMessage = pauseAfterOneMessage;
-            this.endpointReserve = endpointReserve;
-            this.globalReserve = globalReserve;
-        }
+        private boolean pauseAfterOneMessage;
+        private Limit endpointReserve;
+        private Limit globalReserve;
     }
-    private ProcessingContext context;
+    private final NextReadContext context = new NextReadContext();
 
     InboundMessageHandler(Button button,
 
@@ -182,7 +175,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         this.processor = processor;
 
-        this.context = new ProcessingContext(false, endpointReserveCapacity, globalReserveCapacity);
+        // set up next read context
+        context.pauseAfterOneMessage = false;
+        context.endpointReserve = endpointReserveCapacity;
+        context.globalReserve = globalReserveCapacity;
     }
 
     @Override
@@ -296,8 +292,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (shouldPause)
             button.pause();
 
-        if (context.pauseAfterOneMessage) // reset context
-            context = new ProcessingContext(false, endpointReserveCapacity, globalReserveCapacity);
+        /*
+         * Reset processing context to normal
+         */
+        context.pauseAfterOneMessage = false;
+        context.endpointReserve = endpointReserveCapacity;
+        context.globalReserve = globalReserveCapacity;
 
         return isBlocked;
     }
@@ -459,7 +459,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            context = new ProcessingContext(true, endpointReserve, globalReserve);
+
+            context.pauseAfterOneMessage = true;
+            context.endpointReserve = endpointReserve;
+            context.globalReserve = globalReserve;
+
             button.resume();
         }
     }
