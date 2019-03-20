@@ -171,4 +171,19 @@ public class HandshakeTest
         Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
     }
 
+    @Test
+    public void testSendCompatibleOldVersion40() throws InterruptedException, ExecutionException
+    {
+        Result result = handshake(VERSION_30, VERSION_30, VERSION_30, VERSION_30, current_version);
+        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        Assert.assertEquals(current_version, result.retry().withMessagingVersion);
+    }
+
+    @Test
+    public void testSendIncompatibleOldVersion40() throws InterruptedException, ExecutionException
+    {
+        Result result = handshake(VERSION_30, VERSION_30, VERSION_30, current_version, current_version);
+        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
+        Assert.assertEquals(current_version, result.retry().withMessagingVersion);
+    }
 }

@@ -287,7 +287,12 @@ public class HandshakeProtocol
             int useMessagingVersion = 0;
             if (maxMessagingVersion >= VERSION_40)
             {
-                if (in.readableBytes() < 8)
+                // This should not happen in real life: 3.0 node will not respond with 4.0 message; 4.0 node will not respond with 3.0 message.
+                if (in.readableBytes() == 0)
+                {
+                    return new AcceptInbound(useMessagingVersion, maxMessagingVersion);
+                }
+                else if (in.readableBytes() < 8)
                 {
                     in.readerIndex(readerIndex);
                     return null;
