@@ -47,17 +47,13 @@ import static org.apache.cassandra.net.async.Crc.computeCrc32;
 
 /**
  * Messages for the handshake phase of the internode protocol.
+ *
+ * The modern handshake is composed of 2 messages: Initiate and Accept
  * <p>
- * The handshake's main purpose is to establish a protocol version that both side can talk, as well as exchanging a few connection
- * options/parameters. The handshake is composed of 3 messages, the first being sent by the initiator of the connection. The other
+ * The legacy handshake is composed of 3 messages, the first being sent by the initiator of the connection. The other
  * side then answer with the 2nd message. At that point, if a version mismatch is detected by the connection initiator,
  * it will simply disconnect and reconnect with a more appropriate version. But if the version is acceptable, the connection
  * initiator sends the third message of the protocol, after which it considers the connection ready.
- * <p>
- * See below for a more precise description of each of those 3 messages.
- * <p>
- * Note that this handshake protocol doesn't fully apply to streaming. For streaming, only the first message is sent,
- * after which the streaming protocol takes over (not documented here)
  */
 public class HandshakeProtocol
 {
@@ -79,6 +75,8 @@ public class HandshakeProtocol
      *      - the "mode" of the connection: whether it is for streaming or for messaging.
      *      - whether compression should be used or not (if it is, compression is enabled _after_ the last message of the
      *        handshake has been sent).
+     *   3) the connection initiator's broadcast address
+     *   4) a CRC protecting the message from corruption
      * <p>
      * More precisely, connection flags:
      * <pre>
@@ -86,15 +84,16 @@ public class HandshakeProtocol
      *                      1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3
      *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * |U U C M       |                |                               |
-     * |N N M O       |     VERSION    |             unused            |
-     * |U U P D       |                |                               |
+     * |U U C M C      |    REQUEST    |      MIN      |      MAX      |
+     * |N N M O R      |    VERSION    |   SUPPORTED   |   SUPPORTED   |
+     * |U U P D C      |  (DEPRECATED) |    VERSION    |    VERSION    |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * }
      * </pre>
      * UNU - unused bits lowest two bits; from a historical note: used to be "serializer type," which was always Binary
      * CMP - compression enabled bit
-     * MOD - connection mode. If the bit is on, the connection is for streaming; if the bit is off, it is for inter-node messaging.
+     * MOD - connection mode; if the bit is on, the connection is for streaming; if the bit is off, it is for inter-node messaging.
+     * CRC - crc enabled bit
      * VERSION - {@link org.apache.cassandra.net.MessagingService#current_version}
      */
     public static class Initiate
@@ -226,8 +225,8 @@ public class HandshakeProtocol
         @Override
         public String toString()
         {
-            return String.format("First(request: %d, min: %d, max: %d, mode: %s, compress: %b)",
-                                 requestMessagingVersion, acceptVersions.min, acceptVersions.max, mode, withCompression);
+            return String.format("Initiate(request: %d, min: %d, max: %d, mode: %s, compress: %b, from: %s)",
+                                 requestMessagingVersion, acceptVersions.min, acceptVersions.max, mode, withCompression, from);
         }
     }
 
@@ -236,11 +235,15 @@ public class HandshakeProtocol
      * The second message of the handshake, sent by the node receiving the {@link Initiate} back to the
      * connection initiator.
      *
-     * This message contains the messaging version of the peer sending this message
-     * and the negotiated messaging version if one could be accepted by both peers,
-     * or if not the closest version that this peer could support to the ones requested.
+     * This message contains
+     *   1) the messaging version of the peer sending this message
+     *   2) the negotiated messaging version if one could be accepted by both peers,
+     *      or if not the closest version that this peer could support to the ones requested
+     *   3) a CRC protectingn the integrity of the message
+     *
+     * Note that the pre40 equivalent of this message contains ONLY the messaging version of the peer.
      */
-    static class AcceptInbound
+    static class Accept
     {
         /** The messaging version sent by the receiving peer (int). */
         private static final int MAX_LENGTH = 12;
@@ -248,7 +251,7 @@ public class HandshakeProtocol
         final int useMessagingVersion;
         final int maxMessagingVersion;
 
-        AcceptInbound(int useMessagingVersion, int maxMessagingVersion)
+        Accept(int useMessagingVersion, int maxMessagingVersion)
         {
             this.useMessagingVersion = useMessagingVersion;
             this.maxMessagingVersion = maxMessagingVersion;
@@ -275,7 +278,7 @@ public class HandshakeProtocol
             return buffer;
         }
 
-        static AcceptInbound maybeDecode(ByteBuf in) throws InvalidCrc
+        static Accept maybeDecode(ByteBuf in) throws InvalidCrc
         {
             int readerIndex = in.readerIndex();
             if (in.readableBytes() < 4)
@@ -296,27 +299,27 @@ public class HandshakeProtocol
                 if (read != computed)
                     throw new InvalidCrc(read, computed);
             }
-            return new AcceptInbound(useMessagingVersion, maxMessagingVersion);
+            return new Accept(useMessagingVersion, maxMessagingVersion);
         }
 
         @VisibleForTesting
         @Override
         public boolean equals(Object other)
         {
-            return other instanceof AcceptInbound
-                   && this.useMessagingVersion == ((AcceptInbound) other).useMessagingVersion
-                   && this.maxMessagingVersion == ((AcceptInbound) other).maxMessagingVersion;
+            return other instanceof Accept
+                   && this.useMessagingVersion == ((Accept) other).useMessagingVersion
+                   && this.maxMessagingVersion == ((Accept) other).maxMessagingVersion;
         }
 
         @Override
         public String toString()
         {
-            return String.format("AcceptInbound(use: %d, max: %d)", useMessagingVersion, maxMessagingVersion);
+            return String.format("Accept(use: %d, max: %d)", useMessagingVersion, maxMessagingVersion);
         }
     }
 
     /**
-     * The third message of the handshake, sent by the connection initiator on reception of {@link AcceptInbound}.
+     * The third message of the handshake, sent by pre40 nodes on reception of {@link Accept}.
      * This message contains:
      *   1) The connection initiator's {@link org.apache.cassandra.net.MessagingService#current_version} (4 bytes).
      *      This indicates the max messaging version supported by this node.
@@ -324,8 +327,7 @@ public class HandshakeProtocol
      *      This can be either 7 bytes for an IPv4 address, or 19 bytes for an IPv6 one, post40.
      *      This can be either 5 bytes for an IPv4 address, or 17 bytes for an IPv6 one, pre40.
      * <p>
-     * This message concludes the handshake protocol. After that, the connection will used either for streaming, or to
-     * send messages. If the connection is to be compressed, compression is enabled only after this message is sent/received.
+     * This message concludes the legacy handshake protocol.
      */
     static class ConfirmOutboundPre40
     {
@@ -396,7 +398,7 @@ public class HandshakeProtocol
         @Override
         public String toString()
         {
-            return String.format("Third(maxMessagingVersion: %d; address: %s)", maxMessagingVersion, from);
+            return String.format("ConfirmOutboundPre40(maxMessagingVersion: %d; address: %s)", maxMessagingVersion, from);
         }
     }
 }

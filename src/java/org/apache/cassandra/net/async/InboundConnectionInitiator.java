@@ -261,7 +261,7 @@ public class InboundConnectionInitiator
                 }
 
                 int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
-                ByteBuf flush = new HandshakeProtocol.AcceptInbound(useMessagingVersion, accept.max).encode(ctx.alloc());
+                ByteBuf flush = new HandshakeProtocol.Accept(useMessagingVersion, accept.max).encode(ctx.alloc());
 
                 AsyncChannelPromise.writeAndFlush(ctx, flush, (ChannelFutureListener) future -> {
                     if (!future.isSuccess())
@@ -315,7 +315,7 @@ public class InboundConnectionInitiator
                     {
                         // if this version is < the MS version the other node is trying
                         // to connect with, the other node will disconnect
-                        ByteBuf response = HandshakeProtocol.AcceptInbound.respondPre40(settings.acceptMessaging.max, ctx.alloc());
+                        ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.max, ctx.alloc());
                         AsyncChannelPromise.writeAndFlush(ctx, response,
                               (ChannelFutureListener) future -> {
                                    if (!future.isSuccess())

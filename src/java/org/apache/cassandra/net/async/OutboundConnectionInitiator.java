@@ -51,7 +51,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.HandshakeProtocol.Initiate;
 import org.apache.cassandra.net.async.HandshakeProtocol.Mode;
-import org.apache.cassandra.net.async.HandshakeProtocol.AcceptInbound;
+import org.apache.cassandra.net.async.HandshakeProtocol.Accept;
 import org.apache.cassandra.net.async.OutboundConnection.Type;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
@@ -80,7 +80,7 @@ import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
  * See {@link Result} for details about the different result states.
  * <p>
  * This class extends {@link ByteToMessageDecoder}, which is a {@link ChannelInboundHandler}, because this handler
- * waits for the peer's handshake response (the {@link AcceptInbound} of the internode messaging handshake protocol).
+ * waits for the peer's handshake response (the {@link Accept} of the internode messaging handshake protocol).
  */
 public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionInitiator.Result.Success>
 {
@@ -251,7 +251,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             try
             {
-                AcceptInbound msg = AcceptInbound.maybeDecode(in);
+                Accept msg = Accept.maybeDecode(in);
                 if (msg == null)
                     return;
 
