@@ -27,6 +27,7 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 
@@ -166,6 +167,15 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
+    /**
+     * The payload bytes of a complete frame, i.e. a frame stripped of its headers and trailers,
+     * with any verification supported by the protocol confirmed.
+     *
+     * If {@code isSelfContained} the payload contains one or more {@link Message}, all of which
+     * may be parsed entirely from the bytes provided.  Otherwise, only a part of exactly one
+     * {@link Message} is contained in the payload; it can be relied upon that this partial {@link Message}
+     * will only be delivered in its own unique {@link Frame}.
+     */
     final static class IntactFrame extends Frame
     {
         final boolean isSelfContained;
@@ -178,6 +188,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
+    /**
+     * A corrupted frame was encountered; this represents the knowledge we have about this frame,
+     * and whether or not the stream is recoverable.
+     */
     final static class CorruptFrame extends Frame
     {
         final boolean isSelfContained;
@@ -208,11 +222,25 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     }
 
     ByteBuffer stash;
+    // to permit use of Consumer without generating garbage,
+    // we stash the ChannelHandlerContext we constructed it against.
     private ChannelHandlerContext ctx;
     private Consumer<Frame> consumer;
 
+    /**
+     * Read a header that is 8 bytes or shorter, without modifying the buffer position.
+     * If your header is longer than this, you will need to implement your own {@link #decode}
+     */
     abstract long readHeader(ByteBuffer in, int begin);
+    /**
+     * Verify the header, and return an unrecoverable CorruptFrame if it is corrupted
+     * @return null or CorruptFrame.unrecoverable
+     */
     abstract CorruptFrame verifyHeader(long header);
+
+    /**
+     * Calculate the full frame length from info provided by the header, including the length of the header and any triler
+     */
     abstract int frameLength(long header);
 
     /**
@@ -221,21 +249,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     abstract Frame unpackFrame(SharedBytes bytes, int begin, int end, long header, boolean transferOwnership);
 
+    abstract void decode(Consumer<Frame> consumer, SharedBytes bytes);
+
     /**
-     * If the new logical slice would reach the end of the provided slice, cannibalise it
+     * Decode a number of frames using the above abstract method implementations.
+     * It is expected for this method to be invoked by the implementing class' {@link #decode(Consumer, SharedBytes)}
+     * so that this implementation will be inlined, and all of the abstract method implementations will also be inlined.
+     * TODO verify this in assembly
      */
-    public static SharedBytes slice(SharedBytes bytes, int sliceBegin, int sliceEnd, boolean transferOwnership)
-    {
-        if (transferOwnership)
-        {
-            bytes.get().position(sliceBegin)
-                       .limit(sliceEnd);
-            return bytes;
-        }
-
-        return bytes.slice(sliceBegin, sliceEnd);
-    }
-
     @Inline
     protected final void decode(Consumer<Frame> consumer, SharedBytes bytes, int headerLength)
     {
@@ -324,6 +345,21 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
+    /**
+     * If the new logical slice would reach the end of the provided slice, cannibalise it
+     */
+    public static SharedBytes slice(SharedBytes bytes, int sliceBegin, int sliceEnd, boolean transferOwnership)
+    {
+        if (transferOwnership)
+        {
+            bytes.get().position(sliceBegin)
+                 .limit(sliceEnd);
+            return bytes;
+        }
+
+        return bytes.slice(sliceBegin, sliceEnd);
+    }
+
     public void handlerAdded(ChannelHandlerContext ctx)
     {
         this.ctx = ctx;
@@ -335,8 +371,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         this.ctx = null;
         this.consumer = null;
     }
-
-    abstract void decode(Consumer<Frame> consumer, SharedBytes bytes);
 
     public void channelRead(ChannelHandlerContext ctx, Object msg)
     {
@@ -374,13 +408,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         newBuffer.put(buffer);
         BufferPool.put(buffer, false);
         return newBuffer;
-    }
-
-    ByteBuffer unstash()
-    {
-        ByteBuffer result = stash;
-        stash = null;
-        return result;
     }
 
     // visible only for legacy/none decode
