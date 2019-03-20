@@ -29,7 +29,7 @@ import static java.lang.Math.max;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 @ChannelHandler.Sharable
-class FrameDecoderNone extends FrameDecoder
+class FrameDecoderLegacy extends FrameDecoder
 {
     long readHeader(ByteBuffer in, int begin)
     {
@@ -51,14 +51,9 @@ class FrameDecoderNone extends FrameDecoder
     private final int messagingVersion;
     private int remainingBytesInLargeMessage = 0;
 
-    FrameDecoderNone(int messagingVersion) { this.messagingVersion = messagingVersion; }
+    FrameDecoderLegacy(int messagingVersion) { this.messagingVersion = messagingVersion; }
 
     void decode(Consumer<Frame> consumer, SharedBytes bytes)
-    {
-        consumer.accept(new IntactFrame(false, bytes));
-    }
-
-    void _decode(Consumer<Frame> consumer, SharedBytes bytes)
     {
         boolean ownsBytes = true;
         ByteBuffer in = bytes.get();

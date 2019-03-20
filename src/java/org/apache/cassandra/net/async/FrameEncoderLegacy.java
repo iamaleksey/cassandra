@@ -22,14 +22,12 @@ import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
 
 @ChannelHandler.Sharable
-class FrameEncoderNone extends FrameEncoder
+class FrameEncoderLegacy extends FrameEncoder
 {
-    public static final FrameEncoderNone instance = new FrameEncoderNone();
+    public static final FrameEncoderLegacy instance = new FrameEncoderLegacy();
 
     ByteBuf encode(boolean isSelfContained, ByteBuffer buffer)
     {

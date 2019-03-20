@@ -19,14 +19,13 @@
 package org.apache.cassandra.net.async;
 
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.compression.Lz4FrameEncoder;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
 @ChannelHandler.Sharable
-class FrameEncoderLegacyLZ4 extends FrameEncoderNone
+class FrameEncoderLegacyLZ4 extends FrameEncoderLegacy
 {
     public static final FrameEncoderLegacyLZ4 instance = new FrameEncoderLegacyLZ4();
 

@@ -66,14 +66,16 @@ class FrameEncoderLZ4 extends FrameEncoder
 
     public ByteBuf encode(boolean isSelfContained, ByteBuffer in)
     {
-        int uncompressedLength = in.remaining();
-        if (uncompressedLength >= 1 << 17)
-            throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
-
-        int maxOutputLength = compressor.maxCompressedLength(uncompressedLength);
-        ByteBuffer frame = BufferPool.get(HEADER_AND_TRAILER_LENGTH + maxOutputLength, BufferType.OFF_HEAP);
+        ByteBuffer frame = null;
         try
         {
+            int uncompressedLength = in.remaining();
+            if (uncompressedLength >= 1 << 17)
+                throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
+
+            int maxOutputLength = compressor.maxCompressedLength(uncompressedLength);
+            frame = BufferPool.get(HEADER_AND_TRAILER_LENGTH + maxOutputLength, BufferType.OFF_HEAP);
+
             int compressedLength = compressor.compress(in, in.position(), uncompressedLength, frame, HEADER_LENGTH, maxOutputLength);
 
             if (compressedLength >= uncompressedLength)
@@ -104,7 +106,8 @@ class FrameEncoderLZ4 extends FrameEncoder
         }
         catch (Throwable t)
         {
-            BufferPool.put(frame, false);
+            if (frame != null)
+                BufferPool.put(frame, false);
             throw t;
         }
         finally

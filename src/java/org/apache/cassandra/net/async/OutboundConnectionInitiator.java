@@ -23,7 +23,6 @@ import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -278,7 +277,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                             else if (settings.withCrc)
                                 frameEncoder = FrameEncoderCrc.instance;
                             else
-                                frameEncoder = FrameEncoderNone.instance;
+                                frameEncoder = FrameEncoderUnprotected.instance;
 
                             result = (Result<SuccessType>) messagingSuccess(ctx.channel(), useMessagingVersion, frameEncoder.allocator());
                         }
@@ -297,7 +296,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         if (settings.withCompression)
                             frameEncoder = FrameEncoderLegacyLZ4.instance;
                         else
-                            frameEncoder = FrameEncoderNone.instance;
+                            frameEncoder = FrameEncoderLegacy.instance;
 
                         result = (Result<SuccessType>) messagingSuccess(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
                     }

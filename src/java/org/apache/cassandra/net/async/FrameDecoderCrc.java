@@ -35,26 +35,26 @@ public final class FrameDecoderCrc extends FrameDecoder
         return new FrameDecoderCrc();
     }
 
-    private static final int HEADER_LENGTH = 6;
+    static final int HEADER_LENGTH = 6;
     private static final int TRAILER_LENGTH = 4;
     private static final int HEADER_AND_TRAILER_LENGTH = 10;
 
-    private static boolean isSelfContained(long header6b)
+    static boolean isSelfContained(long header6b)
     {
         return 0 != (header6b & (1L << 17));
     }
 
-    private static int payloadLength(long header6b)
+    static int payloadLength(long header6b)
     {
         return ((int) header6b) & 0x1FFFF;
     }
 
-    private static int headerCrc(long header6b)
+    static int headerCrc(long header6b)
     {
         return ((int) (header6b >>> 24)) & 0xFFFFFF;
     }
 
-    final long readHeader(ByteBuffer frame, int begin)
+    static long readHeader6b(ByteBuffer frame, int begin)
     {
         long header6b;
         if (frame.limit() - begin >= 8)
@@ -73,12 +73,22 @@ public final class FrameDecoderCrc extends FrameDecoder
         return header6b;
     }
 
-    final CorruptFrame verifyHeader(long header6b)
+    static CorruptFrame verifyHeader6b(long header6b)
     {
         int computeLengthCrc = crc24(header6b, 3);
         int readLengthCrc = headerCrc(header6b);
 
         return readLengthCrc == computeLengthCrc ? null : CorruptFrame.unrecoverable(readLengthCrc, computeLengthCrc);
+    }
+
+    final long readHeader(ByteBuffer frame, int begin)
+    {
+        return readHeader6b(frame, begin);
+    }
+
+    final CorruptFrame verifyHeader(long header6b)
+    {
+        return verifyHeader6b(header6b);
     }
 
     final int frameLength(long header6b)

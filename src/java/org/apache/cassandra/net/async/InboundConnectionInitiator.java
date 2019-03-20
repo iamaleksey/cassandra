@@ -410,8 +410,10 @@ public class InboundConnectionInitiator
                 frameDecoder = new FrameDecoderLegacyLZ4(useMessagingVersion);
             else if (initiate.withCrc)
                 frameDecoder = FrameDecoderCrc.create();
+            else if (useMessagingVersion >= VERSION_40)
+                frameDecoder = new FrameDecoderUnprotected();
             else
-                frameDecoder = new FrameDecoderNone(useMessagingVersion);
+                frameDecoder = new FrameDecoderLegacy(useMessagingVersion);
 
             frameDecoder.addLastTo(pipeline);
 
