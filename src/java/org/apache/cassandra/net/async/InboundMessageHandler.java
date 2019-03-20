@@ -38,12 +38,14 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.EventExecutorGroup;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.Crc.InvalidCrc;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
@@ -313,6 +315,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (expiresAtNanos < currentTimeNanos)
         {
+            onExpired.call(serializer.getVerb(buf, version), size, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+
             int skipped = contained ? size : buf.remaining();
             receivedBytes += skipped;
             bytes.skipBytes(skipped);
@@ -335,12 +339,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 break;
         }
 
+        long id = serializer.getId(buf, version);
+        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
+
         if (!contained)
-            return processLargeMessageUncontained(bytes, size);
+            return processLargeMessageUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
         else if (size <= largeThreshold)
-            return processSmallMessageContained(bytes, size);
+            return processSmallMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
         else
-            return processLargeMessageContained(bytes, size);
+            return processLargeMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
     }
 
     private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
@@ -348,7 +355,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         ticket = queue.registerAndSignal(bytesRequested, expiresAtNanos, channel.eventLoop(), onCapacityRegained, this::exceptionCaught, this::resumeIfNotBlocked);
     }
 
-    private boolean processSmallMessageContained(SharedBytes bytes, int size)
+    private boolean processSmallMessageContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
@@ -358,7 +365,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         final int end = buf.limit();
         buf.limit(begin + size); // cap to expected message size
 
+        Throwable exception = null;
         Message<?> message = null;
+
         try (DataInputBuffer in = new DataInputBuffer(buf, false))
         {
             message = serializer.deserialize(in, peer, version);
@@ -367,52 +376,69 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
             onError.call(e, size);
+            exception = e;
         }
         catch (IOException e)
         {
             logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
             onError.call(e, size);
+            exception = e;
         }
         catch (Throwable t)
         {
             releaseCapacity(size);
             onError.call(t, size);
+            if (callBackOnFailure)
+                sendFailureResponse(id, expiresAtNanos, t);
             throw t;
         }
         finally
         {
             buf.position(begin + size);
             buf.limit(end);
+
+            if (null == message)
+                releaseCapacity(size);
         }
 
         if (null != message)
             processor.process(message, size, this::onMessageProcessed, this::onMessageExpired);
-        else
-            releaseCapacity(size);
+        else if (null != exception && callBackOnFailure)
+            sendFailureResponse(id, expiresAtNanos, exception);
 
         return true;
     }
 
-    private boolean processLargeMessageContained(SharedBytes bytes, int size)
+    private boolean processLargeMessageContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
 
-        LargeCoprocessor coprocessor = new LargeCoprocessor(size);
+        LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = coprocessor.supplyAndCloseWithoutSignaling(bytes.sliceAndConsume(size));
         largeExecutor.submit(coprocessor);
         return isKeepingUp;
     }
 
-    private boolean processLargeMessageUncontained(SharedBytes bytes, int size)
+    private boolean processLargeMessageUncontained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         int readableBytes = bytes.readableBytes();
         receivedBytes += readableBytes;
 
-        startCoprocessor(size);
+        startCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
         largeBytesRemaining = size - readableBytes;
         return isKeepingUp;
+    }
+
+    /*
+     * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
+     * on the other end to expire.
+     */
+    private void sendFailureResponse(long id, long expiresAtNanos, Throwable exception)
+    {
+        Message response = Message.failureResponse(id, expiresAtNanos, RequestFailureReason.forException(exception));
+        MessagingService.instance().sendOneWay(response, peer);
     }
 
     // wrap parent callback to release capacity first
@@ -561,9 +587,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         onClosed.call(this);
     }
 
-    private void startCoprocessor(int messageSize)
+    private void startCoprocessor(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
-        largeCoprocessor = new LargeCoprocessor(messageSize);
+        largeCoprocessor = new LargeCoprocessor(messageSize, id, expiresAtNanos, callBackOnFailure);
         largeExecutor.submit(largeCoprocessor);
     }
 
@@ -579,17 +605,22 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final class LargeCoprocessor implements Runnable
     {
         private final int messageSize;
+        private final long id;
+        private final long expiresAtNanos;
+        private final boolean callBackOnFailure;
+
         private final AsyncInputPlus input;
 
         private final int maxUnconsumedBytes;
 
-        private LargeCoprocessor(int messageSize)
+        private LargeCoprocessor(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure)
         {
             this.messageSize = messageSize;
+            this.id = id;
+            this.expiresAtNanos = expiresAtNanos;
+            this.callBackOnFailure = callBackOnFailure;
 
             this.input = new AsyncInputPlus(this::onBufConsumed);
-
-
             /*
              * Allow up to 2x large message threshold bytes of ByteBufs in coprocessors' queues before pausing reads
              * from the channel. Signal the handler to resume reading from the channel once we've consumed enough
@@ -617,7 +648,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         private void processLargeMessage()
         {
+            Throwable exception = null;
             Message<?> message = null;
+
             try
             {
                 message = serializer.deserialize(input, peer, version);
@@ -629,32 +662,34 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                  * we are done here, and AIP will have closed itself.
                  */
                 onError.call(e, messageSize);
+                exception = e;
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
                 noSpamLogger.info("{} caught while reading a large message from {}", e.getClass().getSimpleName(), peer, e);
                 onError.call(e, messageSize);
-            }
-            catch (IOException e)
-            {
-                logger.error("Unexpected IOException caught while reading a large message from {}", peer, e);
-                onError.call(e, messageSize);
+                exception = e;
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
                 logger.error("Unexpected exception caught while reading a large message from {}", peer, t);
                 onError.call(t, messageSize);
+                channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
+                exception = t;
             }
             finally
             {
+                if (null == message)
+                    releaseCapacity(messageSize);
+
                 input.close();
             }
 
             if (null != message)
                 processor.process(message, messageSize, InboundMessageHandler.this::onMessageProcessed, InboundMessageHandler.this::onMessageExpired);
-            else
-                releaseCapacity(messageSize);
+            else if (null != exception && callBackOnFailure)
+                sendFailureResponse(id, expiresAtNanos, exception);
         }
 
         void stop()

@@ -225,6 +225,11 @@ public class Message<T>
         return new Message<>(from, payload, noFlags(), buildParameters(parameterType, parameterValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
     }
 
+    public static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
+    {
+        return outWithParameter(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
+    }
+
     public static <T> Message<T> internalResponse(Verb verb, T payload)
     {
         assert verb.isResponse();
@@ -243,7 +248,7 @@ public class Message<T>
 
     public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
     {
-        return outWithParameter(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
+        return failureResponse(id, expiresAtNanos, reason);
     }
 
     public static <T> Builder<T> builder(Message<T> message)
@@ -530,6 +535,11 @@ public class Message<T>
             return version >= VERSION_40 ? messageSizePost40(buf, index, limit) : messageSizePre40(buf, index, limit);
         }
 
+        public long getId(ByteBuffer buf, int version)
+        {
+            return version >= VERSION_40 ? VIntCoding.getUnsignedVInt(buf, buf.position()) : buf.getInt(buf.position() + 4);
+        }
+
         public long getCreatedAtNanos(ByteBuffer buf, InetAddressAndPort peer, int version)
         {
             return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, peer) : getCreatedAtNanosPre40(buf, peer);
@@ -543,6 +553,11 @@ public class Message<T>
         public Verb getVerb(ByteBuffer buf, int version)
         {
             return version >= VERSION_40 ? getVerbPost40(buf) : getVerbPre40(buf);
+        }
+
+        public boolean getCallBackOnFailure(ByteBuffer buf, int version)
+        {
+            return version >= VERSION_40 && getCallBackOnFailurePost40(buf);
         }
 
         /*
@@ -664,6 +679,17 @@ public class Message<T>
             index += CREATION_TIME_SIZE;
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
             return Verb.fromId(Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index)));
+        }
+
+        private boolean getCallBackOnFailurePost40(ByteBuffer buf)
+        {
+            int index = buf.position();
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
+            index += CREATION_TIME_SIZE;
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
+            index += VIntCoding.computeUnsignedVIntSize(buf, index); // verb
+            int flags = Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index));
+            return containsFlag(flags, MessageFlag.CALL_BACK_ON_FAILURE);
         }
 
         /*

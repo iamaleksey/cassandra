@@ -40,7 +40,12 @@ public enum RequestFailureReason
     /**
      * The data node read too many tombstones when attempting to execute a read query (see tombstone_failure_threshold).
      */
-    READ_TOO_MANY_TOMBSTONES (1);
+    READ_TOO_MANY_TOMBSTONES (1),
+
+    /**
+     * Unknown table id or column encountered, or otherwise incompatible schema.
+     */
+    INCOMPATIBLE_SCHEMA      (2);
 
     public static final Serializer serializer = new Serializer();
 
@@ -64,7 +69,13 @@ public enum RequestFailureReason
 
     public static RequestFailureReason forException(Throwable t)
     {
-        return t instanceof TombstoneOverwhelmingException ? READ_TOO_MANY_TOMBSTONES : UNKNOWN;
+        if (t instanceof TombstoneOverwhelmingException)
+            return READ_TOO_MANY_TOMBSTONES;
+
+        if (t instanceof UnknownColumnException || t instanceof UnknownTableException)
+            return INCOMPATIBLE_SCHEMA;
+
+        return UNKNOWN;
     }
 
     public static final class Serializer implements IVersionedSerializer<RequestFailureReason>
