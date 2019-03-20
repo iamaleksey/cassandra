@@ -415,10 +415,12 @@ public class InboundConnectionInitiator
             else
                 frameDecoder = new FrameDecoderLegacy(useMessagingVersion);
 
+            Button button = new Button();
+
             frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =
-                instance().getInbound(from).createHandler(pipeline.channel(), useMessagingVersion);
+                instance().getInbound(from).createHandler(button, pipeline.channel(), useMessagingVersion);
             pipeline.addLast("deserialize", handler);
 
             pipeline.remove(this);

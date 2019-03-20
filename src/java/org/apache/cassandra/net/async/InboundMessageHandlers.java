@@ -70,10 +70,12 @@ public final class InboundMessageHandlers
         this.metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(Channel channel, int version)
+    InboundMessageHandler createHandler(Button button, Channel channel, int version)
     {
         InboundMessageHandler handler =
-            new InboundMessageHandler(channel,
+            new InboundMessageHandler(button,
+
+                                      channel,
                                       peer,
                                       version,
 

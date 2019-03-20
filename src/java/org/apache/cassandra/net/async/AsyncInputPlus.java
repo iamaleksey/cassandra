@@ -95,6 +95,15 @@ class AsyncInputPlus extends RebufferingInputStream
         isClosed = true;
     }
 
+    void supplyAndCloseWithoutSignaling(SharedBytes bytes)
+    {
+        if (isClosed)
+            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncInputPlus");
+
+        queue.add(bytes);
+        queue.add(CLOSE_INPUT);
+    }
+
     void supply(SharedBytes bytes)
     {
         if (isClosed)

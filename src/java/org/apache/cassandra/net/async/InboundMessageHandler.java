@@ -40,7 +40,6 @@ import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.EventExecutorGroup;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
@@ -61,7 +60,6 @@ import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.min;
 
@@ -75,8 +73,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private static final Message.Serializer serializer = Message.serializer;
 
-    private enum State { ACTIVE, AHEAD_OF_COPROCESSORS, OVER_RESERVE_CAPACITY, CLOSED }
-    private State state = State.ACTIVE;
+    private boolean isClosed;
+    private boolean isBlocked;
+
+    private final Button button;
 
     private final Channel channel;
     private final InetAddressAndPort peer;
@@ -118,7 +118,29 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandler.class, "largeUnconsumedBytes");
 
-    InboundMessageHandler(Channel channel,
+    /*
+     * Context for next invocation of channelRead(). On occasion, it's necessary to override endpoint and global reserves,
+     * and bound processing to just one message. This is the case when we go beyond either per-endpoing reserve capacity
+     * or global reserve capacity.
+     */
+    private static class ProcessingContext
+    {
+        private final boolean pauseAfterOneMessage;
+        private final Limit endpointReserve;
+        private final Limit globalReserve;
+
+        private ProcessingContext(boolean pauseAfterOneMessage, Limit endpointReserve, Limit globalReserve)
+        {
+            this.pauseAfterOneMessage = pauseAfterOneMessage;
+            this.endpointReserve = endpointReserve;
+            this.globalReserve = globalReserve;
+        }
+    }
+    private ProcessingContext context;
+
+    InboundMessageHandler(Button button,
+
+                          Channel channel,
                           InetAddressAndPort peer,
                           int version,
 
@@ -138,6 +160,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                           MessageProcessor processor)
     {
+        this.button = button;
+
         this.channel = channel;
         this.peer = peer;
         this.version = version;
@@ -157,187 +181,131 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.onClosed = onClosed;
 
         this.processor = processor;
+
+        this.context = new ProcessingContext(false, endpointReserveCapacity, globalReserveCapacity);
     }
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
-        if (isClosed())
-            Frame.release(msg);
-        else if (msg instanceof CorruptFrame)
-            handleCorruption((CorruptFrame) msg);
+        if (isClosed)
+            Frame.release(msg); // FIXME?
+        else if (msg instanceof IntactFrame)
+            readIntactFrame((IntactFrame) msg);
         else
-            doChannelRead((IntactFrame) msg);
+            readCorruptFrame((CorruptFrame) msg);
     }
 
-    private void doChannelRead(IntactFrame frame) throws InvalidLegacyProtocolMagic
+    private void readIntactFrame(IntactFrame frame) throws InvalidLegacyProtocolMagic
     {
-        final SharedBytes bytes = frame.contents;
-        final int readableBytes = bytes.readableBytes();
+        SharedBytes bytes = frame.contents;
+        ByteBuffer buf = bytes.get();
+        int readableBytes = buf.remaining();
 
-        // some bytes of an expired message in the stream to skip still
-        if (skipBytesRemaining > 0)
+        if (frame.isSelfContained)
         {
-            int skippedBytes = min(readableBytes, skipBytesRemaining);
-            receivedBytes += skippedBytes;
-            bytes.skipBytes(skippedBytes);
-
-            skipBytesRemaining -= skippedBytes;
-            if (skipBytesRemaining > 0)
-            {
-                bytes.release();
-            }
-            else
-            {
-                receivedCount++;
-                processMessages(bytes);
-            }
+            isBlocked = processMessages(true, frame.contents);
         }
-
-        // no large message in-flight
-        else if (largeBytesRemaining == 0)
+        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
-            processMessages(combine(unstash(), bytes));
+            isBlocked = processMessages(false, frame.contents);
         }
-
-        // less than enough bytes to complete the large message in-flight
-        else if (readableBytes < largeBytesRemaining)
+        else if (largeBytesRemaining > 0)
         {
             receivedBytes += readableBytes;
             largeBytesRemaining -= readableBytes;
-            if (!largeCoprocessor.supply(bytes))
-                aheadOfCoprocessors();
-        }
 
-        // just enough bytes to complete the large message in-flight
-        else if (readableBytes == largeBytesRemaining)
-        {
-            receivedCount++;
-            receivedBytes += largeBytesRemaining;
-
-            largeBytesRemaining = 0;
-            if (!largeCoprocessor.supply(bytes))
-                aheadOfCoprocessors();
-            stopCoprocessor();
-        }
-
-        // more than enough bytes to complete the large message in-flight
-        else
-        {
-            receivedCount++;
-            receivedBytes += largeBytesRemaining;
-
-            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(largeBytesRemaining));
-            bytes.skipBytes(largeBytesRemaining);
-            largeBytesRemaining = 0;
-            stopCoprocessor();
+            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
+            if (largeBytesRemaining == 0)
+            {
+                receivedCount++;
+                stopCoprocessor();
+            }
 
             if (!isKeepingUp)
-                aheadOfCoprocessors();
+            {
+                button.pause();
+                isBlocked = true;
+            }
+        }
+        else if (skipBytesRemaining > 0)
+        {
+            receivedBytes += readableBytes;
+            skipBytesRemaining -= readableBytes;
 
-            if (isKeepingUp)
-                processMessages(bytes);
-            else
-                stash(bytes);
+            bytes.skipBytes(readableBytes);
+            if (skipBytesRemaining == 0)
+                receivedCount++;
+        }
+        else
+        {
+            throw new IllegalStateException();
         }
     }
 
-    /*
-     * Handle a corrupted LZ4 frame.
-     */
-    private void handleCorruption(CorruptFrame frame) throws InvalidCrc
+    // FIXME: metrics
+    private void readCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
 
-        final int frameSize = frame.frameSize;
+        int frameSize = frame.frameSize;
         receivedBytes += frameSize;
 
-        /*
-         * Skipping bytes in the middle or at the very end of a large message (small messages never cross lz4 frame boundary)
-         */
-        if (skipBytesRemaining > 0)
+        if (frame.isSelfContained)
         {
-            if (skipBytesRemaining == frameSize)
-                receivedCount++;
-            skipBytesRemaining -= frameSize;
-            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
+            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading messages from {} (corrupted self-contained frame)", peer);
         }
-        /*
-         * Corrupted frame in the middle or at the very end of a large message. Can safely be skipped with only the
-         * large message in flight dropped.
-         *
-         * Close the coprocessor (which will, on close, handle resource release and onError metric update), and switch
-         * to skipping the remaining bytes.
-         */
+        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
+        {
+            noSpamLogger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} (corrupted first frame of a message)", peer);
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
         else if (largeBytesRemaining > 0)
         {
-            if (largeBytesRemaining == frameSize)
-                receivedCount++;
             stopCoprocessor();
             skipBytesRemaining = largeBytesRemaining - frameSize;
             largeBytesRemaining = 0;
             noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
         }
-        /*
-         * First frame of a large message, or a frame of small messages; nothing we can really do here.
-         *
-         * If it's the former, then we'll fail to parse the second frame of a large message whenever it arrives,
-         * and close the channel then.
-         *
-         * If it's the latter, then all the messages in the frame will have to be dropped,
-         * but the following frame, barring further corruption, will be parsed just fine.
-         */
+        else if (skipBytesRemaining > 0)
+        {
+            skipBytesRemaining -= frameSize;
+            if (skipBytesRemaining == 0)
+                receivedCount++;
+            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a message from {}", peer);
+        }
         else
         {
-            if (frame.isSelfContained)
-            {
-                noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading messages from {} (corrupted frame of small messages)", peer);
-            }
-            else
-            {
-                noSpamLogger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} (corrupted first frame of a large message)", peer);
-                throw new InvalidCrc(frame.readCRC, frame.computedCRC);
-            }
+            throw new IllegalStateException();
         }
     }
 
-    private void processMessages(SharedBytes bytes) throws InvalidLegacyProtocolMagic
+    private boolean processMessages(boolean contained, SharedBytes bytes) throws InvalidLegacyProtocolMagic
     {
-        processMessages(bytes, Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
+        boolean isBlocked = false;
+        boolean shouldPause = false;
+
+        while (bytes.isReadable())
+        {
+            isBlocked = !processMessage(bytes, contained, context.endpointReserve, context.globalReserve);
+            if (shouldPause = (isBlocked || context.pauseAfterOneMessage))
+                break;
+        }
+
+        if (shouldPause)
+            button.pause();
+
+        if (context.pauseAfterOneMessage) // reset context
+            context = new ProcessingContext(false, endpointReserveCapacity, globalReserveCapacity);
+
+        return isBlocked;
     }
 
-    /*
-     * Process a stream of messages (potentially not ending with a completely read one). The buffer starts at a boundary
-     * of a new message. Will process at most count messages.
-     */
-    private void processMessages(SharedBytes bytes, int count, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
-    {
-        try
-        {
-            //noinspection StatementWithEmptyBody
-            while (count-- > 0 && processMessage(bytes, endpointReserve, globalReserve));
-        }
-        finally
-        {
-            if (bytes.isReadable())
-                stash(bytes);
-            else
-                bytes.release();
-        }
-    }
-
-    private boolean processMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
-        int messageSize = serializer.messageSize(buf, buf.position(), buf.limit(), version);
-
-        if (messageSize < 0) // not enough bytes to read size of the message
-            return false;
-
-        /*
-         * if we can calculate message size, then at the very least we have enough bytes to read the header fully
-         */
+        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
 
         long currentTimeNanos = ApproximateTime.nanoTime();
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
@@ -345,117 +313,112 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            onExpired.call(serializer.getVerb(buf, version), messageSize, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            int skipped = contained ? size : buf.remaining();
+            receivedBytes += skipped;
+            bytes.skipBytes(skipped);
 
-            int skippedBytes = min(buf.remaining(), messageSize);
-            receivedBytes += skippedBytes;
-            bytes.skipBytes(skippedBytes);
-
-            skipBytesRemaining = messageSize - skippedBytes;
-            if (skipBytesRemaining == 0)
+            if (contained)
                 receivedCount++;
-            return buf.hasRemaining();
+            else
+                skipBytesRemaining = size - skipped;
+
+            return true;
         }
 
-        Outcome outcome = acquireCapacity(endpointReserve, globalReserve, messageSize);
-        if (outcome != Outcome.SUCCESS)
+        switch (acquireCapacity(endpointReserve, globalReserve, size))
         {
-            overReserveCapacity(messageSize, expiresAtNanos, outcome);
-            return false;
+            case INSUFFICIENT_ENDPOINT:
+                ticket = endpointWaitQueue.registerAndSignal(size,
+                                                             expiresAtNanos,
+                                                             channel.eventLoop(),
+                                                             this::onEndpointReserveCapacityRegained,
+                                                             this::exceptionCaught,
+                                                             this::resumeIfNotBlocked);
+                break;
+            case INSUFFICIENT_GLOBAL:
+                ticket = globalWaitQueue.registerAndSignal(size,
+                                                           expiresAtNanos,
+                                                           channel.eventLoop(),
+                                                           this::onGlobalReserveCapacityRegained,
+                                                           this::exceptionCaught,
+                                                           this::resumeIfNotBlocked);
+                break;
+            case SUCCESS:
         }
 
-        return messageSize <= largeThreshold
-             ? processSmallMessage(buf, messageSize)
-             : processLargeMessage(bytes, messageSize);
+        if (!contained)
+            return processLargeMessageUncontained(bytes, size);
+        else if (size <= largeThreshold)
+            return processSmallMessageContained(bytes, size);
+        else
+            return processLargeMessageContained(bytes, size);
     }
 
-    @SuppressWarnings({ "resource", "RedundantSuppression" })
-    private boolean processSmallMessage(ByteBuffer buf, int messageSize)
+    private boolean processSmallMessageContained(SharedBytes bytes, int size)
     {
-        if (buf.remaining() < messageSize)
-            return false; // not enough bytes to read the entire small message
+        receivedCount++;
+        receivedBytes += size;
 
-        receivedCount += 1;
-        receivedBytes += messageSize;
-
+        ByteBuffer buf = bytes.get();
         final int begin = buf.position();
         final int end = buf.limit();
-        buf.limit(begin + messageSize); // cap to expected message size
+        buf.limit(begin + size); // cap to expected message size
 
         Message<?> message = null;
-        try
+        try (DataInputBuffer in = new DataInputBuffer(buf, false))
         {
-            message = serializer.deserialize(new DataInputBuffer(buf, false), peer, version);
+            message = serializer.deserialize(in, peer, version);
         }
         catch (UnknownTableException | UnknownColumnException e)
         {
             noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
-            onError.call(e, messageSize);
+            onError.call(e, size);
         }
         catch (IOException e)
         {
             logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
-            onError.call(e, messageSize);
+            onError.call(e, size);
         }
         catch (Throwable t)
         {
-            releaseCapacity(messageSize);
-            onError.call(t, messageSize);
+            releaseCapacity(size);
+            onError.call(t, size);
             throw t;
         }
         finally
         {
-            buf.position(begin + messageSize);
+            buf.position(begin + size);
             buf.limit(end);
         }
 
         if (null != message)
-            processor.process(message, messageSize, this::onMessageProcessed, this::onMessageExpired);
+            processor.process(message, size, this::onMessageProcessed, this::onMessageExpired);
         else
-            releaseCapacity(messageSize);
+            releaseCapacity(size);
 
-        return buf.hasRemaining();
+        return true;
     }
 
-    private boolean processLargeMessage(SharedBytes bytes, int messageSize)
+    private boolean processLargeMessageContained(SharedBytes bytes, int size)
     {
-        startCoprocessor(messageSize);
+        receivedCount++;
+        receivedBytes += size;
 
-        boolean isKeepingUp;
-        final int readableBytes = bytes.readableBytes();
+        LargeCoprocessor coprocessor = new LargeCoprocessor(size);
+        boolean isKeepingUp = coprocessor.supplyAndCloseWithoutSignaling(bytes.sliceAndConsume(size));
+        largeExecutor.submit(coprocessor);
+        return isKeepingUp;
+    }
 
-        // not enough bytes for the large message
-        if (readableBytes < messageSize)
-        {
-            receivedBytes += readableBytes;
-            isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
-            largeBytesRemaining = messageSize - readableBytes;
-        }
-        // just enough bytes for the large message
-        else if (readableBytes == messageSize)
-        {
-            receivedCount++;
-            receivedBytes += readableBytes;
+    private boolean processLargeMessageUncontained(SharedBytes bytes, int size)
+    {
+        int readableBytes = bytes.readableBytes();
+        receivedBytes += readableBytes;
 
-            isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
-            largeBytesRemaining = 0;
-            stopCoprocessor();
-        }
-        // more than enough bytes for the large message
-        else
-        {
-            receivedCount++;
-            receivedBytes += messageSize;
-
-            isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(messageSize));
-            bytes.skipBytes(messageSize);
-            stopCoprocessor();
-        }
-
-        if (!isKeepingUp)
-            aheadOfCoprocessors();
-
-        return isKeepingUp && bytes.isReadable();
+        startCoprocessor(size);
+        boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
+        largeBytesRemaining = size - readableBytes;
+        return isKeepingUp;
     }
 
     // wrap parent callback to release capacity first
@@ -472,120 +435,47 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         onExpired.call(verb, messageSize, timeElapsed, unit);
     }
 
-    private void aheadOfCoprocessors()
-    {
-        state = State.AHEAD_OF_COPROCESSORS;
-        pauseReading();
-    }
-
-    private void overReserveCapacity(int messageSize, long expiresAtNanos, Outcome failureReason)
-    {
-        if (failureReason == Outcome.INSUFFICIENT_ENDPOINT)
-        {
-            ticket = endpointWaitQueue.registerAndSignal(
-                messageSize, expiresAtNanos, channel.eventLoop(), this::onEndpointReserveCapacityRegained, this::processStash);
-        }
-        else
-        {
-            ticket = globalWaitQueue.registerAndSignal(
-                messageSize, expiresAtNanos, channel.eventLoop(), this::onGlobalReserveCapacityRegained, this::processStash);
-        }
-
-        state = State.OVER_RESERVE_CAPACITY;
-        pauseReading();
-    }
-
-    // left over bytes that couldn't be processed yet for whatever reason (incomplete, or got ahead of coprocessor or limits)
-    private SharedBytes stashedBytes;
-
-    private SharedBytes unstash()
-    {
-        SharedBytes buf = stashedBytes;
-        if (buf == null)
-            return null;
-        stashedBytes = null;
-        return buf;
-    }
-
-    private SharedBytes combine(SharedBytes prefix, SharedBytes suffix)
-    {
-        if (prefix == null)
-            return suffix;
-
-        ByteBuffer buffer = BufferPool.get(prefix.readableBytes() + suffix.readableBytes(), BufferType.OFF_HEAP);
-        buffer.put(prefix.get());
-        buffer.put(suffix.get());
-        prefix.release();
-        suffix.release();
-        buffer.flip();
-        return SharedBytes.wrap(buffer);
-    }
-
-    private void stash(SharedBytes bytes)
-    {
-        stashedBytes = bytes;
-    }
-
     private void onCoprocessorCaughtUp()
     {
-        resumeProcessing(Integer.MAX_VALUE, endpointReserveCapacity, globalReserveCapacity);
+        assert channel.eventLoop().inEventLoop();
+
+        if (!isClosed)
+        {
+            isBlocked = false;
+            button.resume();
+        }
     }
 
     private void onEndpointReserveCapacityRegained(Limit endpointReserve)
     {
         ticket = null;
-        resumeProcessing(1, endpointReserve, globalReserveCapacity);
+        onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
     }
 
     private void onGlobalReserveCapacityRegained(Limit globalReserve)
     {
         ticket = null;
-        resumeProcessing(1, endpointReserveCapacity, globalReserve);
+        onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
     }
 
-    private void resumeProcessing(int maxCount, Limit endpointReserve, Limit globalReserve)
+    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve)
     {
         assert channel.eventLoop().inEventLoop();
 
-        if (isClosed())
-            return;
-
-        state = State.ACTIVE;
-
-        // resume from where we left off
-        SharedBytes stash = unstash();
-        try
+        if (!isClosed)
         {
-            if (null != stash)
-                processMessages(stash, maxCount, endpointReserve, globalReserve);
+            isBlocked = false;
+            context = new ProcessingContext(true, endpointReserve, globalReserve);
+            button.resume();
         }
-        catch (InvalidLegacyProtocolMagic e)
-        {
-            exceptionCaught(e);
-        }
-
-        if (isActive())      // processBuffer() may have hit another roadblock,
-            resumeReading(); // so only resume reading if we are still good to go
     }
 
-    private void processStash()
+    private void resumeIfNotBlocked()
     {
         assert channel.eventLoop().inEventLoop();
 
-        if (isClosed())
-            return;
-
-        // resume from where we left off
-        SharedBytes stash = unstash();
-        try
-        {
-            if (null != stash)
-                processMessages(stash);
-        }
-        catch (InvalidLegacyProtocolMagic e)
-        {
-            exceptionCaught(e);
-        }
+        if (!isClosed && !isBlocked)
+            button.resume();
     }
 
     private Outcome acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes)
@@ -629,16 +519,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void pauseReading()
-    {
-        channel.config().setAutoRead(false);
-    }
-
-    private void resumeReading()
-    {
-        channel.config().setAutoRead(true);
-    }
-
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
     {
@@ -654,6 +534,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         else
             logger.error("Unexpected exception caught while processing inbound messages from {}; terminating connection", peer, cause);
 
+        button.stop(); // ?
         channel.close();
     }
 
@@ -661,7 +542,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     public void channelInactive(ChannelHandlerContext ctx)
     {
         close();
-        ctx.fireChannelInactive();
     }
 
     /*
@@ -669,11 +549,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
      */
     private void close()
     {
-        state = State.CLOSED;
-
-        SharedBytes stash = unstash();
-        if (null != stash)
-            stash.release();
+        isClosed = true;
 
         if (null != largeCoprocessor)
             stopCoprocessor();
@@ -685,16 +561,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
 
         onClosed.call(this);
-    }
-
-    private boolean isActive()
-    {
-        return state == State.ACTIVE;
-    }
-
-    private boolean isClosed()
-    {
-        return state == State.CLOSED;
     }
 
     private void startCoprocessor(int messageSize)
@@ -808,6 +674,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return unconsumed <= maxUnconsumedBytes;
         }
 
+        boolean supplyAndCloseWithoutSignaling(SharedBytes bytes)
+        {
+            int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, bytes.readableBytes());
+            input.supplyAndCloseWithoutSignaling(bytes);
+            return unconsumed <= maxUnconsumedBytes;
+        }
+
         private void onBufConsumed(int size)
         {
             int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, -size);
@@ -844,9 +717,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                                          long expiresAtNanos,
                                          EventLoop eventLoop,
                                          Consumer<Limit> processOneCallback,
-                                         Runnable processStashCallback)
+                                         Consumer<Throwable> errorCallback,
+                                         Runnable resumeCallback)
         {
-            Ticket ticket = new Ticket(this, bytesRequested, expiresAtNanos, eventLoop, processOneCallback, processStashCallback);
+            Ticket ticket = new Ticket(this, bytesRequested, expiresAtNanos, eventLoop, processOneCallback, errorCallback, resumeCallback);
             queue.add(ticket);
             signal();
             return ticket;
@@ -915,9 +789,30 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     capacity += t.bytesRequested;
 
                 Limit limit = new ResourceLimits.Basic(capacity);
+
+                /*
+                 * For each handler, process one message off the current frame.
+                 */
                 try
                 {
-                    tickets.forEach(t -> t.processOneCallback.accept(limit));
+                    for (Ticket ticket : tickets)
+                    {
+                        try
+                        {
+                            ticket.processOneCallback.accept(limit);
+                        }
+                        catch (Throwable t)
+                        {
+                            try
+                            {
+                                ticket.errorCallback.accept(t);
+                            }
+                            catch (Throwable e)
+                            {
+                                // no-op
+                            }
+                        }
+                    }
                 }
                 finally
                 {
@@ -928,8 +823,27 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     reserveCapacity.release(limit.remaining());
                 }
 
-                // for every handler, next attempt parsing remaining stashed buf, if any, in their original queue order
-                tickets.forEach(t -> t.processStashCallback.run());
+                /*
+                 * For each handler, resume normal processing.
+                 */
+                for (Ticket ticket : tickets)
+                {
+                    try
+                    {
+                        ticket.resumeCallback.run();
+                    }
+                    catch (Throwable t)
+                    {
+                        try
+                        {
+                            ticket.errorCallback.accept(t);
+                        }
+                        catch (Throwable e)
+                        {
+                            // no-op
+                        }
+                    }
+                }
             }
         }
 
@@ -947,22 +861,27 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             private final int bytesRequested;
             private final long expiresAtNanos;
             private final EventLoop eventLoop;
+
             private final Consumer<Limit> processOneCallback;
-            private final Runnable processStashCallback;
+            private final Consumer<Throwable> errorCallback;
+            private final Runnable resumeCallback;
 
             private Ticket(WaitQueue waitQueue,
                            int bytesRequested,
                            long expiresAtNanos,
                            EventLoop eventLoop,
                            Consumer<Limit> processOneCallback,
-                           Runnable processStashCallback)
+                           Consumer<Throwable> errorCallback,
+                           Runnable resumeCallback)
             {
                 this.waitQueue = waitQueue;
                 this.bytesRequested = bytesRequested;
                 this.expiresAtNanos = expiresAtNanos;
                 this.eventLoop = eventLoop;
+
                 this.processOneCallback = processOneCallback;
-                this.processStashCallback = processStashCallback;
+                this.errorCallback = errorCallback;
+                this.resumeCallback = resumeCallback;
             }
 
             boolean isInvalidated()
