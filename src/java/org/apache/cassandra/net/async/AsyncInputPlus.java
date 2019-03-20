@@ -36,7 +36,7 @@ class AsyncInputPlus extends RebufferingInputStream
     {
     }
 
-    // EMPTY_BUFFER is used to signal AsyncInputPlus that it should be closed
+    // EMPTY is used to signal AsyncInputPlus that it should close itself
     private static final SharedBytes CLOSE_INPUT = SharedBytes.EMPTY;
 
     private final Queue<SharedBytes> queue;
@@ -76,32 +76,28 @@ class AsyncInputPlus extends RebufferingInputStream
         buffer = next.get();
     }
 
+    /**
+     * Must be invoked by the owning thread only.
+     *
+     * Will blockingly wait until {@link #requestClosure} is invoked, skipping over and releasing
+     * any buffers encountered while waiting for the CLOSE_INPUT marker.
+     */
     @Override
     public void close()
     {
         if (isClosed)
             return;
 
-        if (null != current)
-            releaseCurrentBuf();
+        releaseCurrentBuf();
 
-        SharedBytes nextSlice;
-        while ((nextSlice = pollBlockingly()) != CLOSE_INPUT)
+        SharedBytes next;
+        while ((next = pollBlockingly()) != CLOSE_INPUT)
         {
-            onReleased.accept(nextSlice.readableBytes());
-            nextSlice.release();
+            onReleased.accept(next.readableBytes());
+            next.release();
         }
 
         isClosed = true;
-    }
-
-    void supplyAndCloseWithoutSignaling(SharedBytes bytes)
-    {
-        if (isClosed)
-            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncInputPlus");
-
-        queue.add(bytes);
-        queue.add(CLOSE_INPUT);
     }
 
     void supply(SharedBytes bytes)
@@ -111,6 +107,15 @@ class AsyncInputPlus extends RebufferingInputStream
 
         queue.add(bytes);
         maybeUnpark();
+    }
+
+    void supplyAndCloseWithoutSignaling(SharedBytes bytes)
+    {
+        if (isClosed)
+            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncInputPlus");
+
+        queue.add(bytes);
+        queue.add(CLOSE_INPUT);
     }
 
     private void releaseCurrentBuf()
@@ -123,6 +128,11 @@ class AsyncInputPlus extends RebufferingInputStream
         buffer = null;
     }
 
+    /**
+     * Ask {@link AsyncInputPlus} to close itself.
+     *
+     * This close method is designed to be invoked by the non-owning thread.
+     */
     void requestClosure()
     {
         if (isClosed)
