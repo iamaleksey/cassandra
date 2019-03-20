@@ -328,22 +328,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         switch (acquireCapacity(endpointReserve, globalReserve, size))
         {
             case INSUFFICIENT_ENDPOINT:
-                ticket = endpointWaitQueue.registerAndSignal(size,
-                                                             expiresAtNanos,
-                                                             channel.eventLoop(),
-                                                             this::onEndpointReserveCapacityRegained,
-                                                             this::exceptionCaught,
-                                                             this::resumeIfNotBlocked);
+                enterCapacityWaitQueue(endpointWaitQueue, size, expiresAtNanos, this::onEndpointReserveCapacityRegained);
                 break;
             case INSUFFICIENT_GLOBAL:
-                ticket = globalWaitQueue.registerAndSignal(size,
-                                                           expiresAtNanos,
-                                                           channel.eventLoop(),
-                                                           this::onGlobalReserveCapacityRegained,
-                                                           this::exceptionCaught,
-                                                           this::resumeIfNotBlocked);
+                enterCapacityWaitQueue(globalWaitQueue, size, expiresAtNanos, this::onGlobalReserveCapacityRegained);
                 break;
-            case SUCCESS:
         }
 
         if (!contained)
@@ -352,6 +341,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return processSmallMessageContained(bytes, size);
         else
             return processLargeMessageContained(bytes, size);
+    }
+
+    private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
+    {
+        ticket = queue.registerAndSignal(bytesRequested, expiresAtNanos, channel.eventLoop(), onCapacityRegained, this::exceptionCaught, this::resumeIfNotBlocked);
     }
 
     private boolean processSmallMessageContained(SharedBytes bytes, int size)
