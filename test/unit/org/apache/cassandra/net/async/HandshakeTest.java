@@ -18,6 +18,8 @@
 
 package org.apache.cassandra.net.async;
 
+import java.nio.channels.ClosedChannelException;
+import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
@@ -156,34 +158,65 @@ public class HandshakeTest
     }
 
     @Test
-    public void testSendCompatibleOldVersionPre40() throws InterruptedException, ExecutionException
+    public void testSendCompatibleOldVersionPre40() throws InterruptedException
     {
-        Result result = handshake(VERSION_30, VERSION_30, VERSION_3014, VERSION_3014, VERSION_3014);
-        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
-        Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+        try
+        {
+            handshake(VERSION_30, VERSION_30, VERSION_3014, VERSION_3014, VERSION_3014);
+            Assert.fail("Should have thrown");
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertTrue(e.getCause() instanceof ClosedChannelException);
+        }
     }
 
     @Test
-    public void testSendIncompatibleOldVersionPre40() throws InterruptedException, ExecutionException
+    public void testSendIncompatibleOldVersionPre40() throws InterruptedException
     {
-        Result result = handshake(VERSION_30, VERSION_30, VERSION_30, VERSION_3014, VERSION_3014);
-        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
-        Assert.assertEquals(VERSION_3014, result.retry().withMessagingVersion);
+        try
+        {
+            handshake(VERSION_30, VERSION_30, VERSION_30, VERSION_3014, VERSION_3014);
+            Assert.fail("Should have thrown");
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertTrue(e.getCause() instanceof ClosedChannelException);
+        }
     }
 
     @Test
     public void testSendCompatibleOldVersion40() throws InterruptedException, ExecutionException
     {
         Result result = handshake(VERSION_30, VERSION_30, VERSION_30, VERSION_30, current_version);
-        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
-        Assert.assertEquals(current_version, result.retry().withMessagingVersion);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_30, result.success().messagingVersion);
     }
 
     @Test
-    public void testSendIncompatibleOldVersion40() throws InterruptedException, ExecutionException
+    public void testSendIncompatibleOldVersion40() throws InterruptedException
     {
-        Result result = handshake(VERSION_30, VERSION_30, VERSION_30, current_version, current_version);
-        Assert.assertEquals(Result.Outcome.RETRY, result.outcome);
-        Assert.assertEquals(current_version, result.retry().withMessagingVersion);
+        try
+        {
+            handshake(VERSION_30, VERSION_30, VERSION_30, current_version, current_version);
+            Assert.fail("Should have thrown");
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertTrue(e.getCause() instanceof ClosedChannelException);
+        }
+    }
+
+    @Test // fairly contrived case, but since we introduced logic for testing we need to be careful it doesn't make us worse
+    public void testSendToFuturePost40BelievedToBePre40() throws InterruptedException
+    {
+        try
+        {
+            Assert.fail(Objects.toString(handshake(VERSION_30, VERSION_30, current_version, VERSION_30, current_version + 1)));
+        }
+        catch (ExecutionException e)
+        {
+            Assert.assertTrue(e.getCause() instanceof ClosedChannelException);
+        }
     }
 }

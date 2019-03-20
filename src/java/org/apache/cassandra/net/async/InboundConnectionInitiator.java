@@ -293,7 +293,7 @@ public class InboundConnectionInitiator
             else
             {
                 int version = initiate.requestMessagingVersion;
-                assert version < VERSION_40;
+                assert version < VERSION_40 && version >= settings.acceptMessaging.min;
                 logger.trace("Connection version {} from {}", version, ctx.channel().remoteAddress());
 
                 switch(initiate.mode)
@@ -301,9 +301,9 @@ public class InboundConnectionInitiator
                     case STREAM:
                     {
                         // streaming connections are per-session and have a fixed version.  we can't do anything with a wrong-version stream connection, so drop it.
-                        if (initiate.requestMessagingVersion != settings.acceptStreaming.max)
+                        if (version != settings.acceptStreaming.max)
                         {
-                            logger.warn("Received stream using protocol version {} (my version {}). Terminating connection", initiate.requestMessagingVersion, settings.acceptStreaming.max);
+                            logger.warn("Received stream using protocol version {} (my version {}). Terminating connection", version, settings.acceptStreaming.max);
                             failHandshake(ctx);
                         }
                         setupStreamingPipeline(initiate.from, ctx);

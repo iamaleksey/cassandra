@@ -258,7 +258,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         {
             try
             {
-                Accept msg = Accept.maybeDecode(in);
+                Accept msg = Accept.maybeDecode(in, requestMessagingVersion);
                 if (msg == null)
                     return;
 
@@ -297,8 +297,9 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 else
                 {
                     assert type != STREAM;
-                    // pre40 responses only
-                    if (peerMessagingVersion == requestMessagingVersion)
+                    // pre40 handshake responses only (can be a post40 node)
+                    if (peerMessagingVersion == requestMessagingVersion
+                        || peerMessagingVersion > settings.acceptVersions.max) // this clause is for impersonating 3.0 node in testing only
                     {
                         if (settings.withCompression)
                             frameEncoder = FrameEncoderLegacyLZ4.instance;

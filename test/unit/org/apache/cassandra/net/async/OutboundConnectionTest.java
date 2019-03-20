@@ -481,6 +481,43 @@ public class OutboundConnectionTest
     }
 
     @Test
+    public void testPre40() throws Throwable
+    {
+        MessagingService.instance().versions.set(FBUtilities.getBroadcastAddressAndPort(),
+                                                 MessagingService.VERSION_30);
+
+        try
+        {
+            test(new Settings(null).outbound(outbound -> outbound
+                                                         .withDefaults(SMALL_MESSAGE, MessagingService.VERSION_30)
+                                                         .withAcceptVersions(new MessagingService.AcceptVersions(MessagingService.VERSION_30, MessagingService.VERSION_30))
+                                                         // TODO (alexp): This should be fixed and removed when frame decoding for compression and encryption is fixed
+                                                         .withEncryption(null)
+                                                         .withConnectTo(FBUtilities.getBroadcastAddressAndPort())
+                                                         .withCompression(false))
+                                   // TODO (alexp): This should be fixed and removed when frame decoding for compression and encryption is fixed
+                                   .inbound(settings -> settings.withEncryption(null)
+                                   ),
+                 (inbound, outbound, endpoint) -> {
+                     CountDownLatch latch = new CountDownLatch(1);
+                     unsafeSetHandler(Verb._TEST_1,
+                                      () -> (msg) -> latch.countDown());
+
+                     Message<?> message = Message.out(Verb._TEST_1, noPayload);
+                     outbound.enqueue(message);
+                     latch.await(10, SECONDS);
+                     Assert.assertEquals(0, latch.getCount());
+                     Assert.assertTrue(outbound.isConnected());
+                 });
+        }
+        finally
+        {
+            MessagingService.instance().versions.set(FBUtilities.getBroadcastAddressAndPort(),
+                                                     current_version);
+        }
+    }
+
+    @Test
     public void testCloseIfEndpointDown() throws Throwable
     {
         testManual((settings, inbound, outbound, endpoint) -> {

@@ -226,7 +226,10 @@ public class HandshakeProtocol
         public String toString()
         {
             return String.format("Initiate(request: %d, min: %d, max: %d, mode: %s, compress: %b, from: %s)",
-                                 requestMessagingVersion, acceptVersions.min, acceptVersions.max, mode, withCompression, from);
+                                 requestMessagingVersion,
+                                 acceptVersions == null ? requestMessagingVersion : acceptVersions.min,
+                                 acceptVersions == null ? requestMessagingVersion : acceptVersions.max,
+                                 mode, withCompression, from);
         }
     }
 
@@ -278,21 +281,16 @@ public class HandshakeProtocol
             return buffer;
         }
 
-        static Accept maybeDecode(ByteBuf in) throws InvalidCrc
+        static Accept maybeDecode(ByteBuf in, int handshakeMessagingVersion) throws InvalidCrc
         {
             int readerIndex = in.readerIndex();
             if (in.readableBytes() < 4)
                 return null;
             int maxMessagingVersion = in.readInt();
             int useMessagingVersion = 0;
-            if (maxMessagingVersion >= VERSION_40)
+            if (handshakeMessagingVersion >= VERSION_40)
             {
-                // This should not happen in real life: 3.0 node will not respond with 4.0 message; 4.0 node will not respond with 3.0 message.
-                if (in.readableBytes() == 0)
-                {
-                    return new AcceptInbound(useMessagingVersion, maxMessagingVersion);
-                }
-                else if (in.readableBytes() < 8)
+                if (in.readableBytes() < 8)
                 {
                     in.readerIndex(readerIndex);
                     return null;
