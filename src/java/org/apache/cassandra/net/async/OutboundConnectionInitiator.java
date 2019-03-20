@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.nio.channels.ClosedChannelException;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -236,6 +237,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
             ctx.fireChannelActive();
         }
 
+        @Override
+        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception
+        {
+            super.channelUnregistered(ctx);
+            exceptionCaught(ctx, new ClosedChannelException());
+        }
 
         /**
          * {@inheritDoc}
@@ -312,18 +319,19 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     }
                 }
 
+                ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
                 {
-                    ctx.pipeline().remove(this);
                     if (type != STREAM)
                     {
                         assert frameEncoder != null;
-                        frameEncoder.addLastTo(ctx.pipeline());
+                        frameEncoder.addLastTo(pipeline);
                     }
+                    pipeline.remove(this);
                 }
                 else
                 {
-                    ctx.close();
+                    pipeline.close();
                 }
 
                 resultPromise.trySuccess(result);

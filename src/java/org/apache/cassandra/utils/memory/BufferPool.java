@@ -764,7 +764,7 @@ public class BufferPool
             if (attachment == null)
                 return false;
 
-            if (attachment instanceof Ref)
+            if (Ref.DEBUG_ENABLED)
                 ((Ref<Chunk>) attachment).release();
 
             return true;
@@ -886,7 +886,7 @@ public class BufferPool
                         // make sure no other thread has cleared the candidate bits
                         assert ((candidate & cur) == candidate);
                     }
-                    return get(index << shift, size, into);
+                    return get(index << shift, slotCount << shift, into);
                 }
             }
         }

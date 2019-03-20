@@ -52,6 +52,7 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.async.StreamingInboundHandler;
+import org.apache.cassandra.utils.CoalescingStrategies;
 
 import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -256,8 +257,7 @@ public class InboundConnectionInitiator
                 {
                     case REGULAR: accept = settings.acceptMessaging; break;
                     case STREAM: accept = settings.acceptStreaming; break;
-                    default:
-                        throw new IllegalStateException();
+                    default: throw new IllegalStateException();
                 }
 
                 int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
@@ -268,15 +268,13 @@ public class InboundConnectionInitiator
                         exceptionCaught(future.channel(), future.cause());
                 });
 
-                if (initiate.acceptVersions.min > current_version)
+                if (initiate.acceptVersions.min > accept.max)
                 {
-                    // outbound side will reconnect to change the version
                     logger.info("peer {} only supports messaging versions higher ({}) than this node supports ({})", ctx.channel().remoteAddress(), initiate.acceptVersions.min, current_version);
                     failHandshake(ctx);
                 }
-                else if (initiate.acceptVersions.max < minimum_version)
+                else if (initiate.acceptVersions.max < accept.min)
                 {
-                    // outbound side will reconnect to change the version
                     logger.info("peer {} only supports messaging versions lower ({}) than this node supports ({})", ctx.channel().remoteAddress(), initiate.acceptVersions.max, minimum_version);
                     failHandshake(ctx);
                 }
@@ -415,12 +413,13 @@ public class InboundConnectionInitiator
             else
                 frameDecoder = new FrameDecoderLegacy(useMessagingVersion);
 
-            Button button = new Button();
-
             frameDecoder.addLastTo(pipeline);
 
+            logger.info("connection established from {}, version = {}, compress = {}, encryption = {}", from, useMessagingVersion, initiate.withCompression,
+                        NettyFactory.encryptionLogStatement(settings.encryption));
+
             InboundMessageHandler handler =
-                instance().getInbound(from).createHandler(button, pipeline.channel(), useMessagingVersion);
+                instance().getInbound(from).createHandler(frameDecoder, pipeline.channel(), useMessagingVersion);
             pipeline.addLast("deserialize", handler);
 
             pipeline.remove(this);

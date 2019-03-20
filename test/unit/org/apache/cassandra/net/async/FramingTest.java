@@ -19,8 +19,10 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Deque;
 import java.util.List;
 import java.util.Random;
 
@@ -87,12 +89,12 @@ public class FramingTest
         int[] boundaries = sequenceOfFrames.boundaries;
 
         int end = frames.get().limit();
-        List<Object> out = new ArrayList<>();
+        List<FrameDecoder.Frame> out = new ArrayList<>();
         int prevBoundary = -1;
         for (int i = 0 ; i < end ; )
         {
             int limit = i + random.nextInt(1 + end - i);
-            decoder.decode(out::add, FrameDecoder.slice(frames, i, limit, limit == end));
+            decoder.decode(out, frames.slice(i, limit));
             int boundary = Arrays.binarySearch(boundaries, limit);
             if (boundary < 0) boundary = -2 -boundary;
 
@@ -104,6 +106,8 @@ public class FramingTest
             }
             i = limit;
         }
+        for (FrameDecoder.Frame frame : out)
+            frame.release();
     }
 
     private static void verify(byte[] expect, FrameDecoder.SharedBytes actual)
@@ -111,7 +115,6 @@ public class FramingTest
         byte[] fetch = new byte[expect.length];
         actual.get().get(fetch);
         Assert.assertArrayEquals(expect, fetch);
-        actual.release();
     }
 
     private static SequenceOfFrames pairOfFrames(Random random, FrameEncoder encoder)

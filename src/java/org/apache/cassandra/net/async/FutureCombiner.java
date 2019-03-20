@@ -33,6 +33,8 @@ import io.netty.util.concurrent.Promise;
  * decrements a shared counter; if any of them fail, the FutureCombiner is completed immediately with the cause,
  * otherwise it will complete when the counter reaches zero.
  *
+ * TODO is it better to fail immediately on exception, or wait until all operations logically complete?
+ *
  * This Future is always uncancellable.
  *
  * We extend FutureDelegate, and simply provide it an uncancellable Promise that will be completed by the listeners

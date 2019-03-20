@@ -107,6 +107,13 @@ public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
         allocateBuffer();
     }
 
+    public void close() throws IOException
+    {
+        if (flushed() == 0 && payload != null)
+            payload.setSelfContained(true);
+        super.close();
+    }
+
     public long position()
     {
         return flushed() + payload.length();

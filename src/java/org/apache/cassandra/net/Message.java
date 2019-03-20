@@ -785,6 +785,7 @@ public class Message<T>
 
         private int messageSizePre40(ByteBuffer buf, int index, int limit) throws InvalidLegacyProtocolMagic
         {
+            int begin = index;
             // protocol magic
             index += 4;
             if (index > limit)
@@ -815,7 +816,7 @@ public class Message<T>
                 return -1;
             index += buf.getInt(index - 4);
 
-            return index - buf.position();
+            return index - begin;
         }
 
         private long getCreatedAtNanosPre40(ByteBuffer buf, InetAddressAndPort peer)

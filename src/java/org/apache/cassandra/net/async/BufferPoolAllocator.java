@@ -24,6 +24,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import io.netty.buffer.AbstractByteBufAllocator;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledUnsafeDirectByteBuf;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -41,7 +42,8 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
 
     protected ByteBuf newHeapBuffer(int minCapacity, int maxCapacity)
     {
-        throw new UnsupportedOperationException();
+        // for pre40
+        return Unpooled.buffer(minCapacity, maxCapacity);
     }
 
     protected ByteBuf newDirectBuffer(int minCapacity, int maxCapacity)

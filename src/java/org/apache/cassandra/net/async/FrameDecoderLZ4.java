@@ -20,7 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.function.Consumer;
+import java.util.Collection;
 import java.util.zip.CRC32;
 
 import io.netty.channel.ChannelPipeline;
@@ -33,7 +33,7 @@ import static org.apache.cassandra.net.async.Crc.crc24;
 import static org.apache.cassandra.net.async.Crc.crc32;
 import static org.apache.cassandra.net.async.Crc.updateCrc32;
 
-final class FrameDecoderLZ4 extends FrameDecoder
+final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
 {
     public static FrameDecoderLZ4 fast()
     {
@@ -89,58 +89,48 @@ final class FrameDecoderLZ4 extends FrameDecoder
         return compressedLength(header8b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header8b, boolean ownsBytes)
+    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header8b)
     {
-        try
+        ByteBuffer input = bytes.get();
+
+        boolean isSelfContained = isSelfContained(header8b);
+        int uncompressedLength = uncompressedLength(header8b);
+
+        CRC32 crc = crc32();
+        int readFullCrc = input.getInt(end - TRAILER_LENGTH);
+        if (input.order() == ByteOrder.BIG_ENDIAN)
+            readFullCrc = Integer.reverseBytes(readFullCrc);
+
+        updateCrc32(crc, input, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
+        int computeFullCrc = (int) crc.getValue();
+
+        if (readFullCrc != computeFullCrc)
+            return CorruptFrame.recoverable(isSelfContained, uncompressedLength, readFullCrc, computeFullCrc);
+
+        if (uncompressedLength == 0)
         {
-            ByteBuffer input = bytes.get();
-
-            boolean isSelfContained = isSelfContained(header8b);
-            int uncompressedLength = uncompressedLength(header8b);
-
-            CRC32 crc = crc32();
-            int readFullCrc = input.getInt(end - TRAILER_LENGTH);
-            if (input.order() == ByteOrder.BIG_ENDIAN)
-                readFullCrc = Integer.reverseBytes(readFullCrc);
-
-            updateCrc32(crc, input, begin + HEADER_LENGTH, end - TRAILER_LENGTH);
-            int computeFullCrc = (int) crc.getValue();
-
-            if (readFullCrc != computeFullCrc)
-                return CorruptFrame.recoverable(isSelfContained, uncompressedLength, readFullCrc, computeFullCrc);
-
-            if (uncompressedLength == 0)
-            {
-                bytes = slice(bytes, begin + HEADER_LENGTH, end - TRAILER_LENGTH, ownsBytes);
-                ownsBytes = false;
-                return new IntactFrame(isSelfContained, bytes);
-            }
-            else
-            {
-                ByteBuffer out = BufferPool.get(uncompressedLength, BufferType.OFF_HEAP);
-                try
-                {
-                    decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
-                    return new IntactFrame(isSelfContained, SharedBytes.wrap(out));
-                }
-                catch (Throwable t)
-                {
-                    BufferPool.put(out, false);
-                    throw t;
-                }
-            }
+            return new IntactFrame(isSelfContained, bytes.slice(begin + HEADER_LENGTH, end - TRAILER_LENGTH));
         }
-        finally
+        else
         {
-            if (ownsBytes)
-                bytes.release();
+            ByteBuffer out = BufferPool.get(uncompressedLength, BufferType.OFF_HEAP);
+            try
+            {
+                decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
+                return new IntactFrame(isSelfContained, SharedBytes.wrap(out));
+            }
+            catch (Throwable t)
+            {
+                BufferPool.put(out, false);
+                throw t;
+            }
         }
     }
 
-    void decode(Consumer<Frame> consumer, SharedBytes bytes)
+    void decode(Collection<Frame> into, SharedBytes bytes)
     {
         // TODO: confirm in assembly output that we inline the relevant nested method calls
-        decode(consumer, bytes, HEADER_LENGTH);
+        decode(into, bytes, HEADER_LENGTH);
     }
 
     void addLastTo(ChannelPipeline pipeline)

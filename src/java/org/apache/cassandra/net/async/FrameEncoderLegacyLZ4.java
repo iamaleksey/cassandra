@@ -34,7 +34,7 @@ class FrameEncoderLegacyLZ4 extends FrameEncoderLegacy
 
     void addLastTo(ChannelPipeline pipeline)
     {
-        pipeline.addLast("frameEncoderNone", this);
         pipeline.addLast("legacyLz4", new Lz4FrameEncoder(LZ4Factory.fastestInstance(), false, LEGACY_COMPRESSION_BLOCK_SIZE, XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum()));
+        pipeline.addLast("frameEncoderNone", this);
     }
 }

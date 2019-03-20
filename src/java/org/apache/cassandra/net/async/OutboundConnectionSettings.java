@@ -342,7 +342,10 @@ public class OutboundConnectionSettings
             compress = type != STREAM && shouldCompressConnection(snitch, self, endpoint);
 
         if (crc == null)
-            crc = type != STREAM && messagingVersion >= VERSION_40 && !compress;
+            crc = type != STREAM && !compress;
+
+        if (crc && messagingVersion < VERSION_40)
+            crc = false; // cannot use Crc framing with pre-40
 
         if (tcpNoDelay == null)
             tcpNoDelay = isInLocalDC(snitch, self, endpoint)

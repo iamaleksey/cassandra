@@ -120,6 +120,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandler.class, "largeUnconsumedBytes");
 
+    public interface Button
+    {
+        void resume();
+        void pause();
+        void stop();
+    }
+
     /*
      * Context for next invocation of channelRead(). On occasion, it's necessary to override endpoint and global reserves,
      * and bound processing to just one message. This is the case when we go beyond either per-endpoing reserve capacity

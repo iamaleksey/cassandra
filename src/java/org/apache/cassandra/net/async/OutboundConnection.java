@@ -913,10 +913,6 @@ public class OutboundConnection
             switch (result.outcome)
             {
                 case SUCCESS:
-                    if (logger.isDebugEnabled())
-                        logger.debug("{} successfully connected, compress = {}, coalescing = {}", id(), settings.withCompression,
-                                     settings.coalescingStrategy != null ? settings.coalescingStrategy : CoalescingStrategies.Strategy.DISABLED);
-
                     // it is expected that close, if successful, has already cancelled us; so we do not need to worry about leaking connections
                     assert !isClosed;
                     whileDisconnected.cancel(false);
@@ -953,6 +949,10 @@ public class OutboundConnection
                     isFailingToConnect = false;
                     isConnected = true;
                     ++successfulConnections;
+
+                    logger.info("{} successfully connected, version = {}, compress = {}, coalescing = {}, encryption = {}", id(), messagingVersion, settings.withCompression,
+                                     settings.coalescingStrategy != null ? settings.coalescingStrategy : CoalescingStrategies.Strategy.DISABLED,
+                                     NettyFactory.encryptionLogStatement(settings.encryption));
                     break;
 
                 case RETRY:
@@ -990,6 +990,12 @@ public class OutboundConnection
         {
             // system defaults etc might have changed, so refresh before connect
             settings = template.withDefaults(type, messagingVersion);
+            if (messagingVersion > settings.acceptVersions.max)
+            {
+                messagingVersion = settings.acceptVersions.max;
+                settings = template.withDefaults(type, messagingVersion);
+                assert messagingVersion <= settings.acceptVersions.max;
+            }
             connecting = initiateMessaging(eventLoop, type, settings, messagingVersion)
                          .addListener(future -> {
                              connecting = null;

@@ -19,9 +19,12 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -33,6 +36,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Sets;
 import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.After;
 import org.junit.AfterClass;
@@ -56,11 +60,15 @@ import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.MessagingService.AcceptVersions;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
@@ -133,11 +141,11 @@ public class OutboundConnectionTest
         }
         Settings outbound(Function<OutboundConnectionSettings, OutboundConnectionSettings> outbound)
         {
-            return new Settings(type, outbound, inbound);
+            return new Settings(type, this.outbound.andThen(outbound), inbound);
         }
         Settings inbound(Function<InboundConnectionSettings, InboundConnectionSettings> inbound)
         {
-            return new Settings(type, outbound, inbound);
+            return new Settings(type, outbound, this.inbound.andThen(inbound));
         }
         Settings override(Settings settings)
         {
@@ -150,6 +158,7 @@ public class OutboundConnectionTest
     private static final EncryptionOptions.ServerEncryptionOptions encryptionOptions =
             new EncryptionOptions.ServerEncryptionOptions()
             .withEnabled(true)
+            .withLegacySslStoragePort(true)
             .withInternodeEncryption(EncryptionOptions.ServerEncryptionOptions.InternodeEncryption.all)
             .withKeyStore("test/conf/cassandra_ssl_test.keystore")
             .withKeyStorePassword("cassandra")
@@ -158,16 +167,37 @@ public class OutboundConnectionTest
             .withRequireClientAuth(false)
             .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
 
-    private static final List<Settings> SETTINGS = ImmutableList.of(
-        Settings.SMALL.outbound(outbound -> outbound.withEncryption(encryptionOptions))
-                      .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
-        Settings.LARGE.outbound(outbound -> outbound.withEncryption(encryptionOptions))
-                      .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
-        Settings.SMALL,
-        Settings.LARGE,
-        Settings.SMALL.outbound(outbound -> outbound.withCompression(true)),
-        Settings.LARGE.outbound(outbound -> outbound.withCompression(true))
+    private static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
+
+    private static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
+                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
+//        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
+//                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
+        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
+        settings -> settings.outbound(outbound -> outbound.withCompression(true))
     );
+
+    private static final List<Settings> SETTINGS = applyPowerSet(
+        ImmutableList.of(Settings.SMALL, Settings.LARGE),
+        MODIFIERS
+    );
+
+    private static List<Settings> applyPowerSet(List<Settings> settings, List<Function<Settings, Settings>> modifiers)
+    {
+        List<Settings> result = new ArrayList<>();
+        for (Set<Function<Settings, Settings>> set : Sets.powerSet(new HashSet<>(modifiers)))
+        {
+            for (Settings s : settings)
+            {
+                for (Function<Settings, Settings> f : set)
+                    s = f.apply(s);
+                result.add(s);
+            }
+        }
+        return result;
+    }
 
     private void test(Settings extraSettings, SendTest test) throws Throwable
     {
@@ -189,28 +219,29 @@ public class OutboundConnectionTest
     private void doTest(Settings settings, SendTest test) throws Throwable
     {
         doTestManual(settings, (ignore, inbound, outbound, endpoint) -> {
-            inbound.open();
+            inbound.open().sync();
             test.accept(MessagingService.instance().getInbound(endpoint), outbound, endpoint);
         });
     }
 
     private void doTestManual(Settings settings, ManualSendTest test) throws Throwable
     {
-        InboundSockets inbound = new InboundSockets(settings.inbound.apply(new InboundConnectionSettings()));
-        InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+        InboundConnectionSettings inboundSettings = settings.inbound.apply(new InboundConnectionSettings());
+        InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
         MessagingService.instance().removeInbound(endpoint);
-        OutboundConnectionSettings outboundSettings = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
-                                              .withDefaults(settings.type, current_version);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundSettings.applicationReserveSendQueueEndpointCapacityInBytes), outboundSettings.applicationReserveSendQueueGlobalCapacityInBytes);
-        OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
+        InboundSockets inbound = new InboundSockets(inboundSettings);
+        OutboundConnectionSettings outboundTemplate = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
+                                                                       .withDefaultReserveLimits();
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundTemplate.applicationReserveSendQueueEndpointCapacityInBytes), outboundTemplate.applicationReserveSendQueueGlobalCapacityInBytes);
+        OutboundConnection outbound = new OutboundConnection(settings.type, outboundTemplate, reserveCapacityInBytes);
         try
         {
             test.accept(settings, inbound, outbound, endpoint);
         }
         finally
         {
-            inbound.close().get(10L, SECONDS);
-            outbound.close(false).get(10L, MINUTES);
+            inbound.close().get(30L, SECONDS);
+            outbound.close(false).get(30L, SECONDS);
             resetVerbs();
             MessagingService.instance().messageHandlers.clear();
         }
@@ -220,6 +251,7 @@ public class OutboundConnectionTest
     public void testSendSmall() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
             unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
@@ -230,7 +262,7 @@ public class OutboundConnectionTest
             Assert.assertEquals(10, outbound.submitted());
             Assert.assertEquals(0, outbound.pending());
             Assert.assertEquals(10, outbound.sent());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.sentBytes());
+            Assert.assertEquals(10 * message.serializedSize(version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToError());
@@ -244,6 +276,7 @@ public class OutboundConnectionTest
     public void testSendLarge() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
             int count = 10;
             CountDownLatch received = new CountDownLatch(count);
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
@@ -264,14 +297,16 @@ public class OutboundConnectionTest
                 }
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
-            Message<?> message = Message.out(Verb._TEST_1, new Object());
+            Message<?> message = Message.builder(Verb._TEST_1, new Object())
+                                        .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
+                                        .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
             Assert.assertEquals(10, outbound.submitted());
             Assert.assertEquals(0, outbound.pending());
             Assert.assertEquals(10, outbound.sent());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.sentBytes());
+            Assert.assertEquals(10 * message.serializedSize(version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedBytesDueToError());
@@ -350,6 +385,7 @@ public class OutboundConnectionTest
     public void testSerializeError() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
             int count = 100;
             CountDownLatch done = new CountDownLatch(100);
             AtomicInteger serialized = new AtomicInteger();
@@ -392,7 +428,7 @@ public class OutboundConnectionTest
             Assert.assertEquals(100, outbound.submitted());
             Assert.assertEquals(0, outbound.pending());
             Assert.assertEquals(90, outbound.sent());
-            Assert.assertEquals(90 * message.serializedSize(current_version), outbound.sentBytes());
+            Assert.assertEquals(90 * message.serializedSize(version), outbound.sentBytes());
             Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
             Assert.assertEquals(0, outbound.droppedDueToOverload());
             Assert.assertEquals(10, outbound.droppedDueToError());
@@ -407,6 +443,7 @@ public class OutboundConnectionTest
     public void testTimeout() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
             int count = 10;
             CountDownLatch enqueueDone = new CountDownLatch(1);
             CountDownLatch deliveryDone = new CountDownLatch(1);
@@ -415,7 +452,7 @@ public class OutboundConnectionTest
             Message<?> message = Message.builder(Verb._TEST_1, noPayload)
                                         .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
                                         .build();
-            long sentSize = message.serializedSize(current_version);
+            long sentSize = message.serializedSize(version);
             outbound.enqueue(message);
             long timeoutMillis = 10L;
             while (delivered.get() < 1);
@@ -428,7 +465,7 @@ public class OutboundConnectionTest
             Uninterruptibles.sleepUninterruptibly(timeoutMillis * 2, TimeUnit.MILLISECONDS);
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
-            deliveryDone.await(1L, MINUTES);
+            deliveryDone.await(30L, SECONDS);
             Assert.assertEquals(1, delivered.get());
             Assert.assertEquals(11, outbound.submitted());
             Assert.assertEquals(0, outbound.pending());
@@ -490,7 +527,7 @@ public class OutboundConnectionTest
 
             try
             {
-                inbound.open();
+                inbound.open().sync();
                 CountDownLatch latch = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
                 outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
@@ -518,7 +555,7 @@ public class OutboundConnectionTest
         testManual((settings, inbound, outbound, endpoint) -> {
             try
             {
-                inbound.open();
+                inbound.open().sync();
                 CountDownLatch latch = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
                 outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
@@ -529,7 +566,7 @@ public class OutboundConnectionTest
                 inbound.close().get(10, SECONDS);
                 MessagingService.instance().removeInbound(endpoint);
                 inbound = new InboundSockets(settings.inbound.apply(new InboundConnectionSettings()));
-                inbound.open();
+                inbound.open().sync();
 
                 CountDownLatch latch2 = new CountDownLatch(1);
                 unsafeSetHandler(Verb._TEST_1, () -> msg -> latch2.countDown());
@@ -550,6 +587,10 @@ public class OutboundConnectionTest
     public void testRecoverableCorruptedMessageDelivery() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
+            if (version < VERSION_40)
+                return;
+
             AtomicInteger counter = new AtomicInteger();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
@@ -590,6 +631,10 @@ public class OutboundConnectionTest
     public void testUnrecoverableCorruptedMessageDelivery() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
+            if (version < VERSION_40)
+                return;
+
             AtomicInteger counter = new AtomicInteger();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
@@ -629,6 +674,10 @@ public class OutboundConnectionTest
     public void testCRCCorruption() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
+            int version = outbound.settings().acceptVersions.max;
+            if (version < VERSION_40)
+                return;
+
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object o, DataOutputPlus out, int version) throws IOException

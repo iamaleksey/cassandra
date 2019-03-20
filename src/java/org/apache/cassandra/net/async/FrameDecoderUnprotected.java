@@ -19,7 +19,7 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
-import java.util.function.Consumer;
+import java.util.Collection;
 
 import io.netty.channel.ChannelPipeline;
 
@@ -29,7 +29,7 @@ import static org.apache.cassandra.net.async.FrameDecoderCrc.payloadLength;
 import static org.apache.cassandra.net.async.FrameDecoderCrc.readHeader6b;
 import static org.apache.cassandra.net.async.FrameDecoderCrc.verifyHeader6b;
 
-public final class FrameDecoderUnprotected extends FrameDecoder
+final class FrameDecoderUnprotected extends FrameDecoderWith8bHeader
 {
     public static FrameDecoderUnprotected create()
     {
@@ -51,25 +51,15 @@ public final class FrameDecoderUnprotected extends FrameDecoder
         return payloadLength(header6b) + HEADER_LENGTH;
     }
 
-    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header6b, boolean ownsBytes)
+    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header6b)
     {
-        try
-        {
-            boolean isSelfContained = isSelfContained(header6b);
-            bytes = slice(bytes, begin + HEADER_LENGTH, end, ownsBytes);
-            ownsBytes = false;
-            return new IntactFrame(isSelfContained, bytes);
-        }
-        finally
-        {
-            if (ownsBytes)
-                bytes.release();
-        }
+        boolean isSelfContained = isSelfContained(header6b);
+        return new IntactFrame(isSelfContained, bytes.slice(begin + HEADER_LENGTH, end));
     }
 
-    void decode(Consumer<Frame> consumer, SharedBytes bytes)
+    void decode(Collection<Frame> into, SharedBytes bytes)
     {
-        decode(consumer, bytes, HEADER_LENGTH);
+        decode(into, bytes, HEADER_LENGTH);
     }
 
     void addLastTo(ChannelPipeline pipeline)

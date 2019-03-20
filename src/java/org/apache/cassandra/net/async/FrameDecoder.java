@@ -19,13 +19,16 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
+import java.util.Collection;
+import java.util.Deque;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
-import java.util.function.Consumer;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
-import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ByteBufferUtil;
@@ -33,7 +36,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
-abstract class FrameDecoder extends ChannelInboundHandlerAdapter
+abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements InboundMessageHandler.Button
 {
     /**
      * A wrapper for possibly sharing portions of a single, BufferPool managed, ByteBuffer;
@@ -43,30 +46,28 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     {
         public static final SharedBytes EMPTY = new SharedBytes(ByteBufferUtil.EMPTY_BYTE_BUFFER)
         {
-            void retain() {}
+            SharedBytes retain() { return EMPTY; }
             void release() {}
         };
 
         private final ByteBuffer bytes;
-        private final SharedBytes parent;
-        private volatile int owners;
+        private final SharedBytes owner;
+        private volatile int count;
 
-        private static final int OWNED_BY_PARENT = Integer.MIN_VALUE;
         private static final int UNSHARED = -1;
         private static final int RELEASED = 0;
-        private static final AtomicIntegerFieldUpdater<SharedBytes> ownersUpdater = AtomicIntegerFieldUpdater.newUpdater(SharedBytes.class, "owners");
+        private static final AtomicIntegerFieldUpdater<SharedBytes> countUpdater = AtomicIntegerFieldUpdater.newUpdater(SharedBytes.class, "count");
 
         SharedBytes(ByteBuffer bytes)
         {
-            this.owners = UNSHARED;
-            this.parent = this;
+            this.count = UNSHARED;
+            this.owner = this;
             this.bytes = bytes;
         }
 
-        SharedBytes(SharedBytes parent, ByteBuffer bytes)
+        SharedBytes(SharedBytes owner, ByteBuffer bytes)
         {
-            this.owners = OWNED_BY_PARENT;
-            this.parent = parent;
+            this.owner = owner;
             this.bytes = bytes;
         }
 
@@ -90,44 +91,71 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             bytes.position(bytes.position() + skipBytes);
         }
 
-        private SharedBytes owner()
+        /**
+         * Ensure this SharedBytes will use atomic operations for updating its count from now on.
+         * The first invocation must occur while the calling thread has exclusive access (though there may be more
+         * than one 'owner', these must all either be owned by the calling thread or otherwise not being used)
+         */
+        SharedBytes atomic()
         {
-            return parent == null ? this : parent;
+            int count = owner.count;
+            if (count < 0)
+                owner.count = -count;
+            return this;
         }
 
-        void retain()
+        SharedBytes retain()
         {
-            SharedBytes owner = owner();
-            int owners = owner.owners;
-            if (owners == UNSHARED)
+            owner.doRetain();
+            return this;
+        }
+
+        private void doRetain()
+        {
+            int count = this.count;
+            if (count < 0)
             {
-                owner.owners = 2;
+                countUpdater.lazySet(this, count - 1);
             }
             else
             {
-                ownersUpdater.updateAndGet(owner, v -> {
-                    if (v == RELEASED)
+                while (true)
+                {
+                    if (count == RELEASED)
                         throw new IllegalStateException("Attempted to reference an already released SharedByteBuffer");
-                    return v + 1;
-                });
+
+                    if (countUpdater.compareAndSet(this, count, count + 1))
+                        return;
+
+                    count = this.count;
+                }
             }
         }
 
         void release()
         {
-            SharedBytes owner = owner();
-            int owners = owner.owners;
+            owner.doRelease();
+        }
 
-            if (owners == UNSHARED || RELEASED == ownersUpdater.decrementAndGet(owner))
-            {
-                if (owners == UNSHARED)
-                    ownersUpdater.lazySet(owner, RELEASED);
+        private void doRelease()
+        {
+            int count = this.count;
+
+            if (count < 0)
+                countUpdater.lazySet(this, count += 1);
+            else if (count > 0)
+                count = countUpdater.decrementAndGet(this);
+            else
+                throw new IllegalStateException("Already released");
+
+            if (count == RELEASED)
                 BufferPool.put(bytes, false);
-            }
         }
 
         /**
          * Create a slice over the next {@code length} bytes, and consume them from our buffer
+         *
+         * Does NOT increase the retention count; may need to be prefixed by a call to retain
          */
         SharedBytes sliceAndConsume(int length)
         {
@@ -145,8 +173,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         {
             ByteBuffer slice = bytes.duplicate();
             slice.position(begin).limit(end);
-            retain();
-            return new SharedBytes(owner(), slice);
+            return new SharedBytes(owner.retain(), slice);
         }
 
         static SharedBytes wrap(ByteBuffer buffer)
@@ -155,15 +182,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
-    static class Frame
+    abstract static class Frame
     {
-        /**
-         * If the provided Object is a Frame, release any associated resources it owns
-         */
-        static void release(Object msg)
+        abstract void release();
+        abstract boolean isConsumed();
+        public static void release(Object object)
         {
-            if (msg instanceof IntactFrame)
-                ((IntactFrame) msg).contents.release();
+            if (object instanceof Frame)
+                ((Frame) object).release();
         }
     }
 
@@ -185,6 +211,16 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         {
             this.isSelfContained = isSelfContained;
             this.contents = contents;
+        }
+
+        void release()
+        {
+            contents.release();
+        }
+
+        boolean isConsumed()
+        {
+            return !contents.isReadable();
         }
     }
 
@@ -219,163 +255,133 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         {
             return frameSize != Integer.MIN_VALUE;
         }
+
+        void release() { }
+
+        boolean isConsumed()
+        {
+            return true;
+        }
     }
+
 
     ByteBuffer stash;
-    // to permit use of Consumer without generating garbage,
-    // we stash the ChannelHandlerContext we constructed it against.
+    private final Deque<Frame> frames = new ArrayDeque<>();
+    private boolean active = true;
     private ChannelHandlerContext ctx;
-    private Consumer<Frame> consumer;
+    private ChannelConfig config;
 
-    /**
-     * Read a header that is 8 bytes or shorter, without modifying the buffer position.
-     * If your header is longer than this, you will need to implement your own {@link #decode}
-     */
-    abstract long readHeader(ByteBuffer in, int begin);
-    /**
-     * Verify the header, and return an unrecoverable CorruptFrame if it is corrupted
-     * @return null or CorruptFrame.unrecoverable
-     */
-    abstract CorruptFrame verifyHeader(long header);
+    abstract void decode(Collection<Frame> into, SharedBytes bytes);
+    abstract void addLastTo(ChannelPipeline pipeline);
 
-    /**
-     * Calculate the full frame length from info provided by the header, including the length of the header and any triler
-     */
-    abstract int frameLength(long header);
-
-    /**
-     * Extract a frame known to cover the given range.
-     * If {@code transferOwnership}, the method is responsible for ensuring bytes.release() is invoked at some future point.
-     */
-    abstract Frame unpackFrame(SharedBytes bytes, int begin, int end, long header, boolean transferOwnership);
-
-    abstract void decode(Consumer<Frame> consumer, SharedBytes bytes);
-
-    /**
-     * Decode a number of frames using the above abstract method implementations.
-     * It is expected for this method to be invoked by the implementing class' {@link #decode(Consumer, SharedBytes)}
-     * so that this implementation will be inlined, and all of the abstract method implementations will also be inlined.
-     * TODO verify this in assembly
-     */
-    @Inline
-    protected final void decode(Consumer<Frame> consumer, SharedBytes bytes, int headerLength)
+    public void resume()
     {
-        ByteBuffer in = bytes.get();
-
-        try
+        if (!active)
         {
-            if (stash != null)
-            {
-                if (!copyToSize(in, stash, headerLength))
-                    return;
-
-                long header = readHeader(stash, 0);
-                CorruptFrame c = verifyHeader(header);
-                if (c != null)
-                {
-                    reset();
-                    consumer.accept(c);
-                    return;
-                }
-
-                int frameLength = frameLength(header);
-                stash = ensureCapacity(stash, frameLength);
-
-                if (!copyToSize(in, stash, frameLength))
-                    return;
-
-                stash.flip();
-                SharedBytes stashed = SharedBytes.wrap(stash);
-                stash = null;
-
-                Frame frame;
-                try
-                {
-                    frame = unpackFrame(stashed, 0, frameLength, header, true);
-                }
-                catch (Throwable t)
-                {
-                    stashed.release();
-                    throw t;
-                }
-                consumer.accept(frame);
-            }
-
-            int begin = in.position();
-            int limit = in.limit();
-            while (begin < limit)
-            {
-                int remaining = limit - begin;
-                if (remaining < headerLength)
-                {
-                    stash(bytes, headerLength, begin, remaining);
-                    return;
-                }
-
-                long header = readHeader(in, begin);
-                CorruptFrame c = verifyHeader(header);
-                if (c != null)
-                {
-                    consumer.accept(c);
-                    return;
-                }
-
-                int frameLength = frameLength(header);
-                if (remaining < frameLength)
-                {
-                    stash(bytes, frameLength, begin, remaining);
-                    return;
-                }
-
-                int end = begin + frameLength;
-                SharedBytes unpack = bytes;
-                if (end == limit)
-                    bytes = null;
-                Frame frame = unpackFrame(unpack, begin, end, header, end == limit);
-
-                consumer.accept(frame);
-                begin = end;
-            }
-        }
-        catch (Throwable t)
-        {
-            if (bytes != null)
-                bytes.release();
-            throw t;
+            active = true;
+            // previously inactive; trigger either a decode or autoread
+            deliver(ctx);
+            config.setAutoRead(true);
         }
     }
 
-    /**
-     * If the new logical slice would reach the end of the provided slice, cannibalise it
-     */
-    public static SharedBytes slice(SharedBytes bytes, int sliceBegin, int sliceEnd, boolean transferOwnership)
+    public void pause()
     {
-        if (transferOwnership)
+        if (active)
         {
-            bytes.get().position(sliceBegin)
-                 .limit(sliceEnd);
-            return bytes;
+            active = false;
+            config.setAutoRead(false);
+        }
+    }
+
+    public void stop()
+    {
+        discard();
+    }
+
+    void stash(SharedBytes in, int stashLength, int begin, int length)
+    {
+        ByteBuffer out = BufferPool.get(stashLength, BufferType.OFF_HEAP);
+        copyBytes(in.get(), begin, out, 0, length);
+        out.position(length);
+        stash = out;
+    }
+
+    // visible only for legacy/none decode
+    void discard()
+    {
+        ctx = null;
+        config = null;
+        active = false;
+        if (stash != null)
+        {
+            ByteBuffer bytes = stash;
+            stash = null;
+            BufferPool.put(bytes);
+        }
+        while (!frames.isEmpty())
+            frames.poll().release();
+    }
+
+    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    {
+        ByteBuffer buf;
+        if (!(msg instanceof BufferPoolAllocator.Wrapped))
+        {
+            ByteBuf in = (ByteBuf) msg;
+            buf = BufferPool.get(in.readableBytes());
+            buf.limit(in.readableBytes());
+            in.readBytes(buf);
+            buf.flip();
+        }
+        else
+        {
+            buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
         }
 
-        return bytes.slice(sliceBegin, sliceEnd);
+        decode(frames, SharedBytes.wrap(buf));
+        deliver(ctx);
+    }
+
+    private void deliver(ChannelHandlerContext ctx)
+    {
+        while (!frames.isEmpty())
+        {
+            Frame frame = frames.peek();
+            ctx.fireChannelRead(frame);
+
+            if (!active)
+            {
+                if (frame.isConsumed())
+                {
+                    frames.poll();
+//                    frame.release();
+                }
+                return;
+            }
+
+            frames.poll();
+
+            // TODO enable once InboundMessageHandler API matches ours
+//            assert frame.isConsumed();
+//            frame.release();
+        }
     }
 
     public void handlerAdded(ChannelHandlerContext ctx)
     {
         this.ctx = ctx;
-        this.consumer = ctx::fireChannelRead;
+        this.config = ctx.channel().config();
     }
 
     public void channelUnregistered(ChannelHandlerContext ctx)
     {
-        this.ctx = null;
-        this.consumer = null;
+        discard();
     }
 
-    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    public void handlerRemoved(ChannelHandlerContext ctx)
     {
-        assert ctx == this.ctx;
-        decode(consumer, SharedBytes.wrap(((BufferPoolAllocator.Wrapped) msg).adopt()));
+        discard();
     }
 
     // visible only for legacy/none decode
@@ -397,42 +403,15 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    // visible only for legacy/none decode
-    static ByteBuffer ensureCapacity(ByteBuffer buffer, int capacity)
+    static ByteBuffer ensureCapacity(ByteBuffer in, int capacity)
     {
-        if (buffer.capacity() >= capacity)
-            return buffer;
+        if (in.capacity() >= capacity)
+            return in;
 
-        ByteBuffer newBuffer = BufferPool.get(capacity, BufferType.OFF_HEAP);
-        buffer.flip();
-        newBuffer.put(buffer);
-        BufferPool.put(buffer, false);
-        return newBuffer;
+        ByteBuffer out = BufferPool.get(capacity, BufferType.OFF_HEAP);
+        in.flip();
+        out.put(in);
+        BufferPool.put(in);
+        return out;
     }
-
-    // visible only for legacy/none decode
-    void stash(SharedBytes in, int stashLength, int begin, int length)
-    {
-        stash = BufferPool.get(stashLength, BufferType.OFF_HEAP);
-        copyBytes(in.get(), begin, stash, 0, length);
-        stash.position(length);
-    }
-
-    // visible only for legacy/none decode
-    void reset()
-    {
-        ByteBuffer put = stash;
-        if (put != null)
-        {
-            stash = null;
-            BufferPool.put(put, false);
-        }
-    }
-
-    public void handlerRemoved(ChannelHandlerContext ctx)
-    {
-        reset();
-    }
-
-    abstract void addLastTo(ChannelPipeline pipeline);
 }

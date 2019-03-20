@@ -32,7 +32,7 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
 {
     static class Payload
     {
-        final boolean isSelfContained;
+        private boolean isSelfContained;
         final ByteBuffer buffer;
         final int headerLength;
         final int trailerLength;
@@ -53,6 +53,11 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
             assert buffer.capacity() >= payloadCapacity + headerLength + trailerLength;
             buffer.position(headerLength);
             buffer.limit(buffer.capacity() - trailerLength);
+        }
+
+        void setSelfContained(boolean isSelfContained)
+        {
+            this.isSelfContained = isSelfContained;
         }
 
         // do not invoke after finish()

@@ -19,7 +19,7 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
-import java.util.function.Consumer;
+import java.util.Collection;
 
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
@@ -31,48 +31,30 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 @ChannelHandler.Sharable
 class FrameDecoderLegacy extends FrameDecoder
 {
-    long readHeader(ByteBuffer in, int begin)
-    {
-        throw new UnsupportedOperationException();
-    }
-    CorruptFrame verifyHeader(long header)
-    {
-        throw new UnsupportedOperationException();
-    }
-    int frameLength(long header)
-    {
-        throw new UnsupportedOperationException();
-    }
-    Frame unpackFrame(SharedBytes bytes, int begin, int end, long header, boolean transferOwnership)
-    {
-        throw new UnsupportedOperationException();
-    }
-
     private final int messagingVersion;
+
     private int remainingBytesInLargeMessage = 0;
 
     FrameDecoderLegacy(int messagingVersion) { this.messagingVersion = messagingVersion; }
 
-    void decode(Consumer<Frame> consumer, SharedBytes bytes)
+    final void decode(Collection<Frame> into, SharedBytes newBytes)
     {
-        boolean ownsBytes = true;
-        ByteBuffer in = bytes.get();
+        ByteBuffer in = newBytes.get();
         try
         {
             if (remainingBytesInLargeMessage > 0)
             {
-                if (remainingBytesInLargeMessage >= bytes.readableBytes())
+                if (remainingBytesInLargeMessage >= newBytes.readableBytes())
                 {
-                    remainingBytesInLargeMessage -= bytes.readableBytes();
-                    ownsBytes = false;
-                    consumer.accept(new IntactFrame(false, bytes));
+                    remainingBytesInLargeMessage -= newBytes.readableBytes();
+                    into.add(new IntactFrame(false, newBytes.sliceAndConsume(newBytes.readableBytes())));
                     return;
                 }
                 else
                 {
-                    Frame frame = new IntactFrame(false, bytes.sliceAndConsume(remainingBytesInLargeMessage));
+                    Frame frame = new IntactFrame(false, newBytes.sliceAndConsume(remainingBytesInLargeMessage));
                     remainingBytesInLargeMessage = 0;
-                    consumer.accept(frame);
+                    into.add(frame);
                 }
             }
 
@@ -89,10 +71,11 @@ class FrameDecoderLegacy extends FrameDecoder
                     copyToSize(in, stash, stash.capacity());
 
                     length = Message.serializer.messageSize(stash, 0, stash.position(), messagingVersion);
-                    if (length >= 0 && length < stash.limit())
+                    if (length >= 0 && length < stash.position())
                     {
-                        int excess = stash.limit() - length;
+                        int excess = stash.position() - length;
                         in.position(in.position() - excess);
+                        stash.position(length);
                     }
                 }
 
@@ -111,9 +94,9 @@ class FrameDecoderLegacy extends FrameDecoder
                 }
 
                 stash.flip();
-                Frame frame = new IntactFrame(isSelfContained, SharedBytes.wrap(stash));
+                SharedBytes stashed = SharedBytes.wrap(stash);
+                into.add(new IntactFrame(isSelfContained, stashed));
                 stash = null;
-                consumer.accept(frame);
             }
 
             int begin = in.position();
@@ -123,40 +106,46 @@ class FrameDecoderLegacy extends FrameDecoder
             {
                 int length = Message.serializer.messageSize(in, end, limit, messagingVersion);
 
-                if (length < 0 || end + length >= limit)
+                if (length >= 0 && end + length < limit)
                 {
-                    if (begin < end)
-                        consumer.accept(new IntactFrame(true, bytes.slice(begin, end)));
-
-                    if (length > LARGE_MESSAGE_THRESHOLD)
-                    {
-                        in.position(end);
-                        remainingBytesInLargeMessage = length - (limit - end);
-                        Frame frame = new IntactFrame(false, bytes);
-                        ownsBytes = false;
-                        consumer.accept(frame);
-                    }
-                    else
-                    {
-                        stash(bytes, length < 0 ? max(64, limit - end) : length, end, limit);
-                    }
-                    break;
+                    end += length;
+                    continue;
                 }
 
-                end += length;
+                if (end + length == limit)
+                {
+                    end = limit;
+                    length = 0;
+                }
+
+                if (begin < end)
+                    into.add(new IntactFrame(true, newBytes.slice(begin, end)));
+
+                if (length < 0)
+                {
+                    stash(newBytes, max(64, limit - end), end, limit - end);
+                }
+                else if (length > LARGE_MESSAGE_THRESHOLD)
+                {
+                    remainingBytesInLargeMessage = length - (limit - end);
+                    Frame frame = new IntactFrame(false, newBytes.slice(end, limit));
+                    into.add(frame);
+                }
+                else if (length > 0)
+                {
+                    stash(newBytes, length, end, limit - end);
+                }
+                break;
             }
         }
         catch (Message.InvalidLegacyProtocolMagic e)
         {
-            bytes.release();
-            reset();
-            consumer.accept(CorruptFrame.unrecoverable(e.read, Message.PROTOCOL_MAGIC));
-            assert ownsBytes;
+            discard();
+            into.add(CorruptFrame.unrecoverable(e.read, Message.PROTOCOL_MAGIC));
         }
         finally
         {
-            if (ownsBytes)
-                bytes.release();
+            newBytes.release();
         }
     }
 
