@@ -342,12 +342,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         long id = serializer.getId(buf, version);
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
-        if (!contained)
-            return processLargeMessageUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else if (size <= largeThreshold)
+        if (contained && size <= largeThreshold)
             return processSmallMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else
+        else if (contained || size <= buf.remaining())
             return processLargeMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
+        else
+            return processLargeMessageUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
     }
 
     private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
