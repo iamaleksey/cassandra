@@ -36,16 +36,18 @@ final class InternodeInboundTable extends AbstractVirtualTable
     private static final String ADDRESS = "address";
     private static final String PORT = "port";
 
-    private static final String RECEIVED_COUNT = "received_count";
-    private static final String RECEIVED_BYTES = "received_bytes";
-    private static final String PROCESSED_COUNT = "processed_count";
-    private static final String PROCESSED_BYTES = "processed_bytes";
-    private static final String PENDING_COUNT = "pending_count";
-    private static final String PENDING_BYTES = "pending_bytes";
-    private static final String EXPIRED_COUNT = "expired_count";
-    private static final String EXPIRED_BYTES = "expired_bytes";
-    private static final String ERROR_COUNT = "error_count";
+    private static final String CORRUPT_FRAMES_RECOVERED = "corrupt_frames_recovered";
+    private static final String CORRUPT_FRAMES_UNRECOVERED = "corrupt_frames_unrecovered";
     private static final String ERROR_BYTES = "error_bytes";
+    private static final String ERROR_COUNT = "error_count";
+    private static final String EXPIRED_BYTES = "expired_bytes";
+    private static final String EXPIRED_COUNT = "expired_count";
+    private static final String PENDING_BYTES = "pending_bytes";
+    private static final String PENDING_COUNT = "pending_count";
+    private static final String PROCESSED_BYTES = "processed_bytes";
+    private static final String PROCESSED_COUNT = "processed_count";
+    private static final String RECEIVED_BYTES = "received_bytes";
+    private static final String RECEIVED_COUNT = "received_count";
 
     InternodeInboundTable(String keyspace)
     {
@@ -54,16 +56,18 @@ final class InternodeInboundTable extends AbstractVirtualTable
                            .partitioner(new LocalPartitioner(CompositeType.getInstance(InetAddressType.instance, Int32Type.instance)))
                            .addPartitionKeyColumn(ADDRESS, InetAddressType.instance)
                            .addPartitionKeyColumn(PORT, Int32Type.instance)
-                           .addRegularColumn(RECEIVED_COUNT, LongType.instance)
-                           .addRegularColumn(RECEIVED_BYTES, LongType.instance)
-                           .addRegularColumn(PROCESSED_COUNT, LongType.instance)
-                           .addRegularColumn(PROCESSED_BYTES, LongType.instance)
-                           .addRegularColumn(PENDING_COUNT, LongType.instance)
-                           .addRegularColumn(PENDING_BYTES, LongType.instance)
-                           .addRegularColumn(EXPIRED_COUNT, LongType.instance)
-                           .addRegularColumn(EXPIRED_BYTES, LongType.instance)
-                           .addRegularColumn(ERROR_COUNT, LongType.instance)
+                           .addRegularColumn(CORRUPT_FRAMES_RECOVERED, Int32Type.instance)
+                           .addRegularColumn(CORRUPT_FRAMES_UNRECOVERED, Int32Type.instance)
                            .addRegularColumn(ERROR_BYTES, LongType.instance)
+                           .addRegularColumn(ERROR_COUNT, LongType.instance)
+                           .addRegularColumn(EXPIRED_BYTES, LongType.instance)
+                           .addRegularColumn(EXPIRED_COUNT, LongType.instance)
+                           .addRegularColumn(PENDING_BYTES, LongType.instance)
+                           .addRegularColumn(PENDING_COUNT, LongType.instance)
+                           .addRegularColumn(PROCESSED_BYTES, LongType.instance)
+                           .addRegularColumn(PROCESSED_COUNT, LongType.instance)
+                           .addRegularColumn(RECEIVED_BYTES, LongType.instance)
+                           .addRegularColumn(RECEIVED_COUNT, LongType.instance)
                            .build());
     }
 
@@ -95,15 +99,17 @@ final class InternodeInboundTable extends AbstractVirtualTable
     private void addRow(SimpleDataSet dataSet, InetAddressAndPort addressAndPort, InboundMessageHandlers handlers)
     {
         dataSet.row(addressAndPort.address, addressAndPort.port)
-               .column(RECEIVED_COUNT, handlers.receivedCount())
-               .column(RECEIVED_BYTES, handlers.receivedBytes())
-               .column(PROCESSED_COUNT, handlers.processedCount())
-               .column(PROCESSED_BYTES, handlers.processedBytes())
-               .column(PENDING_COUNT, handlers.pendingCount())
-               .column(PENDING_BYTES, handlers.pendingBytes())
-               .column(EXPIRED_COUNT, handlers.expiredCount())
-               .column(EXPIRED_BYTES, handlers.expiredBytes())
+               .column(CORRUPT_FRAMES_RECOVERED, handlers.corruptFramesRecovered())
+               .column(CORRUPT_FRAMES_UNRECOVERED, handlers.corruptFramesUnrecovered())
+               .column(ERROR_BYTES, handlers.errorBytes())
                .column(ERROR_COUNT, handlers.errorCount())
-               .column(ERROR_BYTES, handlers.errorBytes());
+               .column(EXPIRED_BYTES, handlers.expiredBytes())
+               .column(EXPIRED_COUNT, handlers.expiredCount())
+               .column(PENDING_BYTES, handlers.pendingBytes())
+               .column(PENDING_COUNT, handlers.pendingCount())
+               .column(PROCESSED_BYTES, handlers.processedBytes())
+               .column(PROCESSED_COUNT, handlers.processedCount())
+               .column(RECEIVED_BYTES, handlers.receivedBytes())
+               .column(RECEIVED_COUNT, handlers.receivedCount());
     }
 }

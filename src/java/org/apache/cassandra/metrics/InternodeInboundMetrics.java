@@ -27,16 +27,18 @@ import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
  */
 public class InternodeInboundMetrics
 {
-    private final MetricName receivedCount;
-    private final MetricName receivedBytes;
-    private final MetricName processedCount;
-    private final MetricName processedBytes;
-    private final MetricName pendingCount;
-    private final MetricName pendingBytes;
-    private final MetricName expiredCount;
-    private final MetricName expiredBytes;
-    private final MetricName errorCount;
+    private final MetricName corruptFramesRecovered;
+    private final MetricName corruptFramesUnrecovered;
     private final MetricName errorBytes;
+    private final MetricName errorCount;
+    private final MetricName expiredBytes;
+    private final MetricName expiredCount;
+    private final MetricName pendingBytes;
+    private final MetricName pendingCount;
+    private final MetricName processedBytes;
+    private final MetricName processedCount;
+    private final MetricName receivedBytes;
+    private final MetricName receivedCount;
 
     /**
      * Create metrics for given inbound message handlers.
@@ -48,33 +50,37 @@ public class InternodeInboundMetrics
         // ipv6 addresses will contain colons, which are invalid in a JMX ObjectName
         MetricNameFactory factory = new DefaultNameFactory("InboundConnection", peer.toString().replace(':', '_'));
 
-        register(receivedCount = factory.createMetricName("ReceivedCount"), handlers::receivedCount);
-        register(receivedBytes = factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);
-        register(processedCount = factory.createMetricName("ProcessedCount"), handlers::processedCount);
-        register(processedBytes = factory.createMetricName("ProcessedBytes"), handlers::processedBytes);
-        register(pendingCount = factory.createMetricName("PendingCount"), handlers::pendingCount);
-        register(pendingBytes = factory.createMetricName("PendingBytes"), handlers::pendingBytes);
-        register(expiredCount = factory.createMetricName("ExpiredCount"), handlers::expiredCount);
-        register(expiredBytes = factory.createMetricName("ExpiredBytes"), handlers::expiredBytes);
-        register(errorCount = factory.createMetricName("ErrorCount"), handlers::errorCount);
+        register(corruptFramesRecovered = factory.createMetricName("CorruptFramesRecovered"), handlers::corruptFramesRecovered);
+        register(corruptFramesUnrecovered = factory.createMetricName("CorruptFramesUnrecovered"), handlers::corruptFramesUnrecovered);
         register(errorBytes = factory.createMetricName("ErrorBytes"), handlers::errorBytes);
+        register(errorCount = factory.createMetricName("ErrorCount"), handlers::errorCount);
+        register(expiredBytes = factory.createMetricName("ExpiredBytes"), handlers::expiredBytes);
+        register(expiredCount = factory.createMetricName("ExpiredCount"), handlers::expiredCount);
+        register(pendingBytes = factory.createMetricName("PendingBytes"), handlers::pendingBytes);
+        register(pendingCount = factory.createMetricName("PendingCount"), handlers::pendingCount);
+        register(processedBytes = factory.createMetricName("ProcessedBytes"), handlers::processedBytes);
+        register(processedCount = factory.createMetricName("ProcessedCount"), handlers::processedCount);
+        register(receivedBytes = factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);
+        register(receivedCount = factory.createMetricName("ReceivedCount"), handlers::receivedCount);
     }
 
     public void release()
     {
-        remove(receivedCount);
-        remove(receivedBytes);
-        remove(processedCount);
-        remove(processedBytes);
-        remove(pendingCount);
-        remove(pendingBytes);
-        remove(expiredCount);
-        remove(expiredBytes);
-        remove(errorCount);
+        remove(corruptFramesRecovered);
+        remove(corruptFramesUnrecovered);
         remove(errorBytes);
+        remove(errorCount);
+        remove(expiredBytes);
+        remove(expiredCount);
+        remove(pendingBytes);
+        remove(pendingCount);
+        remove(processedBytes);
+        remove(processedCount);
+        remove(receivedBytes);
+        remove(receivedCount);
     }
 
-    private static void register(MetricName name, Gauge<Long> gauge)
+    private static void register(MetricName name, Gauge gauge)
     {
         CassandraMetricsRegistry.Metrics.register(name, gauge);
     }

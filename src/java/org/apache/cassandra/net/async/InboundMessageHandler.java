@@ -112,7 +112,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
 
-    long receivedCount, receivedBytes; // intentionally not volatile
+    long receivedCount, receivedBytes;
+    int corruptFramesRecovered, corruptFramesUnrecovered;
 
     private LargeCoprocessor largeCoprocessor;
 
@@ -229,8 +230,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             if (!isKeepingUp)
             {
-                button.pause();
                 isBlocked = true;
+                button.pause();
             }
         }
         else if (skipBytesRemaining > 0)
@@ -248,11 +249,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    // FIXME: metrics
     private void readCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
+        {
+            corruptFramesUnrecovered++;
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
 
         int frameSize = frame.frameSize;
         receivedBytes += frameSize;
@@ -263,6 +266,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
+            corruptFramesUnrecovered++;
             noSpamLogger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} (corrupted first frame of a message)", peer);
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
         }
@@ -284,6 +288,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             throw new IllegalStateException();
         }
+
+        corruptFramesRecovered++;
     }
 
     private boolean processMessages(boolean contained, SharedBytes bytes) throws InvalidLegacyProtocolMagic

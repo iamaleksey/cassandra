@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.ToLongFunction;
 
@@ -161,6 +162,16 @@ public final class InboundMessageHandlers
         return sum(h -> h.receivedBytes) + closedReceivedBytes;
     }
 
+    public int corruptFramesRecovered()
+    {
+        return (int) sum(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
+    }
+
+    public int corruptFramesUnrecovered()
+    {
+        return (int) sum(h -> h.corruptFramesUnrecovered) + closedCorruptFramesUnrecovered;
+    }
+
     public long errorCount()
     {
         return errorCount;
@@ -241,10 +252,21 @@ public final class InboundMessageHandlers
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedReceivedBytesUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedReceivedBytes");
 
+    private volatile int closedCorruptFramesRecovered;
+    private volatile int closedCorruptFramesUnrecovered;
+
+    private static final AtomicIntegerFieldUpdater<InboundMessageHandlers> closedCorruptFramesRecoveredUpdater =
+        AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesRecovered");
+    private static final AtomicIntegerFieldUpdater<InboundMessageHandlers> closedCorruptFramesUnrecoveredUpdater =
+        AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesUnrecovered");
+
     private void absorbCounters(InboundMessageHandler handler)
     {
         closedReceivedCountUpdater.addAndGet(this, handler.receivedCount);
         closedReceivedBytesUpdater.addAndGet(this, handler.receivedBytes);
+
+        closedCorruptFramesRecoveredUpdater.addAndGet(this, handler.corruptFramesRecovered);
+        closedCorruptFramesUnrecoveredUpdater.addAndGet(this, handler.corruptFramesUnrecovered);
     }
 
     private long sum(ToLongFunction<InboundMessageHandler> counter)
