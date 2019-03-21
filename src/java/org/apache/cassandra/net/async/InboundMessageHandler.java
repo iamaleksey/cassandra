@@ -333,10 +333,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             case INSUFFICIENT_ENDPOINT:
                 enterCapacityWaitQueue(endpointWaitQueue, size, expiresAtNanos, this::onEndpointReserveCapacityRegained);
-                break;
+                return false;
             case INSUFFICIENT_GLOBAL:
                 enterCapacityWaitQueue(globalWaitQueue, size, expiresAtNanos, this::onGlobalReserveCapacityRegained);
-                break;
+                return false;
         }
 
         long id = serializer.getId(buf, version);
