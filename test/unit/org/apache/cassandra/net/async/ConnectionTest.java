@@ -433,7 +433,8 @@ public class ConnectionTest
             unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            done.await(30L, SECONDS);
+            done.await(60L, SECONDS);
+            Assert.assertEquals(0, done.getCount());
             check(outbound).submitted(100)
                            .sent     ( 90, 90 * message.serializedSize(version))
                            .pending  (  0,  0)
@@ -447,7 +448,6 @@ public class ConnectionTest
                            .expired  (  0,  0)
                            .error    (  0,  0)
                            .check();
-            Assert.assertEquals(0, done.getCount());
         });
     }
 
@@ -477,7 +477,8 @@ public class ConnectionTest
             Uninterruptibles.sleepUninterruptibly(timeoutMillis * 2, TimeUnit.MILLISECONDS);
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
-            deliveryDone.await(30L, SECONDS);
+            deliveryDone.await(60L, SECONDS);
+            Assert.assertEquals(1, delivered.get());
             check(outbound).submitted( 11)
                            .sent     (  1,  sentSize)
                            .pending  (  0,  0)
@@ -491,7 +492,6 @@ public class ConnectionTest
                            .expired  (  0,  0)
                            .error    (  0,  0)
                            .check();
-            Assert.assertEquals(1, delivered.get());
         });
     }
 

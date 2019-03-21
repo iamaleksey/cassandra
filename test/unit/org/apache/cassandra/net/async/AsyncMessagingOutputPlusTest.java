@@ -42,7 +42,7 @@ public class AsyncMessagingOutputPlusTest
     {
         EmbeddedChannel channel = new TestChannel(4);
         ByteBuf read;
-        try (AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, 8, PayloadAllocator.simple))
+        try (AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, 32, PayloadAllocator.simple))
         {
             out.writeInt(1);
             assertEquals(0, out.flushed());
@@ -73,25 +73,25 @@ public class AsyncMessagingOutputPlusTest
             assertEquals(4, read.readableBytes());
             assertEquals(2, read.getInt(0));
 
-            out.write(new byte[16]);
-            assertEquals(24, out.position());
-            assertEquals(16, out.flushed());
-            assertEquals(16, out.flushedToNetwork());
+            out.write(new byte[64]);
+            assertEquals(72, out.position());
+            assertEquals(40, out.flushed());
+            assertEquals(40, out.flushedToNetwork());
 
             out.doFlush(0);
-            assertEquals(24, out.position());
-            assertEquals(24, out.flushed());
-            assertEquals(16, out.flushedToNetwork());
+            assertEquals(72, out.position());
+            assertEquals(72, out.flushed());
+            assertEquals(40, out.flushedToNetwork());
 
             read = channel.readOutbound();
-            assertEquals(8, read.readableBytes());
+            assertEquals(32, read.readableBytes());
             assertEquals(0, read.getLong(0));
-            assertEquals(24, out.position());
-            assertEquals(24, out.flushed());
-            assertEquals(24, out.flushedToNetwork());
+            assertEquals(72, out.position());
+            assertEquals(72, out.flushed());
+            assertEquals(72, out.flushedToNetwork());
 
             read = channel.readOutbound();
-            assertEquals(8, read.readableBytes());
+            assertEquals(32, read.readableBytes());
             assertEquals(0, read.getLong(0));
         }
 
