@@ -92,7 +92,7 @@ public class BufferPoolTest
     {
         ByteBuffer buffer = BufferPool.get(size);
         assertNotNull(buffer);
-        assertEquals(size, buffer.capacity());
+        assertEquals(BufferPool.roundUp(size), buffer.capacity());
         assertTrue(buffer.isDirect());
 
         long address = MemoryUtil.getAddress(buffer);
@@ -503,7 +503,7 @@ public class BufferPoolTest
     private void checkBuffer(int size)
     {
         ByteBuffer buffer = BufferPool.get(size);
-        assertEquals(size, buffer.capacity());
+        assertEquals(BufferPool.roundUp(size), buffer.capacity());
 
         if (size > 0 && size < BufferPool.NORMAL_CHUNK_SIZE)
         {
@@ -531,7 +531,7 @@ public class BufferPoolTest
         for (int size : sizes)
         {
             ByteBuffer buffer = BufferPool.get(size);
-            assertEquals(size, buffer.capacity());
+            assertEquals(BufferPool.roundUp(size), buffer.capacity());
 
             buffers.add(buffer);
         }
@@ -558,7 +558,7 @@ public class BufferPoolTest
 
         // now check we can still get the buffer with the free slots mask changed
         ByteBuffer buffer2 = BufferPool.get(size);
-        assertEquals(size, buffer.capacity());
+        assertEquals(BufferPool.roundUp(size), buffer.capacity());
         BufferPool.put(buffer2);
 
         // reset the free slots

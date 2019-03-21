@@ -115,9 +115,9 @@ public final class InboundMessageHandlers
 
     private void onMessageExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
     {
-        pendingCountUpdater.decrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, -messageSize);
-
+//        pendingCountUpdater.decrementAndGet(this);
+//        pendingBytesUpdater.addAndGet(this, -messageSize);
+//
         expiredCountUpdater.incrementAndGet(this);
         expiredBytesUpdater.addAndGet(this, messageSize);
 
