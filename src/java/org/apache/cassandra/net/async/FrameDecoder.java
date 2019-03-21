@@ -264,7 +264,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         }
     }
 
-
     ByteBuffer stash;
     private final Deque<Frame> frames = new ArrayDeque<>();
     private boolean active = true;
@@ -377,7 +376,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         discard();
     }
 
-    // visible only for legacy/none decode
+    /**
+     * Utility: fill {@code out} from {@code in} up to {@code toOutPosition},
+     * updating the position of both buffers with the result
+     * @return true if there were sufficient bytes to fill to {@code toOutPosition}
+     */
     static boolean copyToSize(ByteBuffer in, ByteBuffer out, int toOutPosition)
     {
         int bytesToSize = toOutPosition - out.position();
@@ -396,6 +399,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         return true;
     }
 
+    /**
+     * @return {@code in} if has sufficient capacity, otherwise
+     *         a replacement from {@code BufferPool} that {@code in} is copied into
+     */
     static ByteBuffer ensureCapacity(ByteBuffer in, int capacity)
     {
         if (in.capacity() >= capacity)

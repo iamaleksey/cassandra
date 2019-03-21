@@ -220,7 +220,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedBytes += readableBytes;
             largeBytesRemaining -= readableBytes;
 
-            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
+            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
             if (largeBytesRemaining == 0)
             {
                 receivedCount++;
@@ -427,7 +427,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         receivedBytes += size;
 
         LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
-        boolean isKeepingUp = coprocessor.supplyAndCloseWithoutSignaling(bytes.sliceAndConsume(size));
+        boolean isKeepingUp = coprocessor.supplyAndCloseWithoutSignaling(bytes.sliceAndConsume(size).atomic());
         largeExecutor.submit(coprocessor);
         return isKeepingUp;
     }
@@ -438,7 +438,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         receivedBytes += readableBytes;
 
         startCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
-        boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes));
+        boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
         largeBytesRemaining = size - readableBytes;
         return isKeepingUp;
     }
