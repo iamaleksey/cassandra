@@ -40,9 +40,9 @@ public class Cluster extends AbstractCluster<IInvokableInstance> implements IClu
         super(root, version, configs, sharedClassLoader);
     }
 
-    protected IInvokableInstance newInstanceWrapper(Versions.Version version, InstanceConfig config)
+    protected IInvokableInstance newInstanceWrapper(int generation, Versions.Version version, InstanceConfig config)
     {
-        return new Wrapper(version, config);
+        return new Wrapper(generation, version, config);
     }
 
     public static Builder<IInvokableInstance, Cluster> build(int nodeCount)

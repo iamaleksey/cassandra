@@ -44,9 +44,9 @@ public class UpgradeableCluster extends AbstractCluster<IUpgradeableInstance> im
         super(root, version, configs, sharedClassLoader);
     }
 
-    protected IUpgradeableInstance newInstanceWrapper(Versions.Version version, InstanceConfig config)
+    protected IUpgradeableInstance newInstanceWrapper(int generation, Versions.Version version, InstanceConfig config)
     {
-        return new Wrapper(version, config);
+        return new Wrapper(generation, version, config);
     }
 
     public static Builder<IUpgradeableInstance, UpgradeableCluster> build(int nodeCount)

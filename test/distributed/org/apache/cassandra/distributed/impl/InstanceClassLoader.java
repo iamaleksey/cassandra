@@ -56,17 +56,14 @@ public class InstanceClassLoader extends URLClassLoader
 
     private static final Predicate<String> shareClass = name -> sharePackage.apply(name) || sharedClassNames.contains(name);
 
-    public static interface Factory
-    {
-        InstanceClassLoader create(int id, URL[] urls, ClassLoader sharedClassLoader);
-    }
-
+    private final int generation; // used to help debug class loader leaks, by helping determine which classloaders should have been collected
     private final ClassLoader sharedClassLoader;
 
-    InstanceClassLoader(int id, URL[] urls, ClassLoader sharedClassLoader)
+    InstanceClassLoader(int generation, URL[] urls, ClassLoader sharedClassLoader)
     {
         super(urls, null);
         this.sharedClassLoader = sharedClassLoader;
+        this.generation = generation;
     }
 
     @Override
