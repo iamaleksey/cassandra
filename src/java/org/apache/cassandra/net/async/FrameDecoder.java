@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelConfig;
@@ -31,7 +30,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
@@ -42,11 +40,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     {
         abstract void release();
         abstract boolean isConsumed();
-        public static void release(Object object)
-        {
-            if (object instanceof Frame)
-                ((Frame) object).release();
-        }
     }
 
     /**

@@ -48,7 +48,6 @@ import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.Crc.InvalidCrc;
-import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.InboundCallbacks.*;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
@@ -192,8 +191,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
         if (isClosed)
-            Frame.release(msg); // FIXME?
-        else if (msg instanceof IntactFrame)
+            throw new IllegalStateException("channelRead() invoked on a closed InboundMessageHandler");
+
+        if (msg instanceof IntactFrame)
             readIntactFrame((IntactFrame) msg);
         else
             readCorruptFrame((CorruptFrame) msg);
