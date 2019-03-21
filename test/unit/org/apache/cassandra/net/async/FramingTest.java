@@ -19,10 +19,8 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Deque;
 import java.util.List;
 import java.util.Random;
 
@@ -35,7 +33,7 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.*;
-import static org.apache.cassandra.net.async.FrameDecoder.SharedBytes.wrap;
+import static org.apache.cassandra.net.async.SharedBytes.wrap;
 
 // TODO: test corruption
 // TODO: use a different random seed each time
@@ -51,7 +49,7 @@ public class FramingTest
     {
         final List<byte[]> original;
         final int[] boundaries;
-        final FrameDecoder.SharedBytes frames;
+        final SharedBytes frames;
 
         private SequenceOfFrames(List<byte[]> original, int[] boundaries, ByteBuffer frames)
         {
@@ -85,7 +83,7 @@ public class FramingTest
         SequenceOfFrames sequenceOfFrames = pairOfFrames(random, encoder);
 
         List<byte[]> uncompressed = sequenceOfFrames.original;
-        FrameDecoder.SharedBytes frames = sequenceOfFrames.frames;
+        SharedBytes frames = sequenceOfFrames.frames;
         int[] boundaries = sequenceOfFrames.boundaries;
 
         int end = frames.get().limit();
@@ -110,7 +108,7 @@ public class FramingTest
             frame.release();
     }
 
-    private static void verify(byte[] expect, FrameDecoder.SharedBytes actual)
+    private static void verify(byte[] expect, SharedBytes actual)
     {
         byte[] fetch = new byte[expect.length];
         actual.get().get(fetch);

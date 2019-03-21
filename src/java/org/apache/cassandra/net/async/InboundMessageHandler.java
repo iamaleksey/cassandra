@@ -50,7 +50,6 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.Crc.InvalidCrc;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
-import org.apache.cassandra.net.async.FrameDecoder.SharedBytes;
 import org.apache.cassandra.net.async.InboundCallbacks.*;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
@@ -569,7 +568,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         else
             logger.error("Unexpected exception caught while processing inbound messages from {}; terminating connection", peer, cause);
 
-        button.stop(); // ?
         channel.close();
     }
 
