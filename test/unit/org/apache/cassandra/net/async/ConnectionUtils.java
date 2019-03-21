@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.net.async;
 
+import java.util.concurrent.TimeUnit;
+
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Assert;
 
 public class ConnectionUtils
@@ -177,11 +180,6 @@ public class ConnectionUtils
 
         public void check()
         {
-            if (checkPending)
-            {
-                Assert.assertEquals(pending, connection.pendingCount());
-                Assert.assertEquals(pendingBytes, connection.pendingBytes());
-            }
             if (checkReceived)
             {
                 Assert.assertEquals(received, connection.receivedCount());
@@ -201,6 +199,16 @@ public class ConnectionUtils
             {
                 Assert.assertEquals(error, connection.errorCount());
                 Assert.assertEquals(errorBytes, connection.errorBytes());
+            }
+            if (checkPending)
+            {
+                // pending cannot relied upon to not race with completion of the task,
+                // so if it is currently above the value we expect, sleep for a bit
+                if (pending < connection.pendingCount())
+                    for (int i = 0 ; i < 10 && pending < connection.pendingCount() ; ++i)
+                        Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.MILLISECONDS);
+                Assert.assertEquals(pending, connection.pendingCount());
+                Assert.assertEquals(pendingBytes, connection.pendingBytes());
             }
         }
     }
