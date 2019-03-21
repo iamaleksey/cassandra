@@ -26,7 +26,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
  * A wrapper for possibly sharing portions of a single, BufferPool managed, ByteBuffer;
- * optimised for the case where no sharing is necessary
+ * optimised for the case where no sharing is necessary.
  */
 class SharedBytes
 {

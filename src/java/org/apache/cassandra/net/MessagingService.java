@@ -65,7 +65,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
 
-    public final class MessagingService extends MessagingServiceMBeanImpl
+public final class MessagingService extends MessagingServiceMBeanImpl
 {
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
@@ -121,6 +121,8 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
 
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
+
+    private volatile boolean isShuttingDown;
 
     @VisibleForTesting
     MessagingService(boolean testOnly)
@@ -376,8 +378,10 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
             }
             catch (ClosedChannelException e)
             {
-                // make sure they're all closed, not just the one we wanted to send to; remove them from our map and try again
-                connections.close(true);
+                if (isShuttingDown)
+                    return; // just drop the message, and let others clean up
+
+                // remove the connection and try again
                 channelManagers.remove(to, connections);
             }
         }
@@ -400,6 +404,7 @@ import static org.apache.cassandra.concurrent.Stage.MUTATION;
 
     public void shutdown(boolean isTest)
     {
+        isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
         assert !StageManager.getStage(MUTATION).isShutdown();
