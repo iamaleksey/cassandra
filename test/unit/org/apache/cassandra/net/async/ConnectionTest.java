@@ -109,7 +109,7 @@ public class ConnectionTest
     @AfterClass
     public static void cleanup() throws InterruptedException
     {
-        NettyFactory.instance.close();
+        NettyFactory.instance.shutdownNow();
     }
 
     interface SendTest

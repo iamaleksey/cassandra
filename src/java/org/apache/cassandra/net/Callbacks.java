@@ -18,7 +18,7 @@
 
 package org.apache.cassandra.net;
 
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -135,9 +135,19 @@ public class Callbacks
         return callbacks.getCreationTimeNanos(messageId);
     }
 
-    boolean shutdownBlocking()
+    void shutdownNow(boolean expireCallbacks)
     {
-        return callbacks.shutdownBlocking();
+        callbacks.shutdownNow(expireCallbacks);
+    }
+
+    void shutdownGracefully()
+    {
+        callbacks.shutdownGracefully();
+    }
+
+    void awaitTerminationUntil(long deadlineNanos) throws TimeoutException, InterruptedException
+    {
+        callbacks.awaitTerminationUntil(deadlineNanos);
     }
 
     @VisibleForTesting

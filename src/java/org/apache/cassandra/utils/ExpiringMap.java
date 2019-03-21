@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 
 import com.google.common.util.concurrent.Uninterruptibles;
@@ -31,6 +32,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.DebuggableScheduledThreadPoolExecutor;
+
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 public class ExpiringMap<K, V>
 {
@@ -96,35 +99,58 @@ public class ExpiringMap<K, V>
 
         Runnable runnable = () ->
         {
-            long start = Clock.instance.nanoTime();
-            int n = 0;
-            for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
-            {
-                if (entry.getValue().isReadyToDieAt(start))
-                {
-                    if (cache.remove(entry.getKey()) != null)
-                    {
-                        n++;
-                        onExpired.accept(entry.getKey(), entry.getValue());
-                    }
-                }
-            }
-            logger.trace("Expired {} entries", n);
         };
 
         service.scheduleWithFixedDelay(runnable, defaultExpiration / 2, defaultExpiration / 2, TimeUnit.MILLISECONDS);
     }
 
-    public boolean shutdownBlocking()
+    public void shutdownNow(boolean expireContents)
     {
-        service.shutdown();
-        try
+        service.shutdownNow();
+        if (expireContents)
+            forceExpire();
+    }
+
+    public void shutdownGracefully()
+    {
+        expire();
+        if (!cache.isEmpty())
+            service.schedule(this::shutdownGracefully, 100L, TimeUnit.MILLISECONDS);
+        else
+            service.shutdownNow();
+    }
+
+    public void awaitTerminationUntil(long deadlineNanos) throws TimeoutException, InterruptedException
+    {
+        long wait = deadlineNanos - System.nanoTime();
+        if (wait <= 0 || !service.awaitTermination(wait, NANOSECONDS))
+            throw new TimeoutException();
+    }
+
+    private void expire()
+    {
+        long start = Clock.instance.nanoTime();
+        int n = 0;
+        for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
         {
-            return service.awaitTermination(defaultExpiration * 2, defaultExpirationUnit);
+            if (entry.getValue().isReadyToDieAt(start))
+            {
+                if (cache.remove(entry.getKey()) != null)
+                {
+                    n++;
+                    onExpired.accept(entry.getKey(), entry.getValue());
+                }
+            }
         }
-        catch (InterruptedException e)
+        logger.trace("Expired {} entries", n);
+    }
+
+    private void forceExpire()
+    {
+        for (Map.Entry<K, CacheableObject<V>> e : cache.entrySet())
         {
-            throw new AssertionError(e);
+            if (cache.remove(e.getKey(), e.getValue()))
+                onExpired.accept(e.getKey(), e.getValue());
         }
     }
 
@@ -147,7 +173,7 @@ public class ExpiringMap<K, V>
             // So we'll just sit on this thread until the rest of the server shutdown completes.
             //
             // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
-            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, NANOSECONDS);
         }
         CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, timeout, unit));
         return (previous == null) ? null : previous.value;
@@ -161,7 +187,7 @@ public class ExpiringMap<K, V>
             // So we'll just sit on this thread until the rest of the server shutdown completes.
             //
             // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
-            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, NANOSECONDS);
         }
         CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, expiresAtNanos));
         return (previous == null) ? null : previous.value;

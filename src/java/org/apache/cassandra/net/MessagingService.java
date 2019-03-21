@@ -61,11 +61,15 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
+import org.apache.cassandra.utils.Throwables;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
+import static org.apache.cassandra.utils.Throwables.maybeFail;
+import static org.apache.cassandra.utils.Throwables.perform;
 
-public final class MessagingService extends MessagingServiceMBeanImpl
+    public final class MessagingService extends MessagingServiceMBeanImpl
 {
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
@@ -399,39 +403,52 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      */
     public void shutdown()
     {
-        shutdown(false);
+        shutdown(true, true);
     }
 
-    public void shutdown(boolean isTest)
+    public void shutdown(boolean shutdownGracefully, boolean shutdownNetty)
     {
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
         // We may need to schedule hints on the mutation stage, so it's erroneous to shut down the mutation stage first
         assert !StageManager.getStage(MUTATION).isShutdown();
 
-        // the important part
-        if (!callbacks.shutdownBlocking())
-            logger.warn("Failed to wait for messaging service callbacks shutdown");
-
-        // attempt to humor tests that try to stop and restart MS
-        try
+        if (shutdownGracefully)
         {
-            // first close the recieve channels
-
-            // now close the send channels
+            callbacks.shutdownGracefully();
             List<Future<Void>> closing = new ArrayList<>();
             for (OutboundConnections pool : channelManagers.values())
-                closing.add(pool.close(false));
-            new FutureCombiner(closing).get(30L, TimeUnit.SECONDS);
+                closing.add(pool.close(true));
 
-            if (!isTest)
-                NettyFactory.instance.close();
-
-            messageSink.clear();
+            long deadline = System.nanoTime() + SECONDS.toNanos(60L);
+            maybeFail(() -> new FutureCombiner(closing).get(60L, TimeUnit.SECONDS),
+                      () -> inbound.close().get(),
+                      () -> {
+                          if (shutdownNetty)
+                          {
+                              NettyFactory.instance.shutdownNow();
+                              NettyFactory.instance.awaitTerminationUntil(deadline);
+                          }
+                      },
+                      messageSink::clear);
         }
-        catch (Exception e)
+        else
         {
-            throw new IOError(e);
+            callbacks.shutdownNow(false);
+            List<Future<Void>> closing = new ArrayList<>();
+            closing.add(inbound.close());
+            for (OutboundConnections pool : channelManagers.values())
+                closing.add(pool.close(false));
+            if (shutdownNetty)
+                NettyFactory.instance.shutdownNow();
+
+            long deadline = System.nanoTime() + SECONDS.toNanos(60L);
+            maybeFail(() -> new FutureCombiner(closing).get(60L, TimeUnit.SECONDS),
+                      () -> {
+                          if (shutdownNetty)
+                              NettyFactory.instance.awaitTerminationUntil(deadline);
+                      },
+                      messageSink::clear);
         }
     }
 

@@ -54,7 +54,7 @@ public class HandshakeTest
     @AfterClass
     public static void cleanup() throws InterruptedException
     {
-        NettyFactory.instance.close();
+        NettyFactory.instance.shutdownNow();
     }
 
     private Result handshake(int req, int outMin, int outMax) throws ExecutionException, InterruptedException

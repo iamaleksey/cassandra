@@ -4,14 +4,19 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.zip.CRC32;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -37,6 +42,7 @@ import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
@@ -48,8 +54,12 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static com.google.common.collect.Iterables.*;
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
+import static java.util.Collections.*;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 /**
@@ -181,13 +191,23 @@ public final class NettyFactory
         return outboundStreamingGroup;
     }
 
-    public void close() throws InterruptedException
+    public void shutdownNow()
     {
-        EventLoopGroup[] groups = new EventLoopGroup[] { acceptGroup, defaultGroup };
-        for (EventLoopGroup group : groups)
-            group.shutdownGracefully(0, 2, TimeUnit.SECONDS);
-        for (EventLoopGroup group : groups)
-            group.awaitTermination(60, TimeUnit.SECONDS);
+        acceptGroup.shutdownGracefully(0, 2, SECONDS);
+        defaultGroup.shutdownGracefully(0, 2, SECONDS);
+        outboundStreamingGroup.shutdownGracefully(0, 2, SECONDS);
+        synchronousWorkExecutor.shutdown();
+    }
+
+    public void awaitTerminationUntil(long deadlineNanos) throws InterruptedException, TimeoutException
+    {
+        List<ExecutorService> groups = ImmutableList.of(acceptGroup, defaultGroup, outboundStreamingGroup, synchronousWorkExecutor);
+        for (ExecutorService executor : concat(groups, singleton(synchronousWorkExecutor)))
+        {
+            long wait = deadlineNanos - System.nanoTime();
+            if (wait <= 0 || !executor.awaitTermination(wait, NANOSECONDS))
+                throw new TimeoutException();
+        }
     }
 
     public static boolean isConnectionResetException(Throwable t)
