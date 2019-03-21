@@ -241,7 +241,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void channelUnregistered(ChannelHandlerContext ctx) throws Exception
         {
             super.channelUnregistered(ctx);
-            exceptionCaught(ctx, new ClosedChannelException());
+//            exceptionCaught(ctx, new ClosedChannelException());
         }
 
         /**

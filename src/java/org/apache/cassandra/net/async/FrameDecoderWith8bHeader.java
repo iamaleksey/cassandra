@@ -84,17 +84,14 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                 SharedBytes stashed = SharedBytes.wrap(stash);
                 stash = null;
 
-                Frame frame;
                 try
                 {
-                    frame = unpackFrame(stashed, 0, frameLength, header);
+                    into.add(unpackFrame(stashed, 0, frameLength, header));
                 }
                 finally
                 {
                     stashed.release();
                 }
-
-                into.add(frame);
             }
 
             int begin = in.position();

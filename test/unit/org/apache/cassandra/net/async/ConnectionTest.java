@@ -171,16 +171,15 @@ public class ConnectionTest
     private static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
 
     private static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
-//        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
-//                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
-//        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
-//                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
+                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
+        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
         settings -> settings.outbound(outbound -> outbound.withCompression(true))
     );
 
     private static final List<Settings> SETTINGS = applyPowerSet(
-//        ImmutableList.of(Settings.SMALL, Settings.LARGE),
-        ImmutableList.of(Settings.SMALL),
+        ImmutableList.of(Settings.SMALL, Settings.LARGE),
         MODIFIERS
     );
 

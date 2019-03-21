@@ -301,13 +301,12 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
 
     void stash(SharedBytes in, int stashLength, int begin, int length)
     {
-        ByteBuffer out = BufferPool.get(stashLength, BufferType.OFF_HEAP);
+        ByteBuffer out = BufferPool.getAtLeast(stashLength, BufferType.OFF_HEAP);
         copyBytes(in.get(), begin, out, 0, length);
         out.position(length);
         stash = out;
     }
 
-    // visible only for legacy/none decode
     void discard()
     {
         ctx = null;
@@ -350,21 +349,15 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
             Frame frame = frames.peek();
             ctx.fireChannelRead(frame);
 
-            if (!active)
+            assert !active || frame.isConsumed();
+            if (active || frame.isConsumed())
             {
-                if (frame.isConsumed())
-                {
-                    frames.poll();
-//                    frame.release();
-                }
-                return;
+                frames.poll();
+                frame.release();
             }
 
-            frames.poll();
-
-            // TODO enable once InboundMessageHandler API matches ours
-//            assert frame.isConsumed();
-//            frame.release();
+            if (!active)
+                return;
         }
     }
 
@@ -408,7 +401,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         if (in.capacity() >= capacity)
             return in;
 
-        ByteBuffer out = BufferPool.get(capacity, BufferType.OFF_HEAP);
+        ByteBuffer out = BufferPool.getAtLeast(capacity, BufferType.OFF_HEAP);
         in.flip();
         out.put(in);
         BufferPool.put(in);

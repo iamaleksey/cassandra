@@ -96,7 +96,7 @@ public class BufferPool
         if (DISABLED)
             return allocate(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
         else
-            return takeFromPool(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+            return takeFromPool(size, false, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
     }
 
     public static ByteBuffer get(int size, BufferType bufferType)
@@ -105,16 +105,27 @@ public class BufferPool
         if (DISABLED || !direct)
             return allocate(size, !direct);
         else
-            return takeFromPool(size, !direct);
+            return takeFromPool(size, false, !direct);
+    }
+
+    public static ByteBuffer getAtLeast(int size, BufferType bufferType)
+    {
+        boolean direct = bufferType == BufferType.OFF_HEAP;
+        if (DISABLED || !direct)
+            return allocate(size, !direct);
+        else
+            return takeFromPool(size, true, !direct);
     }
 
     /** Unlike the get methods, this will return null if the pool is exhausted */
     public static ByteBuffer tryGet(int size)
     {
-        if (DISABLED)
-            return allocate(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
-        else
-            return maybeTakeFromPool(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+        return tryGet(size, false);
+    }
+
+    public static ByteBuffer tryGet(int size, boolean sizeIsLowerBound)
+    {
+        return maybeTakeFromPool(size, sizeIsLowerBound, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
     }
 
     private static ByteBuffer allocate(int size, boolean onHeap)
@@ -124,9 +135,9 @@ public class BufferPool
                : ByteBuffer.allocateDirect(size);
     }
 
-    private static ByteBuffer takeFromPool(int size, boolean allocateOnHeapWhenExhausted)
+    private static ByteBuffer takeFromPool(int size, boolean exactSize, boolean allocateOnHeapWhenExhausted)
     {
-        ByteBuffer ret = maybeTakeFromPool(size, allocateOnHeapWhenExhausted);
+        ByteBuffer ret = maybeTakeFromPool(size, exactSize, allocateOnHeapWhenExhausted);
         if (ret != null)
             return ret;
 
@@ -137,7 +148,7 @@ public class BufferPool
         return allocate(size, allocateOnHeapWhenExhausted);
     }
 
-    private static ByteBuffer maybeTakeFromPool(int size, boolean allocateOnHeapWhenExhausted)
+    private static ByteBuffer maybeTakeFromPool(int size, boolean sizeIsLowerBound, boolean allocateOnHeapWhenExhausted)
     {
         if (size < 0)
             throw new IllegalArgumentException("Size must be positive (" + size + ")");
@@ -156,7 +167,7 @@ public class BufferPool
             return allocate(size, allocateOnHeapWhenExhausted);
         }
 
-        return localPool.get().get(size);
+        return localPool.get().get(size, sizeIsLowerBound);
     }
 
     public static void put(ByteBuffer buffer)
@@ -399,7 +410,7 @@ public class BufferPool
         public LocalPool(LocalPool parent)
         {
             this.parent = () -> {
-                ByteBuffer buffer = parent.get(TINY_CHUNK_SIZE);
+                ByteBuffer buffer = parent.get(TINY_CHUNK_SIZE, false);
                 if (buffer == null)
                     return null;
                 return new Chunk(TINY_RECYCLER, buffer);
@@ -447,10 +458,10 @@ public class BufferPool
             return tinyPool;
         }
 
-        public ByteBuffer get(int size)
+        public ByteBuffer get(int size, boolean sizeIsLowerBound)
         {
             if (size <= tinyLimit)
-                return tinyPool().get(size);
+                return tinyPool().get(size, sizeIsLowerBound);
 
             ByteBuffer reuse = this.reuseObjects.poll();
             for (Chunk chunk : chunks)
@@ -458,7 +469,7 @@ public class BufferPool
                 if (chunk == null)
                     break;
 
-                ByteBuffer buffer = chunk.get(size, reuse);
+                ByteBuffer buffer = chunk.get(size, sizeIsLowerBound, reuse);
                 if (buffer != null)
                     return buffer;
             }
@@ -467,7 +478,7 @@ public class BufferPool
             Chunk chunk = addChunkFromParent();
             if (chunk != null)
             {
-                ByteBuffer result = chunk.get(size, reuse);
+                ByteBuffer result = chunk.get(size, sizeIsLowerBound, reuse);
                 if (result != null)
                     return result;
             }
@@ -811,18 +822,20 @@ public class BufferPool
 
         ByteBuffer get(int size)
         {
-            return get(size, null);
+            return get(size, false, null);
         }
 
         /**
          * Return the next available slice of this size. If
          * we have exceeded the capacity we return null.
          */
-        ByteBuffer get(int size, ByteBuffer into)
+        ByteBuffer get(int size, boolean sizeIsLowerBound, ByteBuffer into)
         {
             // how many multiples of our units is the size?
             // we add (unit - 1), so that when we divide by unit (>>> shift), we effectively round up
             int slotCount = (size - 1 + unit()) >>> shift;
+            if (sizeIsLowerBound)
+                size = slotCount << shift;
 
             // if we require more than 64 slots, we cannot possibly accommodate the allocation
             if (slotCount > 64)
@@ -886,12 +899,12 @@ public class BufferPool
                         // make sure no other thread has cleared the candidate bits
                         assert ((candidate & cur) == candidate);
                     }
-                    return get(index << shift, slotCount << shift, into);
+                    return set(index << shift, size, into);
                 }
             }
         }
 
-        private ByteBuffer get(int offset, int size, ByteBuffer into)
+        private ByteBuffer set(int offset, int size, ByteBuffer into)
         {
             if (into == null)
                 into = MemoryUtil.getHollowDirectByteBuffer(ByteOrder.BIG_ENDIAN);

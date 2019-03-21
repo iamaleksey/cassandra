@@ -49,7 +49,7 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
             this.headerLength = headerLength;
             this.trailerLength = trailerLength;
 
-            buffer = BufferPool.get(payloadCapacity + headerLength + trailerLength, BufferType.OFF_HEAP);
+            buffer = BufferPool.getAtLeast(payloadCapacity + headerLength + trailerLength, BufferType.OFF_HEAP);
             assert buffer.capacity() >= payloadCapacity + headerLength + trailerLength;
             buffer.position(headerLength);
             buffer.limit(buffer.capacity() - trailerLength);

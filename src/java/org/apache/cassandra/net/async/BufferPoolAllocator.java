@@ -48,7 +48,7 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
 
     protected ByteBuf newDirectBuffer(int minCapacity, int maxCapacity)
     {
-        ByteBuf result = wrap(BufferPool.get(minCapacity, BufferType.OFF_HEAP));
+        ByteBuf result = wrap(BufferPool.getAtLeast(minCapacity, BufferType.OFF_HEAP));
         result.clear();
         return result;
     }

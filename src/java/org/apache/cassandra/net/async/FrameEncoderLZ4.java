@@ -74,7 +74,7 @@ class FrameEncoderLZ4 extends FrameEncoder
                 throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
 
             int maxOutputLength = compressor.maxCompressedLength(uncompressedLength);
-            frame = BufferPool.get(HEADER_AND_TRAILER_LENGTH + maxOutputLength, BufferType.OFF_HEAP);
+            frame = BufferPool.getAtLeast(HEADER_AND_TRAILER_LENGTH + maxOutputLength, BufferType.OFF_HEAP);
 
             int compressedLength = compressor.compress(in, in.position(), uncompressedLength, frame, HEADER_LENGTH, maxOutputLength);
 

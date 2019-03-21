@@ -55,8 +55,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
-import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
 import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -109,8 +107,8 @@ public class OutboundConnection
 
     private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submitted");
     private static final AtomicLongFieldUpdater<OutboundConnection> queueSizeInBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "queueSizeInBytes");
-    private static final AtomicLongFieldUpdater<OutboundConnection> droppedDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "droppedDueToOverload");
-    private static final AtomicLongFieldUpdater<OutboundConnection> droppedBytesDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "droppedBytesDueToOverload");
+    private static final AtomicLongFieldUpdater<OutboundConnection> droppedDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadCount");
+    private static final AtomicLongFieldUpdater<OutboundConnection> droppedBytesDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadBytes");
     private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> closingUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "closing");
     private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> scheduledCloseUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "scheduledClose");
 
@@ -127,16 +125,16 @@ public class OutboundConnection
     private final ResourceLimits.EndpointAndGlobal reserveCapacityInBytes;
 
     private volatile long submitted = 0;                    // updated with cas
-    private volatile long droppedDueToOverload = 0;         // updated with cas
-    private volatile long droppedBytesDueToOverload = 0;    // updated with cas
-    private long droppedDueToTimeout = 0;                   // updated with queue lock held
-    private long droppedBytesDueToTimeout = 0;              // updated with queue lock held
-    private long droppedDueToError = 0;                     // updated only by delivery thread
-    private long droppedBytesDueToError = 0;                // updated by delivery thread only
+    private volatile long overloadCount = 0;         // updated with cas
+    private volatile long overloadBytes = 0;    // updated with cas
+    private long expiredCount = 0;                   // updated with queue lock held
+    private long expiredBytes = 0;              // updated with queue lock held
+    private long errorCount = 0;                     // updated only by delivery thread
+    private long errorBytes = 0;                // updated by delivery thread only
     private long sent;                                      // updated by delivery thread only
     private long sentBytes;                                 // updated by delivery thread only
     private long successfulConnections;                     // updated by event loop only
-    private long failedConnections;                         // updated by event loop only
+    private long failedConnectionAttempts;                         // updated by event loop only
 
     /*
      * The following four fields define our connection behaviour; the template contains the user-specified desired properties,
@@ -340,8 +338,8 @@ public class OutboundConnection
     private boolean onDroppedDueToTimeout(Message<?> msg)
     {
         releaseCapacity(canonicalSize(msg));
-        droppedDueToTimeout += 1;
-        droppedBytesDueToTimeout += canonicalSize(msg);
+        expiredCount += 1;
+        expiredBytes += canonicalSize(msg);
         noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), msg.verb);
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
         return true;
@@ -356,8 +354,8 @@ public class OutboundConnection
     {
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(canonicalSize(msg));
-        droppedDueToError += 1;
-        droppedBytesDueToError += canonicalSize(msg);
+        errorCount += 1;
+        errorBytes += canonicalSize(msg);
         logger.warn("{} dropping message of type {} due to error", id(), msg.verb, t);
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
         return true;
@@ -730,8 +728,8 @@ public class OutboundConnection
                         }
                         else
                         {
-                            droppedDueToError += sendingCountFinal;
-                            droppedBytesDueToError += sendingBytesFinal;
+                            errorCount += sendingCountFinal;
+                            errorBytes += sendingBytesFinal;
                             invalidateChannel(closeChannelOnFailure, future.cause());
                         }
                     });
@@ -740,8 +738,8 @@ public class OutboundConnection
             }
             catch (Throwable t)
             {
-                droppedDueToError += sendingCount;
-                droppedBytesDueToError += sendingBytes;
+                errorCount += sendingCount;
+                errorBytes += sendingBytes;
                 invalidateChannel(channel, t);
             }
             finally
@@ -905,7 +903,7 @@ public class OutboundConnection
                 assert connecting == null;
 
             retryRateMillis = min(1000, retryRateMillis * 2);
-            ++failedConnections;
+            ++failedConnectionAttempts;
         }
 
         void onCompletedHandshake(Result<MessagingSuccess> result)
@@ -1349,47 +1347,47 @@ public class OutboundConnection
 
     public long dropped()
     {
-        return droppedDueToOverload + droppedDueToTimeout;
+        return overloadCount + expiredCount;
     }
 
     public long overloadBytes()
     {
-        return droppedDueToOverload;
+        return overloadBytes;
     }
 
     public long overloadCount()
     {
-        return droppedBytesDueToOverload;
+        return overloadCount;
     }
 
     public long expiredCount()
     {
-        return droppedDueToTimeout;
+        return expiredCount;
     }
 
     public long expiredBytes()
     {
-        return droppedBytesDueToTimeout;
+        return expiredBytes;
     }
 
     public long errorCount()
     {
-        return droppedDueToError;
+        return errorCount;
     }
 
     public long errorBytes()
     {
-        return droppedBytesDueToError;
+        return errorBytes;
     }
 
-    public long successfulConnectionAttempts()
+    public long successfulConnections()
     {
         return successfulConnections;
     }
 
     public long failedConnectionAttempts()
     {
-        return failedConnections;
+        return failedConnectionAttempts;
     }
 
     private static Runnable andThen(Runnable a, Runnable b)

@@ -137,7 +137,7 @@ public class FramingTest
             cumulativeCompressedLength[i] = (i == 0 ? 0 : cumulativeCompressedLength[i - 1]) + buffer.readableBytes();
         }
 
-        ByteBuffer frames = BufferPool.get(cumulativeCompressedLength[frameCount - 1], BufferType.OFF_HEAP);
+        ByteBuffer frames = BufferPool.getAtLeast(cumulativeCompressedLength[frameCount - 1], BufferType.OFF_HEAP);
         for (ByteBuf buffer : compressed)
         {
             frames.put(buffer.internalNioBuffer(buffer.readerIndex(), buffer.readableBytes()));
