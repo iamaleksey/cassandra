@@ -239,6 +239,7 @@ public class ConnectionTest
         }
         finally
         {
+            outbound.close(false);
             inbound.close().get(30L, SECONDS);
             outbound.close(false).get(30L, SECONDS);
             resetVerbs();

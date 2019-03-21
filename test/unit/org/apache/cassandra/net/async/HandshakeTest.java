@@ -198,8 +198,7 @@ public class HandshakeTest
     {
         try
         {
-            handshake(VERSION_30, VERSION_30, VERSION_30, current_version, current_version);
-            Assert.fail("Should have thrown");
+            Assert.fail(Objects.toString(handshake(VERSION_30, VERSION_30, VERSION_30, current_version, current_version)));
         }
         catch (ExecutionException e)
         {
@@ -208,15 +207,10 @@ public class HandshakeTest
     }
 
     @Test // fairly contrived case, but since we introduced logic for testing we need to be careful it doesn't make us worse
-    public void testSendToFuturePost40BelievedToBePre40() throws InterruptedException
+    public void testSendToFuturePost40BelievedToBePre40() throws InterruptedException, ExecutionException
     {
-        try
-        {
-            Assert.fail(Objects.toString(handshake(VERSION_30, VERSION_30, current_version, VERSION_30, current_version + 1)));
-        }
-        catch (ExecutionException e)
-        {
-            Assert.assertTrue(e.getCause() instanceof ClosedChannelException);
-        }
+        Result result = handshake(VERSION_30, VERSION_30, current_version, VERSION_30, current_version + 1);
+        Assert.assertEquals(Result.Outcome.SUCCESS, result.outcome);
+        Assert.assertEquals(VERSION_30, result.success().messagingVersion);
     }
 }
