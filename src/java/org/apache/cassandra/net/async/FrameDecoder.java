@@ -34,7 +34,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
-abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements InboundMessageHandler.Button
+abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements InboundMessageHandler.ReadSwitch
 {
     abstract static class Frame
     {

@@ -72,7 +72,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private boolean isClosed;
     private boolean isBlocked;
 
-    private final Button button;
+    private final ReadSwitch readSwitch;
 
     private final Channel channel;
     private final InetAddressAndPort peer;
@@ -116,7 +116,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandler.class, "largeUnconsumedBytes");
 
-    public interface Button
+    /**
+     * Signal to the underlying frame decoder to pause or resume read activity.
+     */
+    public interface ReadSwitch
     {
         void resume();
         void pause();
@@ -135,7 +138,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
     private final NextReadContext context = new NextReadContext();
 
-    InboundMessageHandler(Button button,
+    InboundMessageHandler(ReadSwitch readSwitch,
 
                           Channel channel,
                           InetAddressAndPort peer,
@@ -158,7 +161,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                           MessageProcessor processor)
     {
-        this.button = button;
+        this.readSwitch = readSwitch;
 
         this.channel = channel;
         this.peer = peer;
@@ -228,7 +231,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (!isKeepingUp)
             {
                 isBlocked = true;
-                button.pause();
+                readSwitch.pause();
             }
         }
         else if (skipBytesRemaining > 0)
@@ -302,7 +305,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
 
         if (shouldPause)
-            button.pause();
+            readSwitch.pause();
 
         /*
          * Reset processing context to normal
@@ -472,7 +475,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            button.resume();
+            readSwitch.resume();
         }
     }
 
@@ -500,7 +503,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             context.endpointReserve = endpointReserve;
             context.globalReserve = globalReserve;
 
-            button.resume();
+            readSwitch.resume();
         }
     }
 
@@ -509,7 +512,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed && !isBlocked)
-            button.resume();
+            readSwitch.resume();
     }
 
     private Outcome acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes)
