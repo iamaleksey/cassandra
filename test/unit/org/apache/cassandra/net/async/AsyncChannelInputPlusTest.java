@@ -219,7 +219,7 @@ public class AsyncChannelInputPlusTest
 
         inputPlus.skipBytesFully(startOffset);
         BufferedDataOutputStreamPlus writer = new BufferedDataOutputStreamPlus(wbc);
-        inputPlus.consume(writer, len);
+        inputPlus.consume(buffer -> { writer.write(buffer); return buffer.remaining(); }, len);
         writer.close();
 
         Assert.assertEquals(String.format("Test with %d buffers starting at %d consuming %d bytes", nBuffs, startOffset, len),

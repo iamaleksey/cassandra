@@ -19,6 +19,7 @@ package org.apache.cassandra.io.util;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.StandardOpenOption;
 
@@ -386,6 +387,15 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
             txnProxy.finish();
         else
             txnProxy.close();
+    }
+
+    public int writeDirectlyToChannel(ByteBuffer buf) throws IOException
+    {
+        if (strictFlushing)
+            throw new UnsupportedOperationException();
+        // Don't allow writes to the underlying channel while data is buffered
+        flush();
+        return channel.write(buf);
     }
 
     public final void finish()
