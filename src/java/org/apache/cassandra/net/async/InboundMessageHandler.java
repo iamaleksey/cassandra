@@ -343,11 +343,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
         if (contained && size <= largeThreshold)
-            return processSmallMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else if (contained || size <= buf.remaining())
-            return processLargeMessageContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
+            return processMessageOnEventLoop(bytes, size, id, expiresAtNanos, callBackOnFailure);
+        else if (size <= buf.remaining())
+            return processMessageOutsideEventLoopContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
         else
-            return processLargeMessageUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
+            return processMessageOutsideEventLoopUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
     }
 
     private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
@@ -355,7 +355,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         ticket = queue.registerAndSignal(bytesRequested, expiresAtNanos, channel.eventLoop(), onCapacityRegained, this::exceptionCaught, this::resumeIfNotBlocked);
     }
 
-    private boolean processSmallMessageContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processMessageOnEventLoop(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
@@ -409,7 +409,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processLargeMessageContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processMessageOutsideEventLoopContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
@@ -420,7 +420,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return isKeepingUp;
     }
 
-    private boolean processLargeMessageUncontained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processMessageOutsideEventLoopUncontained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         int readableBytes = bytes.readableBytes();
         receivedBytes += readableBytes;
