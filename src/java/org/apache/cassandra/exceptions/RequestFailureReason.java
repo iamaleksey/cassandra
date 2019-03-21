@@ -35,26 +35,28 @@ public enum RequestFailureReason
     /**
      * The reason for the failure was none of the below reasons or was not recorded by the data node.
      */
-    UNKNOWN                  (0),
+    UNKNOWN                  (0, "Unknown error"),
 
     /**
      * The data node read too many tombstones when attempting to execute a read query (see tombstone_failure_threshold).
      */
-    READ_TOO_MANY_TOMBSTONES (1),
+    READ_TOO_MANY_TOMBSTONES (1, "Read too many tombstones"),
 
     /**
      * Unknown table id or column encountered, or otherwise incompatible schema.
      */
-    INCOMPATIBLE_SCHEMA      (2);
+    INCOMPATIBLE_SCHEMA      (2, "Incompatible schema");
 
     public static final Serializer serializer = new Serializer();
 
     public final int code;
+    public final String description;
     private static final RequestFailureReason[] VALUES = values();
 
-    RequestFailureReason(final int code)
+    RequestFailureReason(final int code, final String description)
     {
         this.code = code;
+        this.description = description;
     }
 
     public static RequestFailureReason fromCode(final int code)
@@ -65,6 +67,11 @@ public enum RequestFailureReason
                 return reasonCode;
         }
         throw new IllegalArgumentException("Unknown request failure reason error code: " + code);
+    }
+
+    public String toString()
+    {
+        return description;
     }
 
     public static RequestFailureReason forException(Throwable t)

@@ -136,7 +136,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
         }
     }
 
-//    @Test
+    @Test
     public void writeWithSchemaDisagreement() throws Throwable
     {
         try (Cluster cluster = init(Cluster.create(3)))
@@ -161,13 +161,12 @@ public class DistributedReadWritePathTest extends DistributedTestBase
                 thrown = e;
             }
 
-            Assert.assertTrue(thrown.getMessage().contains("Exception occurred on node"));
-            Assert.assertTrue(thrown.getCause().getCause().getCause().getMessage().contains("Unknown column v2 during deserialization"));
+            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.2"));
+            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.3"));
         }
     }
 
-    // TODO: these tests only work with message sink delivery, as they depend on trapping exceptions on inbound message parsing
-//    @Test
+    @Test
     public void readWithSchemaDisagreement() throws Throwable
     {
         try (Cluster cluster = init(Cluster.create(3)))
@@ -192,8 +191,9 @@ public class DistributedReadWritePathTest extends DistributedTestBase
             {
                 thrown = e;
             }
-            Assert.assertTrue(thrown.getMessage().contains("Exception occurred on node"));
-            Assert.assertTrue(thrown.getCause().getCause().getCause().getMessage().contains("Unknown column v2 during deserialization"));
+
+            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.2"));
+            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.3"));
         }
     }
 
