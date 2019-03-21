@@ -190,9 +190,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
     {
-        if (isClosed)
-            throw new IllegalStateException("channelRead() invoked on a closed InboundMessageHandler");
-
         if (msg instanceof IntactFrame)
             readIntactFrame((IntactFrame) msg);
         else
@@ -577,6 +574,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
 
     private void exceptionCaught(Throwable cause)
     {
+        readSwitch.pause();
+
         JVMStabilityInspector.inspectThrowable(cause);
 
         if (cause instanceof Message.InvalidLegacyProtocolMagic)
