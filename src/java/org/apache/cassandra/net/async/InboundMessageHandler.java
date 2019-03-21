@@ -122,7 +122,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         void resume();
         void pause();
-        void stop();
     }
 
     /*

@@ -273,17 +273,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
     abstract void addLastTo(ChannelPipeline pipeline);
 
-    public void resume()
-    {
-        if (!active)
-        {
-            active = true;
-            // previously inactive; trigger either a decode or autoread
-            deliver(ctx);
-            config.setAutoRead(true);
-        }
-    }
-
+    /**
+     * For use by InboundMessageHandler (or other upstream handlers) that want to temporarily
+     * stop receiving frames, e.g. because they are behind on processing those they already have.
+     * Once they catch up, {@link #resume} resumes passingn frames up (and reading from the network)
+     */
     public void pause()
     {
         if (active)
@@ -293,9 +287,69 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         }
     }
 
-    public void stop()
+    /**
+     * For use by InboundMessageHandler (or other upstream handlers) that want to resume
+     * receiving frames after previously invoking {@link #pause}
+     */
+    public void resume()
     {
-        discard();
+        if (!active)
+        {
+            active = true;
+            deliver(ctx);
+            if (active) // we could have called pause again before delivery completed
+                config.setAutoRead(true);
+        }
+    }
+
+    /**
+     * Called by Netty pipeline when a new message arrives; we anticipate in normal operation
+     * this will receive messages of type {@link BufferPoolAllocator.Wrapped}
+     *
+     * These buffers are unwrapped and passed to {@link #decode(Collection, SharedBytes)},
+     * which collects decoded frames into {@link #frames}, which we send upstream in {@link #deliver}
+     */
+    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    {
+        ByteBuffer buf;
+        if (msg instanceof BufferPoolAllocator.Wrapped)
+        {
+            buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
+        }
+        else
+        {
+            // this is only necessary for pre40, which uses the legacy LZ4,
+            // which sometimes allocates on heap explicitly for some reason
+            ByteBuf in = (ByteBuf) msg;
+            buf = BufferPool.get(in.readableBytes());
+            in.readBytes(buf);
+            buf.flip();
+        }
+
+        decode(frames, SharedBytes.wrap(buf));
+        deliver(ctx);
+    }
+
+    /**
+     * Deliver any waiting frames, including those that were incompletely read last time
+     */
+    private void deliver(ChannelHandlerContext ctx)
+    {
+        while (!frames.isEmpty())
+        {
+            Frame frame = frames.peek();
+            ctx.fireChannelRead(frame);
+
+            assert !active || frame.isConsumed();
+            if (active || frame.isConsumed())
+            {
+                frames.poll();
+                frame.release();
+            }
+
+            if (!active)
+                return;
+        }
     }
 
     void stash(SharedBytes in, int stashLength, int begin, int length)
@@ -319,45 +373,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         }
         while (!frames.isEmpty())
             frames.poll().release();
-    }
-
-    public void channelRead(ChannelHandlerContext ctx, Object msg)
-    {
-        ByteBuffer buf;
-        if (!(msg instanceof BufferPoolAllocator.Wrapped))
-        {
-            ByteBuf in = (ByteBuf) msg;
-            buf = BufferPool.get(in.readableBytes());
-            buf.limit(in.readableBytes());
-            in.readBytes(buf);
-            buf.flip();
-        }
-        else
-        {
-            buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
-        }
-
-        decode(frames, SharedBytes.wrap(buf));
-        deliver(ctx);
-    }
-
-    private void deliver(ChannelHandlerContext ctx)
-    {
-        while (!frames.isEmpty())
-        {
-            Frame frame = frames.peek();
-            ctx.fireChannelRead(frame);
-
-            assert !active || frame.isConsumed();
-            if (active || frame.isConsumed())
-            {
-                frames.poll();
-                frame.release();
-            }
-
-            if (!active)
-                return;
-        }
     }
 
     public void handlerAdded(ChannelHandlerContext ctx)

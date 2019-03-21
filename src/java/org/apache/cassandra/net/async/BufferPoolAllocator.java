@@ -26,6 +26,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledUnsafeDirectByteBuf;
+import io.netty.channel.ChannelHandlerContext;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
@@ -42,7 +43,7 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
 
     protected ByteBuf newHeapBuffer(int minCapacity, int maxCapacity)
     {
-        // for pre40
+        // for pre40; Netty LZ4 decoder sometimes allocates on heap explicitly for some reason
         return Unpooled.buffer(minCapacity, maxCapacity);
     }
 
@@ -58,6 +59,11 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
         return new Wrapped(buffer);
     }
 
+    /**
+     * A simple extension to UnpooledUnsafeDirectByteBuf that returns buffers to BufferPool on deallocate,
+     * and permits extracting the buffer from it to take ownership and use directly,
+     * which is used in {@link FrameDecoder#channelRead(ChannelHandlerContext, Object)}
+     */
     static class Wrapped extends UnpooledUnsafeDirectByteBuf
     {
         private ByteBuffer wrapped;
