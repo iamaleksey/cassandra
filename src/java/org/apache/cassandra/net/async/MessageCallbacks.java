@@ -26,13 +26,13 @@ public interface MessageCallbacks
     public static final MessageCallbacks NOOP = new MessageCallbacks()
     {
         public void onProcessed(int messageSize) {}
-        public void onExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit) {}
-        public void onArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit) {}
-        public void onError(Throwable t, int messageSize) {}
+        public void onExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit) {}
+        public void onArrivedExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit) {}
+        public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t) {}
     };
 
     void onProcessed(int messageSize);
-    void onExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit);
-    void onArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit);
-    void onError(Throwable t, int messageSize);
+    void onExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit);
+    void onArrivedExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit);
+    void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t);
 }

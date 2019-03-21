@@ -62,7 +62,7 @@ public class ProcessMessageTask implements Runnable
 
         if (nowNanos > message.expiresAtNanos)
         {
-            callbacks.onExpired(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.verb, nowNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 

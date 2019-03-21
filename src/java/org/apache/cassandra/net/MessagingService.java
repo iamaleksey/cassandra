@@ -458,7 +458,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         long nowNanos = ApproximateTime.nanoTime();
         if (nowNanos > message.expiresAtNanos || !messageSink.allowInbound(message))
         {
-            callbacks.onExpired(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.verb, nowNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 
@@ -509,10 +509,9 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             return handlers;
 
         return messageHandlers.computeIfAbsent(from, addr ->
-            new InboundMessageHandlers(addr,
-                                       reserveReceiveQueueGlobalLimitInBytes,
-                                       inboundHandlerWaitQueue,
-                                       this::process));
+        {
+            return new InboundMessageHandlers(addr, reserveReceiveQueueGlobalLimitInBytes, inboundHandlerWaitQueue);
+        });
     }
 
     @VisibleForTesting

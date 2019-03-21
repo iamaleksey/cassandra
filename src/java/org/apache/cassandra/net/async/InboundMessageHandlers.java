@@ -26,12 +26,12 @@ import java.util.function.ToLongFunction;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 
 public final class InboundMessageHandlers implements MessageCallbacks
 {
@@ -44,24 +44,19 @@ public final class InboundMessageHandlers implements MessageCallbacks
     private final InboundMessageHandler.WaitQueue endpointWaitQueue;
     private final InboundMessageHandler.WaitQueue globalWaitQueue;
 
-    private final MessageProcessor processor;
-
     private final Collection<InboundMessageHandler> handlers;
     private final InternodeInboundMetrics metrics;
 
-    // TODO: specify some of this in InboundConnectionSettings
-    public InboundMessageHandlers(InetAddressAndPort peer,
-                                  ResourceLimits.Limit globalReserveCapacity,
-                                  InboundMessageHandler.WaitQueue globalWaitQueue,
-                                  MessageProcessor processor)
+    public InboundMessageHandlers(InetAddressAndPort peer, ResourceLimits.Limit globalReserveCapacity, InboundMessageHandler.WaitQueue globalWaitQueue)
     {
         this.peer = peer;
+
         this.queueCapacity = DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes();
         this.endpointReserveCapacity = new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes());
         this.globalReserveCapacity = globalReserveCapacity;
+
         this.endpointWaitQueue = new InboundMessageHandler.WaitQueue(endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
-        this.processor = processor;
 
         this.handlers = new CopyOnWriteArrayList<>();
         this.metrics = new InternodeInboundMetrics(peer, this);
@@ -105,7 +100,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
         pendingCountUpdater.incrementAndGet(this);
         pendingBytesUpdater.addAndGet(this, messageSize);
 
-        processor.process(message, messageSize, callbacks);
+        MessagingService.instance().process(message, messageSize, callbacks);
     }
 
     private void onHandlerClosed(InboundMessageHandler handler)
@@ -129,7 +124,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
     }
 
     @Override
-    public void onExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    public void onExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit)
     {
         pendingCountUpdater.decrementAndGet(this);
         pendingBytesUpdater.addAndGet(this, -messageSize);
@@ -141,7 +136,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
     }
 
     @Override
-    public void onArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    public void onArrivedExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit)
     {
         expiredCountUpdater.incrementAndGet(this);
         expiredBytesUpdater.addAndGet(this, messageSize);
@@ -150,10 +145,20 @@ public final class InboundMessageHandlers implements MessageCallbacks
     }
 
     @Override
-    public void onError(Throwable t, int messageSize)
+    public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
     {
         errorCountUpdater.incrementAndGet(this);
         errorBytesUpdater.addAndGet(this, messageSize);
+
+        /*
+         * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
+         * on the other end to expire.
+         */
+        if (callBackOnFailure)
+        {
+            Message response = Message.failureResponse(id, expiresAtNanos, RequestFailureReason.forException(t));
+            MessagingService.instance().sendOneWay(response, peer);
+        }
     }
 
     /*
