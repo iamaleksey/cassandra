@@ -91,6 +91,7 @@ public final class InboundMessageHandlers
 
                                       this::onMessageError,
                                       this::onMessageExpired,
+                                      this::onMessageArrivedExpired,
                                       this::onMessageProcessed,
                                       this::onHandlerClosed,
 
@@ -116,9 +117,21 @@ public final class InboundMessageHandlers
 
     private void onMessageExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
     {
-//        pendingCountUpdater.decrementAndGet(this);
-//        pendingBytesUpdater.addAndGet(this, -messageSize);
-//
+        pendingCountUpdater.decrementAndGet(this);
+        pendingBytesUpdater.addAndGet(this, -messageSize);
+
+        expiredCountUpdater.incrementAndGet(this);
+        expiredBytesUpdater.addAndGet(this, messageSize);
+
+        onExpired.call(verb, messageSize, timeElapsed, unit);
+    }
+
+    /*
+     * Message was already expired when we started deserializing it, so it was never fully deserialized and enqueued
+     * for processing. Don't increment pending count/bytes in this case.
+     */
+    private void onMessageArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    {
         expiredCountUpdater.incrementAndGet(this);
         expiredBytesUpdater.addAndGet(this, messageSize);
 

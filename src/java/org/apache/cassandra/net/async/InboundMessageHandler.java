@@ -51,11 +51,7 @@ import org.apache.cassandra.net.async.Crc.InvalidCrc;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.FrameDecoder.SharedBytes;
-import org.apache.cassandra.net.async.InboundCallbacks.MessageProcessor;
-import org.apache.cassandra.net.async.InboundCallbacks.OnHandlerClosed;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageError;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
+import org.apache.cassandra.net.async.InboundCallbacks.*;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
@@ -101,6 +97,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final OnMessageError onError;
     private final OnMessageExpired onExpired;
+    private final OnMessageArrivedExpired onArrivedExpired;
     private final OnMessageProcessed onProcessed;
     private final OnHandlerClosed onClosed;
 
@@ -158,6 +155,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                           OnMessageError onError,
                           OnMessageExpired onExpired,
+                          OnMessageArrivedExpired onArrivedExpired,
                           OnMessageProcessed onProcessed,
                           OnHandlerClosed onClosed,
 
@@ -180,6 +178,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         this.onError = onError;
         this.onExpired = onExpired;
+        this.onArrivedExpired = onArrivedExpired;
         this.onProcessed = onProcessed;
         this.onClosed = onClosed;
 
@@ -328,7 +327,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            onExpired.call(serializer.getVerb(buf, version), size, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            onArrivedExpired.call(serializer.getVerb(buf, version), size, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
 
             int skipped = contained ? size : buf.remaining();
             receivedBytes += skipped;

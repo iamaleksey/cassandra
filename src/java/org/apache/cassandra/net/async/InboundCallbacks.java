@@ -43,6 +43,11 @@ public interface InboundCallbacks
         void call(Verb verb, int messageSize, long timeElapsed, TimeUnit unit);
     }
 
+    public interface OnMessageArrivedExpired
+    {
+        void call(Verb verb, int messageSize, long timeElapsed, TimeUnit unit);
+    }
+
     public interface OnMessageError
     {
         void call(Throwable t, int messageSize);
