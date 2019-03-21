@@ -29,9 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.InboundCallbacks;
-
-import static org.apache.cassandra.utils.FBUtilities.prettyPrintMemory;
+import org.apache.cassandra.net.async.MessageCallbacks;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -193,8 +191,7 @@ public class MatcherResponse
                             if (cb != null)
                                 cb.callback.response(response);
                             else
-                                MessagingService.instance().process(response, 0, InboundCallbacks.OnMessageProcessed.NOOP,
-                                                                    (verb, messageSize, timeElapsed, unit) -> logger.warn("Expired message {} of size {} ({} {})", verb, prettyPrintMemory(messageSize), timeElapsed, unit.toString().toLowerCase()));
+                                MessagingService.instance().process(response, 0, MessageCallbacks.NOOP);
 
                             spy.matchingResponse(response);
                         }

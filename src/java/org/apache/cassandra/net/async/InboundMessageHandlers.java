@@ -29,12 +29,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
-import org.apache.cassandra.net.async.InboundCallbacks.MessageProcessor;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
+import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 
-public final class InboundMessageHandlers
+public final class InboundMessageHandlers implements MessageCallbacks
 {
     private final InetAddressAndPort peer;
 
@@ -45,7 +44,6 @@ public final class InboundMessageHandlers
     private final InboundMessageHandler.WaitQueue endpointWaitQueue;
     private final InboundMessageHandler.WaitQueue globalWaitQueue;
 
-    private final OnMessageExpired onExpired;
     private final MessageProcessor processor;
 
     private final Collection<InboundMessageHandler> handlers;
@@ -55,7 +53,6 @@ public final class InboundMessageHandlers
     public InboundMessageHandlers(InetAddressAndPort peer,
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
-                                  OnMessageExpired onExpired,
                                   MessageProcessor processor)
     {
         this.peer = peer;
@@ -64,7 +61,6 @@ public final class InboundMessageHandlers
         this.globalReserveCapacity = globalReserveCapacity;
         this.endpointWaitQueue = new InboundMessageHandler.WaitQueue(endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
-        this.onExpired = onExpired;
         this.processor = processor;
 
         this.handlers = new CopyOnWriteArrayList<>();
@@ -89,12 +85,8 @@ public final class InboundMessageHandlers
                                       endpointWaitQueue,
                                       globalWaitQueue,
 
-                                      this::onMessageError,
-                                      this::onMessageExpired,
-                                      this::onMessageArrivedExpired,
-                                      this::onMessageProcessed,
                                       this::onHandlerClosed,
-
+                                      this,
                                       this::process);
         handlers.add(handler);
         return handler;
@@ -106,47 +98,28 @@ public final class InboundMessageHandlers
     }
 
     /*
-     * Callbacks
+     * Wrap provided MessageProcessor to allow pending message metrics to be maintained.
      */
-
-    private void onMessageError(Throwable t, int messageSize)
-    {
-        errorCountUpdater.incrementAndGet(this);
-        errorBytesUpdater.addAndGet(this, messageSize);
-    }
-
-    private void onMessageExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
-    {
-        pendingCountUpdater.decrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, -messageSize);
-
-        expiredCountUpdater.incrementAndGet(this);
-        expiredBytesUpdater.addAndGet(this, messageSize);
-
-        onExpired.call(verb, messageSize, timeElapsed, unit);
-    }
-
-    /*
-     * Message was already expired when we started deserializing it, so it was never fully deserialized and enqueued
-     * for processing. Don't increment pending count/bytes in this case.
-     */
-    private void onMessageArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
-    {
-        expiredCountUpdater.incrementAndGet(this);
-        expiredBytesUpdater.addAndGet(this, messageSize);
-
-        onExpired.call(verb, messageSize, timeElapsed, unit);
-    }
-
-    private void process(Message<?> message, int messageSize, OnMessageProcessed onProcessed, OnMessageExpired onExpired)
+    private void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
     {
         pendingCountUpdater.incrementAndGet(this);
         pendingBytesUpdater.addAndGet(this, messageSize);
 
-        processor.process(message, messageSize, onProcessed, onExpired);
+        processor.process(message, messageSize, callbacks);
     }
 
-    private void onMessageProcessed(int messageSize)
+    private void onHandlerClosed(InboundMessageHandler handler)
+    {
+        handlers.remove(handler);
+        absorbCounters(handler);
+    }
+
+    /*
+     * Message callbacks
+     */
+
+    @Override
+    public void onProcessed(int messageSize)
     {
         pendingCountUpdater.decrementAndGet(this);
         pendingBytesUpdater.addAndGet(this, -messageSize);
@@ -155,10 +128,32 @@ public final class InboundMessageHandlers
         processedBytesUpdater.addAndGet(this, messageSize);
     }
 
-    private void onHandlerClosed(InboundMessageHandler handler)
+    @Override
+    public void onExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
     {
-        handlers.remove(handler);
-        absorbCounters(handler);
+        pendingCountUpdater.decrementAndGet(this);
+        pendingBytesUpdater.addAndGet(this, -messageSize);
+
+        expiredCountUpdater.incrementAndGet(this);
+        expiredBytesUpdater.addAndGet(this, messageSize);
+
+        MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+    }
+
+    @Override
+    public void onArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    {
+        expiredCountUpdater.incrementAndGet(this);
+        expiredBytesUpdater.addAndGet(this, messageSize);
+
+        MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+    }
+
+    @Override
+    public void onError(Throwable t, int messageSize)
+    {
+        errorCountUpdater.incrementAndGet(this);
+        errorBytesUpdater.addAndGet(this, messageSize);
     }
 
     /*

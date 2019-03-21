@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net;
 
-import java.io.IOError;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -44,11 +43,10 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.async.FutureCombiner;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.apache.cassandra.net.async.MessageCallbacks;
 import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
@@ -61,15 +59,13 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
-import org.apache.cassandra.utils.Throwables;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
-import static org.apache.cassandra.utils.Throwables.perform;
 
-    public final class MessagingService extends MessagingServiceMBeanImpl
+public final class MessagingService extends MessagingServiceMBeanImpl
 {
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
@@ -452,7 +448,7 @@ import static org.apache.cassandra.utils.Throwables.perform;
         }
     }
 
-    public void process(Message message, int messageSize, OnMessageProcessed onProcessed, OnMessageExpired onExpired)
+    public void process(Message message, int messageSize, MessageCallbacks callbacks)
     {
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)
@@ -460,20 +456,13 @@ import static org.apache.cassandra.utils.Throwables.perform;
 
         // double-check if the message is still unexpired at this point
         long nowNanos = ApproximateTime.nanoTime();
-        if (nowNanos > message.expiresAtNanos)
+        if (nowNanos > message.expiresAtNanos || !messageSink.allowInbound(message))
         {
-            onExpired.call(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 
-        // message sinks are a testing hook
-        if (!messageSink.allowInbound(message))
-        {
-            onProcessed.call(messageSize);
-            return;
-        }
-
-        Runnable runnable = new ProcessMessageTask(message, messageSize, onProcessed, onExpired);
+        Runnable runnable = new ProcessMessageTask(message, messageSize, callbacks);
         LocalAwareExecutorService stage = StageManager.getStage(message.verb.stage);
         assert stage != null : "No stage for message type " + message.verb;
 
@@ -523,7 +512,6 @@ import static org.apache.cassandra.utils.Throwables.perform;
             new InboundMessageHandlers(addr,
                                        reserveReceiveQueueGlobalLimitInBytes,
                                        inboundHandlerWaitQueue,
-                                       (verb, size, elapsed, unit) -> droppedMessages.incrementWithLatency(verb, elapsed, unit),
                                        this::process));
     }
 

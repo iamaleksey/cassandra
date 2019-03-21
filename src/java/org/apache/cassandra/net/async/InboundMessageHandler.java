@@ -49,7 +49,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.Crc.InvalidCrc;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
-import org.apache.cassandra.net.async.InboundCallbacks.*;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
@@ -62,8 +61,18 @@ import static java.lang.Math.min;
 /**
  * Parses incoming messages as per the 3.0/3.11/4.0 internode messaging protocols.
  */
-public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
+public final class InboundMessageHandler extends ChannelInboundHandlerAdapter implements MessageCallbacks
 {
+    public interface MessageProcessor
+    {
+        void process(Message<?> message, int messageSize, MessageCallbacks callbacks);
+    }
+
+    public interface OnHandlerClosed
+    {
+        void call(InboundMessageHandler handler);
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(InboundMessageHandler.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
 
@@ -93,12 +102,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final Limit globalReserveCapacity;
     private final WaitQueue globalWaitQueue;
 
-    private final OnMessageError onError;
-    private final OnMessageExpired onExpired;
-    private final OnMessageArrivedExpired onArrivedExpired;
-    private final OnMessageProcessed onProcessed;
     private final OnHandlerClosed onClosed;
-
+    private final MessageCallbacks callbacks;
     private final MessageProcessor processor;
 
     private int largeBytesRemaining; // remainig bytes we need to supply to the coprocessor to deserialize the in-flight large message
@@ -153,12 +158,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           WaitQueue endpointWaitQueue,
                           WaitQueue globalWaitQueue,
 
-                          OnMessageError onError,
-                          OnMessageExpired onExpired,
-                          OnMessageArrivedExpired onArrivedExpired,
-                          OnMessageProcessed onProcessed,
                           OnHandlerClosed onClosed,
-
+                          MessageCallbacks callbacks,
                           MessageProcessor processor)
     {
         this.readSwitch = readSwitch;
@@ -176,12 +177,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.globalReserveCapacity = globalReserveCapacity;
         this.globalWaitQueue = globalWaitQueue;
 
-        this.onError = onError;
-        this.onExpired = onExpired;
-        this.onArrivedExpired = onArrivedExpired;
-        this.onProcessed = onProcessed;
         this.onClosed = onClosed;
-
+        this.callbacks = callbacks;
         this.processor = processor;
 
         // set up next read context
@@ -328,7 +325,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            onArrivedExpired.call(serializer.getVerb(buf, version), size, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            onArrivedExpired(serializer.getVerb(buf, version), size, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
 
             int skipped = contained ? size : buf.remaining();
             receivedBytes += skipped;
@@ -388,19 +385,19 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         catch (UnknownTableException | UnknownColumnException e)
         {
             noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
-            onError.call(e, size);
+            onError(e, size);
             exception = e;
         }
         catch (IOException e)
         {
             logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
-            onError.call(e, size);
+            onError(e, size);
             exception = e;
         }
         catch (Throwable t)
         {
             releaseCapacity(size);
-            onError.call(t, size);
+            onError(t, size);
             if (callBackOnFailure)
                 sendFailureResponse(id, expiresAtNanos, t);
             throw t;
@@ -415,7 +412,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
 
         if (null != message)
-            processor.process(message, size, this::onMessageProcessed, this::onMessageExpired);
+            processor.process(message, size, this);
         else if (null != exception && callBackOnFailure)
             sendFailureResponse(id, expiresAtNanos, exception);
 
@@ -454,18 +451,34 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         MessagingService.instance().sendOneWay(response, peer);
     }
 
-    // wrap parent callback to release capacity first
-    private void onMessageProcessed(int messageSize)
+    /*
+     * Wrapped message callbacks to ensure capacity is released onProcessed() and onExpired()
+     */
+
+    @Override
+    public void onProcessed(int messageSize)
     {
         releaseCapacity(messageSize);
-        onProcessed.call(messageSize);
+        callbacks.onProcessed(messageSize);
     }
 
-    // wrap parent callback to release capacity first
-    private void onMessageExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    @Override
+    public void onExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
     {
         releaseCapacity(messageSize);
-        onExpired.call(verb, messageSize, timeElapsed, unit);
+        callbacks.onExpired(verb, messageSize, timeElapsed, unit);
+    }
+
+    @Override
+    public void onArrivedExpired(Verb verb, int messageSize, long timeElapsed, TimeUnit unit)
+    {
+        callbacks.onArrivedExpired(verb, messageSize, timeElapsed, unit);
+    }
+
+    @Override
+    public void onError(Throwable t, int messageSize)
+    {
+        callbacks.onError(t, messageSize);
     }
 
     private void onCoprocessorCaughtUp()
@@ -673,20 +686,20 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                  * Closure was requested from the event loop, before we could deserialize the message fully;
                  * we are done here, and AIP will have closed itself.
                  */
-                onError.call(e, messageSize);
+                onError(e, messageSize);
                 exception = e;
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
                 noSpamLogger.info("{} caught while reading a large message from {}", e.getClass().getSimpleName(), peer, e);
-                onError.call(e, messageSize);
+                onError(e, messageSize);
                 exception = e;
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
                 logger.error("Unexpected exception caught while reading a large message from {}", peer, t);
-                onError.call(t, messageSize);
+                onError(t, messageSize);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
                 exception = t;
             }
@@ -699,7 +712,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
 
             if (null != message)
-                processor.process(message, messageSize, InboundMessageHandler.this::onMessageProcessed, InboundMessageHandler.this::onMessageExpired);
+                processor.process(message, messageSize, InboundMessageHandler.this);
             else if (null != exception && callBackOnFailure)
                 sendFailureResponse(id, expiresAtNanos, exception);
         }

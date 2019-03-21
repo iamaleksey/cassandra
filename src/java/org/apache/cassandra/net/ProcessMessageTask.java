@@ -25,8 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.IndexNotAvailableException;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageExpired;
-import org.apache.cassandra.net.async.InboundCallbacks.OnMessageProcessed;
+import org.apache.cassandra.net.async.MessageCallbacks;
 import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.*;
@@ -39,22 +38,20 @@ public class ProcessMessageTask implements Runnable
     private final int messageSize;
     private final long enqueueTime;
 
-    private final OnMessageExpired onExpired;
-    private final OnMessageProcessed onProcessed;
+    private final MessageCallbacks callbacks;
 
     public ProcessMessageTask(Message message)
     {
-        this(message, 0, OnMessageProcessed.NOOP, OnMessageExpired.NOOP);
+        this(message, 0, MessageCallbacks.NOOP);
     }
 
-    ProcessMessageTask(Message message, int messageSize, OnMessageProcessed onProcessed, OnMessageExpired onExpired)
+    ProcessMessageTask(Message message, int messageSize, MessageCallbacks callbacks)
     {
         assert message != null;
         this.message = message;
         this.messageSize = messageSize;
         this.enqueueTime = ApproximateTime.nanoTime();
-        this.onProcessed = onProcessed;
-        this.onExpired = onExpired;
+        this.callbacks = callbacks;
     }
 
     public void run()
@@ -65,7 +62,7 @@ public class ProcessMessageTask implements Runnable
 
         if (nowNanos > message.expiresAtNanos)
         {
-            onExpired.call(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(message.verb, messageSize, nowNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 
@@ -90,7 +87,7 @@ public class ProcessMessageTask implements Runnable
         }
         finally
         {
-            onProcessed.call(messageSize);
+            callbacks.onProcessed(messageSize);
         }
     }
 
