@@ -1319,7 +1319,7 @@ public class OutboundConnection
         return id();
     }
 
-    public int pending()
+    public int pendingCount()
     {
         return queue.size();
     }
@@ -1329,7 +1329,7 @@ public class OutboundConnection
         return queueSizeInBytes;
     }
 
-    public long sent()
+    public long sentCount()
     {
         // not volatile, but shouldn't matter
         return sent;
@@ -1341,7 +1341,7 @@ public class OutboundConnection
         return sentBytes;
     }
 
-    public long submitted()
+    public long submittedCount()
     {
         // not volatile, but shouldn't matter
         return submitted;
@@ -1352,32 +1352,32 @@ public class OutboundConnection
         return droppedDueToOverload + droppedDueToTimeout;
     }
 
-    public long droppedDueToOverload()
+    public long overloadBytes()
     {
         return droppedDueToOverload;
     }
 
-    public long droppedBytesDueToOverload()
+    public long overloadCount()
     {
         return droppedBytesDueToOverload;
     }
 
-    public long droppedDueToTimeout()
+    public long expiredCount()
     {
         return droppedDueToTimeout;
     }
 
-    public long droppedBytesDueToTimeout()
+    public long expiredBytes()
     {
         return droppedBytesDueToTimeout;
     }
 
-    public long droppedDueToError()
+    public long errorCount()
     {
         return droppedDueToError;
     }
 
-    public long droppedBytesDueToError()
+    public long errorBytes()
     {
         return droppedBytesDueToError;
     }

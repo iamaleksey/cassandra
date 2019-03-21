@@ -71,11 +71,12 @@ import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.net.async.ConnectionUtils.check;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
-public class OutboundConnectionTest
+public class ConnectionTest
 {
     private final Map<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> serializers = new HashMap<>();
     private final Map<Verb, Supplier<? extends IVerbHandler<?>>> handlers = new HashMap<>();
@@ -170,17 +171,16 @@ public class OutboundConnectionTest
     private static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
 
     private static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
-        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
-                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
 //        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
 //                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
-        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
-                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
+//        settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
+//                            .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
         settings -> settings.outbound(outbound -> outbound.withCompression(true))
     );
 
     private static final List<Settings> SETTINGS = applyPowerSet(
-        ImmutableList.of(Settings.SMALL, Settings.LARGE),
+//        ImmutableList.of(Settings.SMALL, Settings.LARGE),
+        ImmutableList.of(Settings.SMALL),
         MODIFIERS
     );
 
@@ -259,16 +259,19 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
-            Assert.assertEquals(10, outbound.submitted());
-            Assert.assertEquals(0, outbound.pending());
-            Assert.assertEquals(10, outbound.sent());
-            Assert.assertEquals(10 * message.serializedSize(version), outbound.sentBytes());
-            Assert.assertEquals(0, outbound.droppedDueToOverload());
-            Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
-            Assert.assertEquals(0, outbound.droppedBytesDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToTimeout());
-            Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
+            check(outbound).submitted(10)
+                           .sent     (10, 10 * message.serializedSize(version))
+                           .pending  ( 0,  0)
+                           .overload ( 0,  0)
+                           .expired  ( 0,  0)
+                           .error    ( 0,  0)
+                           .check();
+            check(inbound) .received (10, 10 * message.serializedSize(version))
+                           .processed(10, 10 * message.serializedSize(version))
+                           .pending  ( 0,  0)
+                           .expired  ( 0,  0)
+                           .error    ( 0,  0)
+                           .check();
         });
     }
 
@@ -303,16 +306,19 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             received.await(10L, SECONDS);
-            Assert.assertEquals(10, outbound.submitted());
-            Assert.assertEquals(0, outbound.pending());
-            Assert.assertEquals(10, outbound.sent());
-            Assert.assertEquals(10 * message.serializedSize(version), outbound.sentBytes());
-            Assert.assertEquals(0, outbound.droppedDueToOverload());
-            Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
-            Assert.assertEquals(0, outbound.droppedBytesDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToTimeout());
-            Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
+            check(outbound).submitted(10)
+                           .sent     (10, 10 * message.serializedSize(version))
+                           .pending  ( 0,  0)
+                           .overload ( 0,  0)
+                           .expired  ( 0,  0)
+                           .error    ( 0,  0)
+                           .check();
+            check(inbound) .received (10, 10 * message.serializedSize(version))
+                           .processed(10, 10 * message.serializedSize(version))
+                           .pending  ( 0,  0)
+                           .expired  ( 0,  0)
+                           .error    ( 0,  0)
+                           .check();
         });
     }
 
@@ -368,16 +374,19 @@ public class OutboundConnectionTest
             outbound.enqueue(message);
             done.await(10L, SECONDS);
             Assert.assertEquals(0, delivered.get());
-            Assert.assertEquals(1, outbound.submitted());
-            Assert.assertEquals(0, outbound.pending());
-            Assert.assertEquals(0, outbound.sent());
-            Assert.assertEquals(0, outbound.sentBytes());
-            Assert.assertEquals(1, outbound.droppedDueToOverload());
-            Assert.assertEquals(message.serializedSize(current_version), outbound.droppedBytesDueToOverload());
-            Assert.assertEquals(0, outbound.droppedBytesDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToTimeout());
-            Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
+                 check(outbound).submitted( 1)
+                                .sent     ( 0,  0)
+                                .pending  ( 0,  0)
+                                .overload ( 1,  message.serializedSize(current_version))
+                                .expired  ( 0,  0)
+                                .error    ( 0,  0)
+                                .check();
+                 check(inbound) .received ( 0,  0)
+                                .processed( 0,  0)
+                                .pending  ( 0,  0)
+                                .expired  ( 0,  0)
+                                .error    ( 0,  0)
+                                .check();
         });
     }
 
@@ -425,16 +434,19 @@ public class OutboundConnectionTest
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
             done.await(30L, SECONDS);
-            Assert.assertEquals(100, outbound.submitted());
-            Assert.assertEquals(0, outbound.pending());
-            Assert.assertEquals(90, outbound.sent());
-            Assert.assertEquals(90 * message.serializedSize(version), outbound.sentBytes());
-            Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
-            Assert.assertEquals(0, outbound.droppedDueToOverload());
-            Assert.assertEquals(10, outbound.droppedDueToError());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.droppedBytesDueToError());
-            Assert.assertEquals(0, outbound.droppedDueToTimeout());
-            Assert.assertEquals(0, outbound.droppedBytesDueToTimeout());
+            check(outbound).submitted(100)
+                           .sent     ( 90, 90 * message.serializedSize(version))
+                           .pending  (  0,  0)
+                           .overload (  0,  0)
+                           .expired  (  0,  0)
+                           .error    ( 10, 10 * message.serializedSize(current_version))
+                           .check();
+            check(inbound) .received ( 90, 90 * message.serializedSize(version))
+                           .processed( 90, 90 * message.serializedSize(version))
+                           .pending  (  0,  0)
+                           .expired  (  0,  0)
+                           .error    (  0,  0)
+                           .check();
             Assert.assertEquals(0, done.getCount());
         });
     }
@@ -466,17 +478,20 @@ public class OutboundConnectionTest
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
             deliveryDone.await(30L, SECONDS);
+            check(outbound).submitted( 11)
+                           .sent     (  1,  sentSize)
+                           .pending  (  0,  0)
+                           .overload (  0,  0)
+                           .expired  ( 10, 10 * message.serializedSize(current_version))
+                           .error    (  0,  0)
+                           .check();
+            check(inbound) .received (  1, sentSize)
+                           .processed(  1, sentSize)
+                           .pending  (  0,  0)
+                           .expired  (  0,  0)
+                           .error    (  0,  0)
+                           .check();
             Assert.assertEquals(1, delivered.get());
-            Assert.assertEquals(11, outbound.submitted());
-            Assert.assertEquals(0, outbound.pending());
-            Assert.assertEquals(1, outbound.sent());
-            Assert.assertEquals(sentSize, outbound.sentBytes());
-            Assert.assertEquals(0, outbound.droppedBytesDueToOverload());
-            Assert.assertEquals(0, outbound.droppedDueToOverload());
-            Assert.assertEquals(0, outbound.droppedDueToError());
-            Assert.assertEquals(0, outbound.droppedBytesDueToError());
-            Assert.assertEquals(10, outbound.droppedDueToTimeout());
-            Assert.assertEquals(10 * message.serializedSize(current_version), outbound.droppedBytesDueToTimeout());
         });
     }
 

@@ -270,9 +270,9 @@ public class OutboundConnections
             for (OutboundConnections connections : messagingService.channelManagers.values())
             {
                 Counts cur = new Counts(
-                    connections.small.submitted(),
-                    connections.large.submitted(),
-                    connections.urgent.submitted()
+                    connections.small.submittedCount(),
+                    connections.large.submittedCount(),
+                    connections.urgent.submittedCount()
                 );
                 curEndpointToCounts.put(connections.template.endpoint, cur);
 
