@@ -926,8 +926,8 @@ public class OutboundConnection
 
                     channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
                         @Override
-                        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
-                            super.channelUnregistered(ctx);
+                        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+                            super.channelInactive(ctx);
                             logger.info("{} channel closed by provider", id());
                             closeChannel(ctx.channel());
                         }

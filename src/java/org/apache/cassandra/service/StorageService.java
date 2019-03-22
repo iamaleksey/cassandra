@@ -100,6 +100,7 @@ import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.logging.LoggingSupportFactory;
 import org.apache.cassandra.utils.progress.ProgressEvent;
 import org.apache.cassandra.utils.progress.ProgressEventType;
+import org.apache.cassandra.utils.progress.ProgressListener;
 import org.apache.cassandra.utils.progress.jmx.JMXBroadcastExecutor;
 import org.apache.cassandra.utils.progress.jmx.JMXProgressSupport;
 
@@ -3718,6 +3719,11 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
     public int repairAsync(String keyspace, Map<String, String> repairSpec)
     {
+        return repair(keyspace, repairSpec, Collections.emptyList()).left;
+    }
+
+    public Pair<Integer, Future<?>> repair(String keyspace, Map<String, String> repairSpec, List<ProgressListener> listeners)
+    {
         RepairOption option = RepairOption.parse(repairSpec, tokenMetadata.partitioner);
         // if ranges are not specified
         if (option.getRanges().isEmpty())
@@ -3739,11 +3745,10 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             }
         }
         if (option.getRanges().isEmpty() || Keyspace.open(keyspace).getReplicationStrategy().getReplicationFactor().allReplicas < 2)
-            return 0;
+            return Pair.create(0, Futures.immediateFuture(null));
 
         int cmd = nextRepairCommand.incrementAndGet();
-        ActiveRepairService.repairCommandExecutor.execute(createRepairTask(cmd, keyspace, option));
-        return cmd;
+        return Pair.create(cmd, ActiveRepairService.repairCommandExecutor.submit(createRepairTask(cmd, keyspace, option, listeners)));
     }
 
     /**
@@ -3789,7 +3794,7 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
         return tokenMetadata.partitioner.getTokenFactory();
     }
 
-    private FutureTask<Object> createRepairTask(final int cmd, final String keyspace, final RepairOption options)
+    private FutureTask<Object> createRepairTask(final int cmd, final String keyspace, final RepairOption options, List<ProgressListener> listeners)
     {
         if (!options.getDataCenters().isEmpty() && !options.getDataCenters().contains(DatabaseDescriptor.getLocalDataCenter()))
         {
@@ -3798,6 +3803,9 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
 
         RepairRunnable task = new RepairRunnable(this, cmd, options, keyspace);
         task.addProgressListener(progressSupport);
+        for (ProgressListener listener : listeners)
+            task.addProgressListener(listener);
+
         if (options.isTraced())
         {
             Runnable r = () ->

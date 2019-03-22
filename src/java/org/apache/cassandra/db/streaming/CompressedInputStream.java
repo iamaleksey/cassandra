@@ -59,11 +59,6 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
      */
     private long bufferOffset = 0;
 
-    /**
-     * The current {@link CassandraCompressedStreamReader#sections} offset in the stream.
-     */
-    private long current = 0;
-
     private final ChecksumType checksumType;
 
     private static final int CHECKSUM_LENGTH = 4;
@@ -97,6 +92,11 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
         new FastThreadLocalThread(new Reader(source, info, dataBuffer)).start();
     }
 
+    public long position()
+    {
+        return bufferOffset + buffer.position();
+    }
+
     /**
      * Invoked when crossing into the next stream boundary in {@link CassandraCompressedStreamReader#sections}.
      */
@@ -105,21 +105,15 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
         if (readException != null)
             throw readException;
 
-        assert position >= current : "stream can only read forward.";
-        current = position;
+        assert position >= bufferOffset + buffer.position() : "stream can only read forward.";
 
-        if (current > bufferOffset + buffer.limit())
-            reBuffer(false);
+        while (position > bufferOffset + buffer.limit())
+            reBuffer();
 
-        buffer.position((int)(current - bufferOffset));
+        buffer.position((int)(position - bufferOffset));
     }
 
     protected void reBuffer() throws IOException
-    {
-        reBuffer(true);
-    }
-
-    private void reBuffer(boolean updateCurrent) throws IOException
     {
         if (readException != null)
         {
@@ -127,10 +121,6 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
             buffer = null;
             throw readException;
         }
-
-        // increment the offset into the stream based on the current buffer's read count
-        if (updateCurrent)
-            current += buffer.position();
 
         try
         {
@@ -151,6 +141,7 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
 
     private void decompress(ByteBuffer compressed) throws IOException
     {
+        bufferOffset += buffer.limit();
         int length = compressed.remaining();
 
         // uncompress if the buffer size is less than the max chunk size. else, if the buffer size is greater than or equal to the maxCompressedLength,
@@ -189,10 +180,6 @@ public class CompressedInputStream extends RebufferingInputStream implements Aut
 
         if (releaseCompressedBuffer)
             FileUtils.clean(compressed);
-
-        // buffer offset is always aligned
-        final int compressedChunkLength = info.parameters.chunkLength();
-        bufferOffset = current & ~(compressedChunkLength - 1);
     }
 
     public long getTotalCompressedBytesRead()

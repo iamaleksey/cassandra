@@ -66,7 +66,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
     private void allocateBuffer()
     {
         // this buffer is only used for small quantities of data
-        buffer = BufferPool.get(8 << 10);
+        buffer = BufferPool.getAtLeast(8 << 10, BufferType.OFF_HEAP);
     }
 
     @Override
@@ -138,7 +138,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
                     throw new IllegalStateException("Can only allocate one ByteBuffer");
                 limiter.acquire(size);
                 holder.promise = beginFlush(size, defaultLowWaterMark, defaultHighWaterMark);
-                holder.buffer = BufferPool.getAtLeast(size, BufferType.OFF_HEAP);
+                holder.buffer = BufferPool.get(size);
                 return holder.buffer;
             });
         }

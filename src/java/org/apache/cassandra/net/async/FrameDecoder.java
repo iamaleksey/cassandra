@@ -230,7 +230,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         this.config = ctx.channel().config();
     }
 
-    public void channelUnregistered(ChannelHandlerContext ctx)
+    public void channelInactive(ChannelHandlerContext ctx)
     {
         discard();
     }

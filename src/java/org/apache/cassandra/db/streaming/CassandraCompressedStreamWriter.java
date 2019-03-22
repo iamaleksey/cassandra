@@ -74,7 +74,7 @@ public class CassandraCompressedStreamWriter extends CassandraStreamWriter
                 // length of the section to stream
                 long length = section.upperPosition - section.lowerPosition;
 
-                logger.trace("[Stream #{}] Writing section {} with length {} to stream.", session.planId(), sectionIdx++, length);
+                logger.debug("[Stream #{}] Writing section {} with length {} to stream.", session.planId(), sectionIdx++, length);
 
                 // tracks write progress
                 long bytesTransferred = 0;

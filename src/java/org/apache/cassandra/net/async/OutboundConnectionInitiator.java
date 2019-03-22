@@ -238,9 +238,9 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         }
 
         @Override
-        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception
         {
-            super.channelUnregistered(ctx);
+            super.channelInactive(ctx);
             resultPromise.tryFailure(new ClosedChannelException());
         }
 

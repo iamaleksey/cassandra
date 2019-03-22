@@ -36,6 +36,9 @@ import java.util.UUID;
 
 public class InstanceConfig implements IInstanceConfig
 {
+    public static long NETWORK = 1;
+    public static long GOSSIP  = 1 << 1;
+
     private static final Object NULL = new Object();
 
     public final int num;
@@ -44,6 +47,8 @@ public class InstanceConfig implements IInstanceConfig
     public final UUID hostId;
     public UUID hostId() { return hostId; }
     private final Map<String, Object> params = new TreeMap<>();
+
+    private long featureFlags;
 
     private volatile InetAddressAndPort broadcastAddressAndPort;
 
@@ -113,6 +118,17 @@ public class InstanceConfig implements IInstanceConfig
         this.num = copy.num;
         this.params.putAll(copy.params);
         this.hostId = copy.hostId;
+    }
+
+    public InstanceConfig with(long featureFlag)
+    {
+        featureFlags |= featureFlag;
+        return this;
+    }
+
+    public boolean has(long featureFlag)
+    {
+        return 0 != (featureFlags & featureFlag);
     }
 
     public InstanceConfig set(String fieldName, Object value)

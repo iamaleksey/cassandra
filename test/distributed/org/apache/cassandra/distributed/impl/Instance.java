@@ -87,6 +87,9 @@ import org.apache.cassandra.utils.Throwables;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.memory.BufferPool;
 
+import static org.apache.cassandra.distributed.impl.InstanceConfig.GOSSIP;
+import static org.apache.cassandra.distributed.impl.InstanceConfig.NETWORK;
+
 public class Instance extends IsolatedExecutor implements IInvokableInstance
 {
     public final IInstanceConfig config;
@@ -182,6 +185,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         MessagingService.instance().messageSink.addOutbound(new MessageDeliverySink(deliverToInstanceIfNotFiltered));
     }
 
+    // unnecessary if registerMockMessaging used
     private void registerFilter(ICluster cluster)
     {
         MessagingService.instance().messageSink.addOutbound((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb.id));
@@ -235,6 +239,13 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         sync(() -> {
             try
             {
+                if (config.has(GOSSIP))
+                {
+                    // TODO: hacky
+                    System.setProperty("cassandra.consistent.rangemovement", "false");
+                    System.setProperty("cassandra.consistent.simultaneousmoves.allow", "true");
+                }
+
                 mkdirs();
                 Config.setOverrideLoadConfig(() -> loadConfig(config));
                 DatabaseDescriptor.daemonInitialization();
@@ -268,15 +279,29 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                     throw new RuntimeException(e);
                 }
 
-                // Even though we don't use MessagingService, access the static NettyFactory
-                // instance here so that we start the static event loop state
-                // (e.g. acceptGroup, inboundGroup, outboundGroup, etc ...). We can remove this
-                // once we actually use the MessagingService to communicate between nodes
-                NettyFactory.instance.getClass();
-                initializeRing(cluster);
-//                registerMockMessaging(cluster);
-                registerFilter(cluster);
-                MessagingService.instance().listen();
+                if (config.has(NETWORK))
+                {
+                    registerFilter(cluster);
+                    MessagingService.instance().listen();
+                }
+                else
+                {
+                    // Even though we don't use MessagingService, access the static NettyFactory
+                    // instance here so that we start the static event loop state
+                    NettyFactory.instance.getClass();
+                    registerMockMessaging(cluster);
+                }
+
+                // TODO: this is more than just gossip
+                if (config.has(GOSSIP))
+                {
+                    StorageService.instance.initServer();
+                }
+                else
+                {
+                    initializeRing(cluster);
+                }
+
                 SystemKeyspace.finishStartup();
 
                 if (!FBUtilities.getBroadcastAddressAndPort().equals(broadcastAddressAndPort()))
