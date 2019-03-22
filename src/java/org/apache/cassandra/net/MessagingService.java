@@ -379,7 +379,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             catch (ClosedChannelException e)
             {
                 if (isShuttingDown)
+                {
+                    logger.debug("{} sending {} to {}@{} while messaging is shutting down", FBUtilities.getBroadcastAddressAndPort(), message.verb, message.id, to);
                     return; // just drop the message, and let others clean up
+                }
 
                 // remove the connection and try again
                 channelManagers.remove(to, connections);

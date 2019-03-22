@@ -55,6 +55,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.Math.min;
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
 /**
  * Parses incoming messages as per the 3.0/3.11/4.0 internode messaging protocols.
@@ -357,6 +358,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
 
     private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
     {
+        logger.debug("Connection from {} waiting for capacity", peer);
         ticket = queue.registerAndSignal(bytesRequested, expiresAtNanos, channel.eventLoop(), onCapacityRegained, this::exceptionCaught, this::resumeIfNotBlocked);
     }
 
@@ -374,6 +376,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         try (DataInputBuffer in = new DataInputBuffer(buf, false))
         {
             message = serializer.deserialize(in, peer, version);
+            logger.debug("Deserialized {} ({}) from {}", message.verb, message.id, peer);
         }
         catch (UnknownTableException | UnknownColumnException e)
         {
@@ -442,6 +445,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
     @Override
     public void onExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit)
     {
+        logger.debug("{} expired ({}ms elapsed)", verb, MILLISECONDS.convert(timeElapsed, unit));
         releaseCapacity(messageSize);
         callbacks.onExpired(messageSize, verb, timeElapsed, unit);
     }
@@ -449,6 +453,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
     @Override
     public void onArrivedExpired(int messageSize, Verb verb, long timeElapsed, TimeUnit unit)
     {
+        logger.debug("{} expired on arrival ({}ms elapsed)", verb, MILLISECONDS.convert(timeElapsed, unit));
         callbacks.onArrivedExpired(messageSize, verb, timeElapsed, unit);
     }
 
@@ -577,6 +582,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
      */
     private void close()
     {
+        logger.debug("Closing connection from {}", peer);
         isClosed = true;
 
         if (null != largeCoprocessor)

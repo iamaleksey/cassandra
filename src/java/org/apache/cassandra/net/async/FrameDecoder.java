@@ -23,6 +23,9 @@ import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelHandlerContext;
@@ -36,6 +39,8 @@ import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
 abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements InboundMessageHandler.ReadSwitch
 {
+    private static final Logger logger = LoggerFactory.getLogger(FrameDecoder.class);
+
     abstract static class Frame
     {
         abstract void release();
@@ -131,6 +136,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     {
         if (active)
         {
+            logger.debug("Pausing frame decode and channel reads for {} from {}", this.getClass().getSimpleName(), ctx.channel().remoteAddress());
             active = false;
             config.setAutoRead(false);
         }
@@ -144,10 +150,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     {
         if (!active)
         {
+            logger.debug("Resuming frame delivery for {} from {}", this.getClass().getSimpleName(), ctx.channel().remoteAddress());
             active = true;
             deliver(ctx);
             if (active) // we could have called pause again before delivery completed
+            {
+                logger.debug("Resuming frame decode and channel reads for {} from {}", this.getClass().getSimpleName(), ctx.channel().remoteAddress());
                 config.setAutoRead(true);
+            }
         }
     }
 
@@ -221,7 +231,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
             BufferPool.put(bytes);
         }
         while (!frames.isEmpty())
+        {
+            logger.debug("Discarding unread frame for {} from {}", this.getClass().getSimpleName(), ctx.channel().remoteAddress());
             frames.poll().release();
+        }
     }
 
     public void handlerAdded(ChannelHandlerContext ctx)
@@ -232,6 +245,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
 
     public void channelInactive(ChannelHandlerContext ctx)
     {
+        logger.debug("{} from {} marked inactive; removing {}", ctx.channel().id(), ctx.channel().remoteAddress(), this.getClass().getSimpleName());
         discard();
     }
 

@@ -1520,7 +1520,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             {
                 if (slept % 5000 == 0)
                 { // CASSANDRA-8072, retry at the beginning and every 5 seconds
-                    logger.trace("Sending shadow round GOSSIP DIGEST SYN to seeds {}", seeds);
+                    logger.debug("Sending shadow round GOSSIP DIGEST SYN to seeds {}", seeds);
 
                     for (InetAddressAndPort seed : seeds)
                         MessagingService.instance().sendOneWay(message, seed);
@@ -1528,7 +1528,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     // Send to any peers we already know about, but only if a seed didn't respond.
                     if (includePeers)
                     {
-                        logger.trace("Sending shadow round GOSSIP DIGEST SYN to known peers {}", peers);
+                        logger.debug("Sending shadow round GOSSIP DIGEST SYN to known peers {}", peers);
                         for (InetAddressAndPort peer : peers)
                             MessagingService.instance().sendOneWay(message, peer);
                     }
