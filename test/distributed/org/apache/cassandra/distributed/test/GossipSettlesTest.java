@@ -19,7 +19,9 @@
 package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.junit.Test;
 
 import org.apache.cassandra.distributed.Cluster;
@@ -32,7 +34,13 @@ public class GossipSettlesTest extends DistributedTestBase
     public void testMany()
     {
         for (int i = 0 ; i < 100 ; ++i)
+        {
             test();
+            System.gc();
+            System.gc();
+            System.gc();
+            Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.DAYS);
+        }
     }
 
     @Test

@@ -688,12 +688,9 @@ public class OutboundConnection
                         if (sending.length() != sendingBytes + messageSize)
                             throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
 
-                        logger.debug("Calculating canonical size for {}@{} to {}", next.verb, messageSize, template.endpoint);
                         canonicalSize += canonicalSize(next);
-                        logger.debug("Calculated canonical size for {}@{} to {}", next.verb, messageSize, template.endpoint);
                         sendingCount += 1;
                         sendingBytes += messageSize;
-                        logger.debug("Added {}@{} to frame to {}", next.verb, messageSize, template.endpoint);
                     }
                     catch (Throwable t)
                     {

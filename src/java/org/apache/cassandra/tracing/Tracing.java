@@ -278,10 +278,15 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     {
         try
         {
+            logger.debug("Tracing {} to {} with parameters {}", message.verb, sendTo, message.parameters);
             final UUID sessionId = message.traceSession();
             if (sessionId == null)
+            {
+                logger.debug("No tracing");
                 return;
+            }
 
+            logger.debug("Tracing with sessionId {}", sessionId);
             String logMessage = String.format("Sending %s message to %s", message.verb, sendTo);
 
             TraceState state = get(sessionId);

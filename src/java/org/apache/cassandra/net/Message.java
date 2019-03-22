@@ -90,7 +90,7 @@ public class Message<T>
     public final T payload;
 
     private final int flags;
-    private final Map<ParameterType, Object> parameters;
+    public final Map<ParameterType, Object> parameters;
 
     private Message(InetAddressAndPort from,
                     T payload,
@@ -572,27 +572,19 @@ public class Message<T>
         private <T> void serializePost40(Message<T> message, DataOutputPlus out, int version) throws IOException
         {
             out.writeUnsignedVInt(message.id);
-            logger.debug("Serialized id {}", message.id);
 
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
             out.writeInt((int) ApproximateTime.toCurrentTimeMillis(message.createdAtNanos));
-            logger.debug("Serialized createdAt {}", message.createdAtNanos);
             out.writeUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
-            logger.debug("Serialized expiresAt {}", message.createdAtNanos);
             out.writeUnsignedVInt(message.verb.id);
-            logger.debug("Serialized verb id {}", message.verb.id);
 
             out.writeUnsignedVInt(message.flags);
-            logger.debug("Serialized flags {}", message.flags);
             serializeParams(message.parameters, out, version);
-            logger.debug("Serialized parameters {}", message.parameters.size());
 
             int payloadSize = message.payloadSize(version);
             out.writeUnsignedVInt(payloadSize);
-            logger.debug("Serialized payload size {}", payloadSize);
             message.verb.serializer().serialize(message.payload, out, version);
-            logger.debug("Serialized payload");
         }
 
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
