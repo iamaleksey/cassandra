@@ -821,4 +821,13 @@ public class ConnectionTest
         Assert.assertTrue(outbound.isConnected());
     }
 
+    @Test
+    public void burnTest()
+    {
+        while (true)
+        {
+
+        }
+    }
+
 }
