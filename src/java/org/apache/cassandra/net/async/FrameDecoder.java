@@ -121,7 +121,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     ByteBuffer stash;
     private final Deque<Frame> frames = new ArrayDeque<>();
     private boolean active = true;
-    private ChannelHandlerContext ctx;
+    ChannelHandlerContext ctx;
     private ChannelConfig config;
 
     abstract void decode(Collection<Frame> into, SharedBytes bytes);

@@ -21,10 +21,14 @@ package org.apache.cassandra.net.async;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import net.nicoulaj.compilecommand.annotations.Inline;
 
 abstract class FrameDecoderWith8bHeader extends FrameDecoder
 {
+    private static final Logger logger = LoggerFactory.getLogger(FrameDecoderWith8bHeader.class);
     /**
      * Read a header that is 8 bytes or shorter, without modifying the buffer position.
      * If your header is longer than this, you will need to implement your own {@link #decode}
@@ -63,12 +67,16 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
             if (stash != null)
             {
                 if (!copyToSize(in, stash, headerLength))
+                {
+                    logger.debug("Stashing {}b of incomplete frame from {}", stash.position(), ctx.channel().remoteAddress());
                     return;
+                }
 
                 long header = readHeader(stash, 0);
                 CorruptFrame c = verifyHeader(header);
                 if (c != null)
                 {
+                    logger.debug("Encountered corrupt stashed frame from {}", ctx.channel().remoteAddress());
                     discard();
                     into.add(c);
                     return;
@@ -78,8 +86,12 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                 stash = ensureCapacity(stash, frameLength);
 
                 if (!copyToSize(in, stash, frameLength))
+                {
+                    logger.debug("Stashing {}b of incomplete frame from {}", stash.position(), ctx.channel().remoteAddress());
                     return;
+                }
 
+                logger.debug("Unpacking stashed frame of {}b", stash.position());
                 stash.flip();
                 SharedBytes stashed = SharedBytes.wrap(stash);
                 stash = null;
@@ -102,6 +114,7 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                 if (remaining < headerLength)
                 {
                     stash(newBytes, headerLength, begin, remaining);
+                    logger.debug("Stashing {}b of incomplete frame from {}", stash.position(), ctx.channel().remoteAddress());
                     return;
                 }
 
@@ -109,6 +122,7 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                 CorruptFrame c = verifyHeader(header);
                 if (c != null)
                 {
+                    logger.debug("Encountered corrupt frame from {}", ctx.channel().remoteAddress());
                     into.add(c);
                     return;
                 }
@@ -117,9 +131,11 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                 if (remaining < frameLength)
                 {
                     stash(newBytes, frameLength, begin, remaining);
+                    logger.debug("Stashing {}b of incomplete frame from {}", stash.position(), ctx.channel().remoteAddress());
                     return;
                 }
 
+                logger.debug("Unpacking stashed frame of {}b", frameLength);
                 into.add(unpackFrame(newBytes, begin, begin + frameLength, header));
                 begin += frameLength;
             }

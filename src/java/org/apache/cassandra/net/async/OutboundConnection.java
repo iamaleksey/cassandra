@@ -666,6 +666,7 @@ public class OutboundConnection
 
                         Tracing.instance.traceOutgoingMessage(next, settings.connectTo);
                         Message.serializer.serialize(next, out, messagingVersion);
+                        logger.debug("Serializing {}@{} to {}", next.verb, messageSize, template.endpoint);
 
                         if (sending.length() != sendingBytes + messageSize)
                             throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
