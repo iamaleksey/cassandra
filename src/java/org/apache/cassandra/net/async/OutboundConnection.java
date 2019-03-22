@@ -223,8 +223,8 @@ public class OutboundConnection
         }
         else
         {
-            logger.debug("Queueing {}@{} to {}", message.verb, message.serializedSize(current_version), template.endpoint);
             queue.add(message);
+            logger.debug("Queueing {}@{} to {}; queue size {} ({} bytes)", message.verb, message.serializedSize(current_version), template.endpoint, queue.size(), queueSizeInBytes);
 
             // we might race with the channel closing; if this happens, to ensure this message eventually arrives
             // we need to remove ourselves from the queue and throw a ClosedChannelException, so that another channel
@@ -473,6 +473,7 @@ public class OutboundConnection
          */
         void setInProgress(boolean inProgress)
         {
+            logger.debug("{} set in progress {} ({})", id(), inProgress, null != stopAndRun.get());
             this.inProgress = inProgress;
             if (!inProgress && null != stopAndRun.get())
                 schedule();
@@ -702,6 +703,7 @@ public class OutboundConnection
                     return false;
                 }
 
+                logger.debug("{} sending {} messages ({} bytes)", id(), sendingCount, sendingBytes);
                 sending.finish();
                 ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, sending);
                 sending = null;
@@ -710,6 +712,7 @@ public class OutboundConnection
                 {
                     sent += sendingCount;
                     sentBytes += sendingBytes;
+                    logger.debug("{} completed sending {} messages ({} bytes)", id(), sendingCount, sendingBytes);
                 }
                 else
                 {
@@ -726,6 +729,9 @@ public class OutboundConnection
                     Channel closeChannelOnFailure = channel;
                     result.addListener(future -> {
                         assert eventLoop.inEventLoop();
+
+                        logger.debug("{} completed asynchronously sending {} messages ({} bytes); total flushing {}", id(), sendingCountFinal, sendingBytesFinal, flushingBytes);
+
                         releaseCapacity(releaseBytesFinal);
                         flushingBytes -= sendingBytesFinal;
                         if (flushingBytes == 0)
@@ -767,7 +773,18 @@ public class OutboundConnection
                     sending.release();
 
                 if (!queue.isEmpty() && isWritable)
+                {
+                    logger.debug("{} writable and not-empty; scheduling another delivery", id());
                     schedule();
+                }
+                else if (queue.isEmpty())
+                {
+                    logger.debug("{} queue empty; stopping delivery ({})", id(), queue.size());
+                }
+                else if (!isWritable)
+                {
+                    logger.debug("{} not writable; pausing delivery ({})", id(), queue.size());
+                }
             }
 
             return false;
