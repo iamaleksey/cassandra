@@ -504,7 +504,7 @@ public class OutboundConnection
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
 
             // the delivery loop will pick up again immediately after closeChannel completes, since it depends on stopAndRunOnEventLoop
-            closeChannel(channel);
+            closeChannelNow(channel);
         }
 
         /**
@@ -962,7 +962,7 @@ public class OutboundConnection
                         public void channelInactive(ChannelHandlerContext ctx) throws Exception {
                             super.channelInactive(ctx);
                             logger.info("{} channel closed by provider", id());
-                            closeChannel(ctx.channel());
+                            closeChannelNow(ctx.channel());
                         }
 
                         @Override
@@ -973,7 +973,7 @@ public class OutboundConnection
                             else
                                 logger.error("{} unexpected error; closing", id(), cause);
 
-                            closeChannel(channel);
+                            closeChannelGracefully(channel);
                         }
                     });
 
@@ -1092,7 +1092,7 @@ public class OutboundConnection
         runOnEventLoop(() -> {
             template = newTemplate;
             settings = template.withDefaults(type, messagingVersion);
-            closeChannel(channel, done);
+            closeChannelGracefully(channel, done);
         });
         return done;
     }
@@ -1109,13 +1109,11 @@ public class OutboundConnection
     }
 
     /**
-     * See {@link #closeChannel(Channel, Promise)}
+     * See {@link #closeChannelGracefully(Channel, Promise)}
      */
-    private Future<Void> closeChannel(Channel closeIfIs)
+    private void closeChannelGracefully(Channel closeIfIs)
     {
-        Promise<Void> done = new AsyncPromise<>(eventLoop);
-        closeChannel(closeIfIs, done);
-        return done;
+        delivery.stopAndRunOnEventLoop(closeChannelTask(closeIfIs));
     }
 
     /**
@@ -1128,7 +1126,7 @@ public class OutboundConnection
      * and promptly get the connection going again; the close is considered to have succeeded as soon as we
      * have set our internal state.
      */
-    private void closeChannel(Channel closeIfIs, Promise<Void> done)
+    private Promise<Void> closeChannelGracefully(Channel closeIfIs, Promise<Void> done)
     {
         if (!done.setUncancellable())
             throw new IllegalStateException();
@@ -1137,6 +1135,23 @@ public class OutboundConnection
         // this might mean a slight delay for large message delivery, as the connect will be scheduled
         // asynchronously, so we must wait for a second turn on the eventLoop
         delivery.stopAndRunOnEventLoop(() -> {
+            closeChannelTask(closeIfIs).run();
+            done.setSuccess(null);
+        });
+        return done;
+    }
+
+    /**
+     * The channel is already known to be invalid, so there's no point waiting for a clean break in delivery
+     */
+    private void closeChannelNow(Channel closeIfIs)
+    {
+        runOnEventLoop(closeChannelTask(closeIfIs));
+    }
+
+    private Runnable closeChannelTask(Channel closeIfIs)
+    {
+        return () -> {
             if (closeIfIs != null && channel == closeIfIs)
             {
                 // no need to wait until the channel is closed to set ourselves as disconnected (and potentially open a new channel)
@@ -1150,8 +1165,7 @@ public class OutboundConnection
                         logger.info("Problem closing channel {}", channel, future.cause());
                 });
             }
-            done.setSuccess(null);
-        });
+        };
     }
 
     /**
@@ -1159,7 +1173,7 @@ public class OutboundConnection
      */
     public Future<Void> interrupt()
     {
-        return closeChannel(channel);
+        return closeChannelGracefully(channel, new AsyncPromise<>(eventLoop));
     }
 
     /**
