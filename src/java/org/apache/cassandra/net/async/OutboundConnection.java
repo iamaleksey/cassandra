@@ -625,11 +625,17 @@ public class OutboundConnection
         boolean doRun()
         {
             if (!isWritable)
+            {
+                logger.debug("{} not writable; exiting", id());
                 return false;
+            }
 
             int maxSendBytes = (int) min(queueSizeInBytes - flushingBytes, LARGE_MESSAGE_THRESHOLD);
             if (maxSendBytes == 0)
+            {
+                logger.debug("{} maxSendBytes is zero (queueSize {}, flushing {}); exiting", id(), queueSizeInBytes, flushingBytes);
                 return false;
+            }
 
             FrameEncoder.Payload sending = null;
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
@@ -638,7 +644,10 @@ public class OutboundConnection
             try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(System.nanoTime(), this::schedule))
             {
                 if (withLock == null)
+                {
+                    logger.debug("{} failed to acquire queue lock; exiting", id());
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
+                }
 
                 sending = payloadAllocator.allocate(true, maxSendBytes);
                 DataOutputBufferFixed out = new DataOutputBufferFixed(sending.buffer);
@@ -688,7 +697,10 @@ public class OutboundConnection
                     withLock.removeHead(next);
                 }
                 if (0 == sendingBytes)
+                {
+                    logger.debug("{} found nothing to serialize; exiting", id());
                     return false;
+                }
 
                 sending.finish();
                 ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, sending);
@@ -713,7 +725,7 @@ public class OutboundConnection
                     int sendingCountFinal = sendingCount;
                     Channel closeChannelOnFailure = channel;
                     result.addListener(future -> {
-
+                        assert eventLoop.inEventLoop();
                         releaseCapacity(releaseBytesFinal);
                         flushingBytes -= sendingBytesFinal;
                         if (flushingBytes == 0)

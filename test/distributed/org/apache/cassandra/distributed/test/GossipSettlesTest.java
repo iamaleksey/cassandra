@@ -29,13 +29,13 @@ import static org.apache.cassandra.distributed.impl.InstanceConfig.NETWORK;
 
 public class GossipSettlesTest extends DistributedTestBase
 {
-    @Test
     public void testMany()
     {
         for (int i = 0 ; i < 100 ; ++i)
             test();
     }
 
+    @Test
     public void test()
     {
         try (Cluster cluster = Cluster.build(3).withConfig(config -> config.with(GOSSIP).with(NETWORK)).start())
