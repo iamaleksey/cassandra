@@ -24,6 +24,7 @@ import org.junit.Test;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.distributed.Cluster;
 
+import static org.apache.cassandra.distributed.impl.InstanceConfig.NETWORK;
 import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
@@ -139,7 +140,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
     @Test
     public void writeWithSchemaDisagreement() throws Throwable
     {
-        try (Cluster cluster = init(Cluster.create(3)))
+        try (Cluster cluster = init(Cluster.build(3).withConfig(config -> config.with(NETWORK)).start()))
         {
             cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v1 int, PRIMARY KEY (pk, ck))");
 
@@ -169,7 +170,7 @@ public class DistributedReadWritePathTest extends DistributedTestBase
     @Test
     public void readWithSchemaDisagreement() throws Throwable
     {
-        try (Cluster cluster = init(Cluster.create(3)))
+        try (Cluster cluster = init(Cluster.build(3).withConfig(config -> config.with(NETWORK)).start()))
         {
             cluster.schemaChange("CREATE TABLE " + KEYSPACE + ".tbl (pk int, ck int, v1 int, PRIMARY KEY (pk, ck))");
 

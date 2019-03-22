@@ -60,6 +60,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
+import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
@@ -218,7 +219,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         OutboundConnections pool = channelManagers.get(to);
         if (pool != null)
-            pool.scheduleClose(5L, TimeUnit.MINUTES, true)
+            pool.scheduleClose(5L, MINUTES, true)
                 .addListener(future -> channelManagers.remove(to, pool));
     }
 
@@ -402,10 +403,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      */
     public void shutdown()
     {
-        shutdown(true, true);
+        shutdown(1L, MINUTES, true, true);
     }
 
-    public void shutdown(boolean shutdownGracefully, boolean shutdownNetty)
+    public void shutdown(long timeout, TimeUnit units, boolean shutdownGracefully, boolean shutdownNetty)
     {
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
@@ -419,8 +420,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             for (OutboundConnections pool : channelManagers.values())
                 closing.add(pool.close(true));
 
-            long deadline = System.nanoTime() + SECONDS.toNanos(60L);
-            maybeFail(() -> new FutureCombiner(closing).get(60L, TimeUnit.SECONDS),
+            long deadline = System.nanoTime() + units.toNanos(timeout);
+            maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
                       () -> inbound.close().get(),
                       () -> {
                           if (shutdownNetty)
@@ -438,14 +439,15 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             closing.add(inbound.close());
             for (OutboundConnections pool : channelManagers.values())
                 closing.add(pool.close(false));
-            if (shutdownNetty)
-                NettyFactory.instance.shutdownNow();
 
-            long deadline = System.nanoTime() + SECONDS.toNanos(60L);
-            maybeFail(() -> new FutureCombiner(closing).get(60L, TimeUnit.SECONDS),
+            long deadline = System.nanoTime() + units.toNanos(timeout);
+            maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
                       () -> {
                           if (shutdownNetty)
+                          {
+                              NettyFactory.instance.shutdownNow();
                               NettyFactory.instance.awaitTerminationUntil(deadline);
+                          }
                       },
                       messageSink::clear);
         }

@@ -547,7 +547,7 @@ public class OutboundConnection
                             // exit the loop, but only return if no new pending schedule() - could include the one we just submitted
                             break;
                         }
-                        logger.debug("Delivering {}");
+                        logger.debug("Delivering {}", id());
                     }
                     while (doRun());
                 }
