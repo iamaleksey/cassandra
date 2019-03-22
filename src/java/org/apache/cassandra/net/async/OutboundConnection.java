@@ -211,7 +211,7 @@ public class OutboundConnection
     /**
      * This is the main entry point for enqueuing a message to be sent to the remote peer.
      */
-    void enqueue(Message message) throws ClosedChannelException
+    void enqueue(Message<?> message) throws ClosedChannelException
     {
         if (isClosed())
             throw new ClosedChannelException();
@@ -223,6 +223,7 @@ public class OutboundConnection
         }
         else
         {
+            logger.debug("Queueing {}@{} to {}", message.verb, message.serializedSize(current_version), template.endpoint);
             queue.add(message);
 
             // we might race with the channel closing; if this happens, to ensure this message eventually arrives
@@ -536,8 +537,9 @@ public class OutboundConnection
                         if (!isConnected())
                         {
                             // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
-                            if (!queue.isEmpty() || null != stopAndRun.get())
+                            if (!queue.isEmpty())
                             {
+                                logger.debug("Not connected {}; {} in queue", id(), queue.size());
                                 // note that we depend on scheduleOnCompletion clearing RUN_AGAIN to avoid possible
                                 // infinite loops on self-rescheduling stopAndRun tasks during disconnect
                                 requestConnect().addListener(scheduleOnCompletion());
@@ -545,6 +547,7 @@ public class OutboundConnection
                             // exit the loop, but only return if no new pending schedule() - could include the one we just submitted
                             break;
                         }
+                        logger.debug("Delivering {}");
                     }
                     while (doRun());
                 }
