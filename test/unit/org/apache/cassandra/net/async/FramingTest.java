@@ -106,6 +106,7 @@ public class FramingTest
         }
         for (FrameDecoder.Frame frame : out)
             frame.release();
+        frames.release();
     }
 
     private static void verify(byte[] expect, SharedBytes actual)
