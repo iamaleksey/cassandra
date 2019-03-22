@@ -398,7 +398,7 @@ public class OutboundConnection
         private static final int NOT_RUNNING = 0;
         private static final int RUNNING     = 1;
         private static final int RUN_AGAIN   = 2;
-        private final AtomicInteger scheduled = new AtomicInteger();
+        final AtomicInteger scheduled = new AtomicInteger();
 
         /**
          * Force all task execution to stop, once any currently in progress work is completed
@@ -549,7 +549,7 @@ public class OutboundConnection
                             // exit the loop, but only return if no new pending schedule() - could include the one we just submitted
                             break;
                         }
-                        logger.debug("Delivering {}", id());
+                        logger.debug("{} about to deliver", id());
                     }
                     while (doRun());
                 }
@@ -626,6 +626,7 @@ public class OutboundConnection
         @SuppressWarnings("resource")
         boolean doRun()
         {
+            logger.debug("{} delivering", id());
             if (!isWritable)
             {
                 logger.debug("{} not writable; exiting", id());
@@ -761,6 +762,7 @@ public class OutboundConnection
             }
             catch (Throwable t)
             {
+                logger.debug("{}", id(), t);
                 errorCount += sendingCount;
                 errorBytes += sendingBytes;
                 invalidateChannel(channel, t);
@@ -785,6 +787,10 @@ public class OutboundConnection
                 else if (!isWritable)
                 {
                     logger.debug("{} not writable; pausing delivery ({})", id(), queue.size());
+                }
+                else
+                {
+                    logger.debug("{} wtf (or race); should be scheduled {}", id(), scheduled.get());
                 }
             }
 
@@ -846,6 +852,7 @@ public class OutboundConnection
         @SuppressWarnings("resource")
         boolean doRun()
         {
+            logger.debug("{} delivering large messages", id());
             Message<?> send = queue.tryPoll(System.nanoTime(), this::schedule);
             if (send == null)
                 return false;
