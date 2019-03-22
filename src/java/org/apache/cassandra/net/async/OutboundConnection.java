@@ -679,9 +679,9 @@ public class OutboundConnection
                             out = new DataOutputBufferFixed(sending.buffer);
                         }
 
+                        logger.debug("Serializing {}@{} to {}", next.verb, messageSize, template.endpoint);
                         Tracing.instance.traceOutgoingMessage(next, settings.connectTo);
                         Message.serializer.serialize(next, out, messagingVersion);
-                        logger.debug("Serializing {}@{} to {}", next.verb, messageSize, template.endpoint);
 
                         if (sending.length() != sendingBytes + messageSize)
                             throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
@@ -689,6 +689,7 @@ public class OutboundConnection
                         canonicalSize += canonicalSize(next);
                         sendingCount += 1;
                         sendingBytes += messageSize;
+                        logger.debug("Added {}@{} to frame to {}", next.verb, messageSize, template.endpoint);
                     }
                     catch (Throwable t)
                     {
