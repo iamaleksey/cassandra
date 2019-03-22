@@ -679,20 +679,25 @@ public class OutboundConnection
                             out = new DataOutputBufferFixed(sending.buffer);
                         }
 
-                        logger.debug("Serializing {}@{} to {}", next.verb, messageSize, template.endpoint);
+                        logger.debug("Tracing {}@{} to {}", next.verb, messageSize, template.endpoint);
                         Tracing.instance.traceOutgoingMessage(next, settings.connectTo);
+                        logger.debug("Serializing {}@{} to {}", next.verb, messageSize, template.endpoint);
                         Message.serializer.serialize(next, out, messagingVersion);
+                        logger.debug("Serialized {}@{}({}) to {}", next.verb, messageSize, sending.length() - sendingBytes, template.endpoint);
 
                         if (sending.length() != sendingBytes + messageSize)
                             throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
 
+                        logger.debug("Calculating canonical size for {}@{} to {}", next.verb, messageSize, template.endpoint);
                         canonicalSize += canonicalSize(next);
+                        logger.debug("Calculated canonical size for {}@{} to {}", next.verb, messageSize, template.endpoint);
                         sendingCount += 1;
                         sendingBytes += messageSize;
                         logger.debug("Added {}@{} to frame to {}", next.verb, messageSize, template.endpoint);
                     }
                     catch (Throwable t)
                     {
+                        logger.debug("Error", t);
                         onDroppedDueToError(next, t);
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
