@@ -538,7 +538,8 @@ public class OutboundConnection
                         if (!isConnected())
                         {
                             // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
-                            if (!queue.isEmpty())
+                            // we try to reconnect before running another stopAndRun so that we do not infinite loop in close
+                            if (!queue.isEmpty() || null != stopAndRun.get())
                             {
                                 logger.debug("Not connected {}; {} in queue", id(), queue.size());
                                 // note that we depend on scheduleOnCompletion clearing RUN_AGAIN to avoid possible
