@@ -24,23 +24,23 @@ public enum MessageFlag
     /*
      * The order matters here, since we use enum ordinals to encode the flags.
      */
-    CALL_BACK_ON_FAILURE (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
-    TRACK_REPAIRED_DATA  (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
+    CALL_BACK_ON_FAILURE,// (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
+    TRACK_REPAIRED_DATA; // (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
 
     static final ImmutableList<MessageFlag> ALL_VALUES = ImmutableList.copyOf(values());
 
-    final ParameterType legacyParam;
-    final Object legacyValue;
+//    final ParameterType legacyParam;
+//    final Object legacyValue;
 
-    MessageFlag()
-    {
-        this(null, null);
-    }
-
-    MessageFlag(ParameterType legacyParam, Object legacyValue)
-    {
-        this.legacyParam = legacyParam;
-        this.legacyValue = legacyValue;
-    }
+//    MessageFlag()
+//    {
+//        this(null, null);
+//    }
+//
+//    MessageFlag(ParameterType legacyParam, Object legacyValue)
+//    {
+//        this.legacyParam = legacyParam;
+//        this.legacyValue = legacyValue;
+//    }
 }
 

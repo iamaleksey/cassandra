@@ -43,18 +43,18 @@ public enum ParameterType
     @Deprecated
     FAILURE_REASON      (3, "FAIL_REASON",   RequestFailureReason.serializer),
     @Deprecated
-    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance, MessageFlag.CALL_BACK_ON_FAILURE),
+    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance),// MessageFlag.CALL_BACK_ON_FAILURE),
 
     TRACE_SESSION       (5, "TraceSession",  UUIDSerializer.serializer),
     TRACE_TYPE          (6, "TraceType",     Tracing.traceTypeSerializer),
 
     @Deprecated
-    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance, MessageFlag.TRACK_REPAIRED_DATA);
+    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance);//, MessageFlag.TRACK_REPAIRED_DATA);
 
     public final int id;
     public final String legacyAlias;
     public final IVersionedSerializer serializer;
-    public final MessageFlag flagEquivalent;
+//    public final MessageFlag flagEquivalent;
 
     private static final ParameterType[] idToTypeMap;
     private static final Map<String, ParameterType> aliasToTypeMap;
@@ -84,12 +84,12 @@ public enum ParameterType
         aliasToTypeMap = aliasMap;
     }
 
-    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer)
-    {
-        this(id, legacyAlias, serializer, null);
-    }
+//    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer)
+//    {
+//        this(id, legacyAlias, serializer, null);
+//    }
 
-    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer, MessageFlag flagEquivalent)
+    ParameterType(int id, String legacyAlias, IVersionedSerializer serializer)
     {
         if (id < 0)
             throw new IllegalArgumentException("ParameterType id must be non-negative");
@@ -97,7 +97,7 @@ public enum ParameterType
         this.id = id;
         this.legacyAlias = legacyAlias;
         this.serializer = serializer;
-        this.flagEquivalent = flagEquivalent;
+//        this.flagEquivalent = flagEquivalent;
     }
 
     @Nullable

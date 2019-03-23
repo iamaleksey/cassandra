@@ -878,36 +878,36 @@ public class Message<T>
 
         private Map<ParameterType, Object> addFlagsToLegacyParams(Map<ParameterType, Object> params, int flags)
         {
-            if (flags == 0)
+//            if (flags == 0)
                 return params;
 
-            Map<ParameterType, Object> extended = new EnumMap<>(ParameterType.class);
-            extended.putAll(params);
-            forEachFlag(flags, f ->
-            {
-                if (f.legacyParam != null)
-                    extended.put(f.legacyParam, f.legacyValue);
-            });
-            return extended;
+//            Map<ParameterType, Object> extended = new EnumMap<>(ParameterType.class);
+//            extended.putAll(params);
+//            forEachFlag(flags, f ->
+//            {
+//                if (f.legacyParam != null)
+//                    extended.put(f.legacyParam, f.legacyValue);
+//            });
+//            return extended;
         }
 
         private int removeFlagsFromLegacyParams(Map<ParameterType, Object> params)
         {
-            if (params.isEmpty())
+//            if (params.isEmpty())
                 return 0;
 
-            int flags = 0;
-            Iterator<ParameterType> iter = params.keySet().iterator();
-            while (iter.hasNext())
-            {
-                ParameterType type = iter.next();
-                if (type.flagEquivalent != null)
-                {
-                    flags = addFlag(flags, type.flagEquivalent);
-                    iter.remove();
-                }
-            }
-            return flags;
+//            int flags = 0;
+//            Iterator<ParameterType> iter = params.keySet().iterator();
+//            while (iter.hasNext())
+//            {
+//                ParameterType type = iter.next();
+//                if (type.flagEquivalent != null)
+//                {
+//                    flags = addFlag(flags, type.flagEquivalent);
+//                    iter.remove();
+//                }
+//            }
+//            return flags;
         }
 
         private void serializeParams(Map<ParameterType, Object> params, DataOutputPlus out, int version) throws IOException
