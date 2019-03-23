@@ -91,6 +91,8 @@ public enum ParameterType
 
     ParameterType(int id, String legacyAlias, IVersionedSerializer serializer, MessageFlag flagEquivalent)
     {
+        Logging.logger.debug("ParameterType [init] " + id);
+
         if (id < 0)
             throw new IllegalArgumentException("ParameterType id must be non-negative");
 

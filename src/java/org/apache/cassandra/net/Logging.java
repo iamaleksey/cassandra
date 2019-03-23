@@ -15,34 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.net;
 
-import com.google.common.collect.ImmutableList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-public enum MessageFlag
+public class Logging
 {
-    /*
-     * The order matters here, since we use enum ordinals to encode the flags.
-     */
-    CALL_BACK_ON_FAILURE (ParameterType.FAILURE_CALLBACK,    MessagingService.ONE_BYTE),
-    TRACK_REPAIRED_DATA  (ParameterType.TRACK_REPAIRED_DATA, MessagingService.ONE_BYTE);
-
-    static final ImmutableList<MessageFlag> ALL_VALUES = ImmutableList.copyOf(values());
-
-    final ParameterType legacyParam;
-    final Object legacyValue;
-
-    MessageFlag()
-    {
-        this(null, null);
-    }
-
-    MessageFlag(ParameterType legacyParam, Object legacyValue)
-    {
-        Logging.logger.debug("MessageFlag [init] " + ordinal());
-
-        this.legacyParam = legacyParam;
-        this.legacyValue = legacyValue;
-    }
+    public static final Logger logger = LoggerFactory.getLogger(Logging.class);
 }
-
