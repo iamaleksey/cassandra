@@ -32,6 +32,11 @@ import static org.apache.cassandra.net.async.Crc.crc32;
 import static org.apache.cassandra.net.async.FrameEncoderCrc.HEADER_LENGTH;
 import static org.apache.cassandra.net.async.FrameEncoderCrc.writeHeader;
 
+/**
+ * A frame encoder that writes frames, just without any modification or payload protection.
+ * This is non-standard, and useful for systems that have a trusted transport layer that want
+ * to avoid incurring the (very low) cost of computing a CRC.
+ */
 @ChannelHandler.Sharable
 public class FrameEncoderUnprotected extends FrameEncoder
 {

@@ -186,6 +186,7 @@ public class BufferPool
             localPool.get().put(buffer, returnChunkToGlobalPoolIfFree);
     }
 
+    // TODO: equivalent expand method, to increase buffer size if spare slots
     public static void putUnusedPortion(ByteBuffer buffer)
     {
         putUnusedPortion(buffer, true);

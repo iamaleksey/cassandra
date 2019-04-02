@@ -226,7 +226,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         public void channelActive(final ChannelHandlerContext ctx)
         {
             Mode mode = type == STREAM ? Mode.STREAM : Mode.REGULAR;
-            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, mode, settings.withCompression(), settings.withCrc(), getBroadcastAddressAndPort());
+            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, mode, settings.withCompression(), settings.withCrc(), settings.from);
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectTo, msg);
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
                   future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
@@ -315,7 +315,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 
                     if (result.isSuccess())
                     {
-                        ConfirmOutboundPre40 message = new ConfirmOutboundPre40(settings.acceptVersions.max, getBroadcastAddressAndPort());
+                        ConfirmOutboundPre40 message = new ConfirmOutboundPre40(settings.acceptVersions.max, settings.from);
                         AsyncChannelPromise.writeAndFlush(ctx, message.encode());
                     }
                 }

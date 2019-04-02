@@ -22,8 +22,6 @@ import io.netty.channel.MessageSizeEstimator;
 
 /**
  * We want to manage the bytes we have in-flight, so this class asks Netty not to by returning zero for every object.
- *
- * TODO: Make sure we are using a new enough netty that it does not do its own estimation anyway
  */
 public class NoSizeEstimator implements MessageSizeEstimator, MessageSizeEstimator.Handle
 {

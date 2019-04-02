@@ -140,9 +140,7 @@ class SharedBytes
     }
 
     /**
-     * Create a slice over the next {@code length} bytes, and consume them from our buffer
-     *
-     * Does NOT increase the retention count; may need to be prefixed by a call to retain
+     * Create a slice over the next {@code length} bytes, consuming them from our buffer, and incrementing the owner count
      */
     SharedBytes sliceAndConsume(int length)
     {

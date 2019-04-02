@@ -19,7 +19,9 @@
 package org.apache.cassandra.net.async;
 
 import java.util.Collection;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -30,10 +32,8 @@ import io.netty.util.concurrent.Promise;
  * Netty's PromiseCombiner is not threadsafe, and we combine futures from multiple event executors.
  *
  * This class groups a number of Future into a single logical Future, by registering a listener to each that
- * decrements a shared counter; if any of them fail, the FutureCombiner is completed immediately with the cause,
- * otherwise it will complete when the counter reaches zero.
- *
- * TODO is it better to fail immediately on exception, or wait until all operations logically complete?
+ * decrements a shared counter; if any of them fail, the FutureCombiner is completed with the first cause,
+ * but in all scenario only completes when all underlying future have completed (exceptionally or otherwise)
  *
  * This Future is always uncancellable.
  *
@@ -51,19 +51,32 @@ public class FutureCombiner extends FutureDelegate<Void>
     {
         super(combined);
 
+        AtomicBoolean failed = new AtomicBoolean();
+        AtomicReference<Throwable> firstCause = new AtomicReference<>();
         AtomicInteger waitingOn = new AtomicInteger(combine.size());
         if (0 == waitingOn.get())
             combined.trySuccess(null);
 
         GenericFutureListener<? extends Future<Object>> listener = result -> {
             if (!result.isSuccess())
-                combined.tryFailure(result.cause());
-            else if (0 == waitingOn.decrementAndGet())
-                combined.trySuccess(null);
+            {
+                firstCause.compareAndSet(null, result.cause());
+                failed.set(true);
+            }
+            if (0 == waitingOn.decrementAndGet())
+                complete(combined, failed.get(), firstCause.get());
         };
 
         for (Future<?> future : combine)
             future.addListener(listener);
+    }
+
+    private static void complete(Promise<Void> result, boolean failed, Throwable cause)
+    {
+        if (failed)
+            result.tryFailure(cause);
+        else
+            result.trySuccess(null);
     }
 
 }

@@ -77,6 +77,9 @@ import static org.apache.cassandra.net.VerbTimeouts.*;
 import static org.apache.cassandra.net.Verb.Priority.*;
 import static org.apache.cassandra.schema.MigrationManager.MigrationsSerializer;
 
+/**
+ * Note that priorities except P0 are presently unused.  P0 corresponds to urgent, i.e. what used to be the "Gossip" connection.
+ */
 public enum Verb
 {
     MUTATION_RSP         (60, P1, writeTimeout,    REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),

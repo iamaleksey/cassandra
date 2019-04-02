@@ -29,6 +29,12 @@ import static org.apache.cassandra.net.async.FrameDecoderCrc.payloadLength;
 import static org.apache.cassandra.net.async.FrameDecoderCrc.readHeader6b;
 import static org.apache.cassandra.net.async.FrameDecoderCrc.verifyHeader6b;
 
+/**
+ * A frame decoder for unprotected frames, i.e. those without any modification or payload protection.
+ * This is non-standard, and useful for systems that have a trusted transport layer that want
+ * to avoid incurring the (very low) cost of computing a CRC.  All we do is accumulate the bytes
+ * of the frame, verify the frame header, and pass through the bytes stripped of the header.
+ */
 final class FrameDecoderUnprotected extends FrameDecoderWith8bHeader
 {
     public static FrameDecoderUnprotected create()

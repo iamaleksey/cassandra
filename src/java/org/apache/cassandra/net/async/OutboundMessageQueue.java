@@ -19,7 +19,6 @@
 package org.apache.cassandra.net.async;
 
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
@@ -27,7 +26,6 @@ import java.util.function.Consumer;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Verb;
 import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.min;
@@ -39,11 +37,7 @@ public class OutboundMessageQueue
         public boolean accept(Message<?> message) throws Produces;
     }
 
-    private volatile int size;
-    private static final AtomicIntegerFieldUpdater<OutboundMessageQueue> sizeUpdater = AtomicIntegerFieldUpdater.newUpdater(OutboundMessageQueue.class, "size");
-
     private final MessageConsumer<RuntimeException> onExpired;
-    private final Runnable onNotEmpty;
 
     private final MpscLinkedQueue<Message<?>> externalQueue = MpscLinkedQueue.newMpscLinkedQueue();
     private final PrunableArrayQueue<Message<?>> internalQueue = new PrunableArrayQueue<>(256);
@@ -52,10 +46,9 @@ public class OutboundMessageQueue
     private static final AtomicLongFieldUpdater<OutboundMessageQueue> earliestExpiresAtUpdater =
         AtomicLongFieldUpdater.newUpdater(OutboundMessageQueue.class, "earliestExpiresAt");
 
-    OutboundMessageQueue(MessageConsumer<RuntimeException> onExpired, Runnable onNotEmpty)
+    OutboundMessageQueue(MessageConsumer<RuntimeException> onExpired)
     {
         this.onExpired = onExpired;
-        this.onNotEmpty = onNotEmpty;
     }
 
     public void add(Message<?> m)
@@ -65,8 +58,6 @@ public class OutboundMessageQueue
         maybePruneExpired(nowNanos);
 
         externalQueue.add(m);
-        if (0 == sizeUpdater.getAndIncrement(this))
-            onNotEmpty.run();
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos);
     }
 
@@ -74,16 +65,6 @@ public class OutboundMessageQueue
     {
         if (newTime < earliestExpiresAt)
             earliestExpiresAtUpdater.accumulateAndGet(this, newTime, Math::min);
-    }
-
-    public boolean isEmpty()
-    {
-        return size == 0;
-    }
-
-    public int size()
-    {
-        return size;
     }
 
     public WithLock lockOrCallback(long nowNanos, Runnable callbackIfDeferred)
@@ -107,9 +88,6 @@ public class OutboundMessageQueue
      */
     public Message<?> tryPoll(long nowNanos, Runnable elseIfDeferred)
     {
-        if (isEmpty())
-            return null;
-
         try (WithLock withLock = lockOrCallback(nowNanos, elseIfDeferred))
         {
             if (withLock == null)
@@ -122,7 +100,6 @@ public class OutboundMessageQueue
     public class WithLock implements AutoCloseable
     {
         private final long nowNanos;
-        private int removed;
 
         public WithLock(long nowNanos)
         {
@@ -136,7 +113,6 @@ public class OutboundMessageQueue
             Message<?> m;
             while (null != (m = internalQueue.poll()))
             {
-                ++removed;
                 if (shouldSend(m, nowNanos))
                     break;
 
@@ -149,10 +125,7 @@ public class OutboundMessageQueue
         public void removeHead(Message<?> expectHead)
         {
             if (expectHead == internalQueue.peek())
-            {
-                ++removed;
                 internalQueue.poll();
-            }
         }
 
         public Message<?> peek()
@@ -164,7 +137,6 @@ public class OutboundMessageQueue
                     break;
 
                 internalQueue.poll();
-                ++removed;
                 onExpired.accept(m);
             }
 
@@ -180,7 +152,6 @@ public class OutboundMessageQueue
 
         public void close()
         {
-            sizeUpdater.addAndGet(OutboundMessageQueue.this, -removed);
             pruneInternalQueueWithLock(nowNanos);
             unlock();
         }
@@ -196,7 +167,7 @@ public class OutboundMessageQueue
 
     private boolean maybePruneExpired(long nowNanos)
     {
-        if (nowNanos > earliestExpiresAt && !isEmpty())
+        if (nowNanos > earliestExpiresAt)
             return tryRun(() -> pruneWithLock(nowNanos));
         return false;
     }
@@ -241,7 +212,6 @@ public class OutboundMessageQueue
         Pruner pruner = new Pruner();
         internalQueue.prune(pruner);
 
-        sizeUpdater.addAndGet(this, -pruner.count);
         maybeUpdateMinimumExpiryTime(pruner.earliestExpiresAt);
     }
 
@@ -268,7 +238,6 @@ public class OutboundMessageQueue
             public void onPruned(Message<?> message)
             {
                 success = true;
-                sizeUpdater.decrementAndGet(OutboundMessageQueue.this);
             }
 
             @Override
@@ -386,7 +355,6 @@ public class OutboundMessageQueue
     @VisibleForTesting
     void unsafeAdd(Message<?> m)
     {
-        sizeUpdater.incrementAndGet(this);
         externalQueue.add(m);
     }
 

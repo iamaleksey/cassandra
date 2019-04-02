@@ -61,7 +61,7 @@ public class ConnectionBurnTest extends ConnectionTest
     {
         Map<InetAddressAndPort, OutboundConnections> result = new HashMap<>();
         for (InetAddressAndPort endpoint : endpoints)
-            result.put(endpoint, OutboundConnections.unsafeCreate(template.toEndpoint(endpoint), null));
+            result.put(endpoint, OutboundConnections.unsafeCreate(template.toEndpoint(endpoint).withFrom(endpoint), null));
         return result;
     }
 
@@ -130,8 +130,8 @@ public class ConnectionBurnTest extends ConnectionTest
             this.endpoints = endpoints(simulateEndpoints);
             this.outbound = getOutbound(endpoints, outboundTemplate);
             this.inbound = new Inbound(endpoints, inboundSettings, this, this::wrap);
-            this.testRunners = new PerConnectionLookup(outbound.values(), messageGenerators);
-            this.version = outboundTemplate.acceptVersions.max;
+            this.testRunners = new PerConnectionLookup(outbound.values(), inbound, messageGenerators);
+            this.version = outboundTemplate.acceptVersions == null ? current_version : outboundTemplate.acceptVersions.max;
         }
 
         public void run() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
@@ -166,6 +166,7 @@ public class ConnectionBurnTest extends ConnectionTest
                 final long maxId;
 
                 private long nextSendId;
+                private long minReceiveId;
                 private long nextReceiveId;
                 private final ConcurrentSkipListMap<Long, Long> inFlight = new ConcurrentSkipListMap<>();
                 private final WaitQueue waitQueue = new WaitQueue();
@@ -178,7 +179,7 @@ public class ConnectionBurnTest extends ConnectionTest
                     this.corroborator = generator.copy();
                     this.minId = minId;
                     this.maxId = maxId;
-                    this.nextReceiveId = this.nextSendId = minId;
+                    this.nextReceiveId = this.minReceiveId = this.nextSendId = minId;
                 }
 
                 void sendOne()
@@ -248,40 +249,60 @@ public class ConnectionBurnTest extends ConnectionTest
                     Map.Entry<Long, Long> oldest;
                     synchronized (this)
                     {
-                        if (id == nextReceiveId && nextReceiveId != maxId)
-                            ++nextReceiveId;
-                        else if (id == nextReceiveId)
-                            nextReceiveId = minId;
-                        else if (id - nextReceiveId < messageIdsPerChannel / 2)
-                            nextReceiveId = id + 1;
+                        if (id == nextReceiveId)
+                        {
+                            if (nextReceiveId != maxId) ++nextReceiveId;
+                            else nextReceiveId = minId;
+                        }
+                        else
+                        {
+                            if (id - nextReceiveId >= 0 && id - nextReceiveId < messageIdsPerChannel / 2)
+                                nextReceiveId = id + 1;
+                        }
                     }
 
                     waitQueue.signalAll();
-                    oldest = inFlight.firstEntry();
-                    if (oldest != null && nextReceiveId - oldest.getKey() > 16)
+                    oldest = inFlight.ceilingEntry(minReceiveId);
+                    if (oldest == null && nextReceiveId < minReceiveId)
                     {
-                        long waitUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100L);
-                        while (true)
+                        minReceiveId = minId;
+                    }
+                    else if (oldest != null)
+                    {
+                        minReceiveId = oldest.getKey();
+                        if (nextReceiveId - oldest.getKey() > 16)
                         {
-                            WaitQueue.Signal signal = waitQueue.register();
-                            oldest = inFlight.firstEntry();
-                            if (oldest == null || nextReceiveId - oldest.getKey() <= 16)
+                            long waitUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100L);
+                            while (true)
                             {
-                                signal.cancel();
-                                return;
+                                WaitQueue.Signal signal = waitQueue.register();
+                                oldest = inFlight.firstEntry();
+                                if (oldest == null || nextReceiveId - oldest.getKey() <= 16)
+                                {
+                                    signal.cancel();
+                                    return;
+                                }
+                                if (!signal.awaitUntilUninterruptibly(waitUntil))
+                                {
+                                    synchronized (this)
+                                    {
+                                        Assert.fail(minId + " " + nextReceiveId + " " + maxId + " " +  inFlight.toString());
+                                    }
+                                }
                             }
-                            Assert.assertTrue(signal.awaitUntilUninterruptibly(waitUntil));
                         }
                     }
                 }
             }
 
+            final InboundMessageHandlers inbound;
             final PerChannel[] perChannels;
             final long minId;
 
-            PerConnection(long minId, OutboundConnections connections, MessageGenerators generators)
+            PerConnection(long minId, OutboundConnections connections, Inbound inbound, MessageGenerators generators)
             {
                 this.perChannels = new PerChannel[3];
+                this.inbound = inbound.handlers.get(connections.template().endpoint);
                 this.minId = minId;
                 long maxId = minId + messageIdsPerChannel;
                 int i = 0;
@@ -304,14 +325,14 @@ public class ConnectionBurnTest extends ConnectionTest
         {
             final PerConnection[] perConnections;
 
-            PerConnectionLookup(Collection<OutboundConnections> outbound, MessageGenerators generators)
+            PerConnectionLookup(Collection<OutboundConnections> outbound, Inbound inbound, MessageGenerators generators)
             {
                 this.perConnections = new PerConnection[outbound.size()];
                 long minId = 0;
                 int i = 0;
                 for (OutboundConnections connections : outbound)
                 {
-                    perConnections[i++] = new PerConnection(minId, connections, generators);
+                    perConnections[i++] = new PerConnection(minId, connections, inbound, generators);
                     minId += messageIdsPerConnection;
                 }
             }
@@ -413,6 +434,7 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withEndpointReserveLimit(1 << 20)
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
+//        test(inboundSettings, new OutboundConnectionSettings(null));
         test(inboundSettings, new OutboundConnectionSettings(null).withAcceptVersions(legacy));
     }
 

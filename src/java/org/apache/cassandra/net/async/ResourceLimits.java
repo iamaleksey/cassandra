@@ -118,7 +118,9 @@ public abstract class ResourceLimits
 
         public void release(long amount)
         {
-            usingUpdater.addAndGet(this, -amount);
+            assert amount >= 0;
+            long using = usingUpdater.addAndGet(this, -amount);
+            assert using >= 0;
         }
     }
 
@@ -158,6 +160,7 @@ public abstract class ResourceLimits
 
         public void release(long amount)
         {
+            assert amount >= 0 && amount <= using;
             using -= amount;
         }
     }

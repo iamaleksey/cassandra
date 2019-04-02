@@ -33,6 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -261,12 +262,12 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 10;
-            CountDownLatch received = new CountDownLatch(count);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
+            CountDownLatch done = new CountDownLatch(count);
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             Message<?> message = Message.out(Verb._TEST_1, noPayload);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            received.await(10L, SECONDS);
+            Assert.assertTrue(done.await(10, MINUTES));
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
@@ -289,7 +290,7 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 10;
-            CountDownLatch received = new CountDownLatch(count);
+            CountDownLatch done = new CountDownLatch(count);
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object noPayload, DataOutputPlus out, int version) throws IOException
@@ -307,13 +308,13 @@ public class ConnectionTest
                     return LARGE_MESSAGE_THRESHOLD + 1;
                 }
             });
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> received.countDown());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             Message<?> message = Message.builder(Verb._TEST_1, new Object())
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            received.await(10L, SECONDS);
+            Assert.assertTrue(done.await(10, SECONDS));
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
@@ -380,8 +381,7 @@ public class ConnectionTest
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> delivered.incrementAndGet());
             outbound.enqueue(message);
-            if (!done.await(10L, SECONDS))
-                throw new AssertionError();
+            Assert.assertTrue(done.await(10, SECONDS));
             Assert.assertEquals(0, delivered.get());
                  check(outbound).submitted( 1)
                                 .sent     ( 0,  0)
@@ -442,7 +442,7 @@ public class ConnectionTest
             unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            done.await(60L, SECONDS);
+            Assert.assertTrue(done.await(1, MINUTES));
             Assert.assertEquals(0, done.getCount());
             check(outbound).submitted(100)
                            .sent     ( 90, 90 * message.serializedSize(version))
@@ -486,7 +486,7 @@ public class ConnectionTest
             Uninterruptibles.sleepUninterruptibly(timeoutMillis * 2, TimeUnit.MILLISECONDS);
             enqueueDone.countDown();
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
-            deliveryDone.await(60L, SECONDS);
+            Assert.assertTrue(deliveryDone.await(1, MINUTES));
             Assert.assertEquals(1, delivered.get());
             check(outbound).submitted( 11)
                            .sent     (  1,  sentSize)
@@ -523,14 +523,13 @@ public class ConnectionTest
                                    .inbound(settings -> settings.withEncryption(null)
                                    ),
                  (inbound, outbound, endpoint) -> {
-                     CountDownLatch latch = new CountDownLatch(1);
+                     CountDownLatch done = new CountDownLatch(1);
                      unsafeSetHandler(Verb._TEST_1,
-                                      () -> (msg) -> latch.countDown());
+                                      () -> (msg) -> done.countDown());
 
                      Message<?> message = Message.out(Verb._TEST_1, noPayload);
                      outbound.enqueue(message);
-                     latch.await(10, SECONDS);
-                     Assert.assertEquals(0, latch.getCount());
+                     Assert.assertTrue(done.await(1, MINUTES));
                      Assert.assertTrue(outbound.isConnected());
                  });
         }
@@ -570,12 +569,12 @@ public class ConnectionTest
                                                     .build();
                         outbound.enqueue(message);
                         Assert.assertFalse(outbound.isConnected());
-                        Assert.assertEquals(1, outbound.queueSize());
+                        Assert.assertEquals(1, outbound.pendingCount());
                         CompletableFuture.runAsync(() -> {
-                            while (outbound.queueSize() > 0 && !Thread.interrupted()) {}
+                            while (outbound.pendingCount() > 0 && !Thread.interrupted()) {}
                         }).get(10, SECONDS);
                         // Message should have been purged
-                        Assert.assertEquals(0, outbound.queueSize());
+                        Assert.assertEquals(0, outbound.pendingCount());
                     }
                 }
                 catch (Throwable t)
@@ -589,13 +588,13 @@ public class ConnectionTest
             try
             {
                 inbound.open().sync();
-                CountDownLatch latch = new CountDownLatch(1);
-                unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+                CountDownLatch done = new CountDownLatch(1);
+                unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
                 outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
-                Assert.assertEquals(1, outbound.queueSize());
-                latch.await(10, SECONDS);
-                Assert.assertEquals(0, latch.getCount());
-                Assert.assertEquals(0, outbound.queueSize());
+                Assert.assertEquals(1, outbound.pendingCount());
+                Assert.assertTrue(done.await(10, SECONDS));
+                Assert.assertEquals(0, done.getCount());
+                Assert.assertEquals(0, outbound.pendingCount());
             }
             finally
             {
@@ -617,11 +616,11 @@ public class ConnectionTest
             try
             {
                 inbound.open().sync();
-                CountDownLatch latch = new CountDownLatch(1);
-                unsafeSetHandler(Verb._TEST_1, () -> msg -> latch.countDown());
+                CountDownLatch done = new CountDownLatch(1);
+                unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
                 outbound.enqueue(Message.out(Verb._TEST_1, noPayload));
-                latch.await(10, SECONDS);
-                Assert.assertEquals(latch.getCount(), 0);
+                Assert.assertTrue(done.await(10, SECONDS));
+                Assert.assertEquals(done.getCount(), 0);
 
                 // Simulate disconnect
                 inbound.close().get(10, SECONDS);
@@ -783,17 +782,14 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             ExecutorService executor = Executors.newFixedThreadPool(100);
             int acquireStep = 123;
-            AtomicLong acquisitions = new AtomicLong();
-            AtomicLong releases = new AtomicLong();
+            outbound.unsafeAcquireCapacity(100 * 10000, 100 * 10000 * acquireStep);
             AtomicLong acquisitionFailures = new AtomicLong();
             for (int i = 0; i < 100; i++)
             {
                 executor.submit(() -> {
                     for (int j = 0; j < 10000; j++)
                     {
-                        if (outbound.unsafeAcquireCapacity(acquireStep))
-                            acquisitions.incrementAndGet();
-                        else
+                        if (!outbound.unsafeAcquireCapacity(acquireStep))
                             acquisitionFailures.incrementAndGet();
                     }
 
@@ -804,11 +800,7 @@ public class ConnectionTest
             {
                 executor.submit(() -> {
                     for (int j = 0; j < 10000; j++)
-                    {
                         outbound.unsafeReleaseCapacity(acquireStep);
-                        releases.incrementAndGet();
-                    }
-
                 });
             }
 
@@ -817,7 +809,7 @@ public class ConnectionTest
 
             // We can release more than we acquire, which certainly should not happen in
             // real life, but since it's a test just for acquisition and release, it is fine
-            Assert.assertEquals(-1 * acquisitionFailures.get() * acquireStep, outbound.pendingBytes());
+            Assert.assertEquals(100 * 10000 * acquireStep - (acquisitionFailures.get() * acquireStep), outbound.pendingBytes());
         });
     }
 

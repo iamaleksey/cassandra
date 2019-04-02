@@ -54,6 +54,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
+import static java.lang.Math.max;
 import static java.lang.Math.min;
 
 /**
@@ -525,7 +526,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
             return outcome;
 
         long newQueueSize = queueSizeUpdater.addAndGet(this, bytes);
-        long actualExcess = min(newQueueSize - queueCapacity, bytes);
+        long actualExcess = max(0, min(newQueueSize - queueCapacity, bytes));
 
         if (actualExcess != allocatedExcess) // can be smaller if a release happened since
             ResourceLimits.release(endpointReserve, globalReserve, allocatedExcess - actualExcess);

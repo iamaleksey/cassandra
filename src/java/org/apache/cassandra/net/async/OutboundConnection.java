@@ -39,7 +39,6 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import io.netty.channel.unix.Errors;
 import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
@@ -79,9 +78,7 @@ import static org.apache.cassandra.net.async.ResourceLimits.Outcome.SUCCESS;
  * to ensure system stability.
  *
  * {@link Delivery#run()} is the main entry point for consuming messages from the queue, and executes either on the event
- * loop or on a non-dedicated companion thread.  This processing is activated via {@link Delivery#schedule()}, which
- * is in turn triggered by {@link #onNotEmpty()} (which is itself invoked by {@link #queue} when it becomes not empty).
- * {@link #onNotEmpty()} first ensures we are connected, then invokes {@link Delivery#schedule()} to begin processing messages.
+ * loop or on a non-dedicated companion thread.  This processing is activated via {@link Delivery#execute()}.
  *
  * Almost all internal state maintenance on this class occurs on the eventLoop, a single threaded executor which is
  * assigned in the constructor.  Further details are outlined below in the class.  Some behaviours require coordination
@@ -109,8 +106,8 @@ public class OutboundConnection
         public static Type fromId(int id) { return values[id]; }
     }
 
-    private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submitted");
-    private static final AtomicLongFieldUpdater<OutboundConnection> queueSizeInBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "queueSizeInBytes");
+    private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submittedCount");
+    private static final AtomicLongFieldUpdater<OutboundConnection> pendingCountAndBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "pendingCountAndBytes");
     private static final AtomicLongFieldUpdater<OutboundConnection> droppedDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadCount");
     private static final AtomicLongFieldUpdater<OutboundConnection> droppedBytesDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadBytes");
     private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> closingUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "closing");
@@ -121,14 +118,16 @@ public class OutboundConnection
 
     private final OutboundMessageQueue queue;
     /** the number of bytes we permit to queue to the network without acquiring any shared resource permits */
-    private final long queueCapacityInBytes;
-    /** the number of bytes queued for flush to the network, including those that are being flushed but have not been completed */
-    private volatile long queueSizeInBytes = 0;
+    private final long pendingCapacityInBytes;
+    /** the number of messages and bytes queued for flush to the network,
+     * including those that are being flushed but have not been completed,
+     * packed into a long (top 20 bits for count, bottom 42 for bytes)*/
+    private volatile long pendingCountAndBytes = 0;
     /** global shared limits that we use only if our local limits are exhausted;
      *  we allocate from here whenever queueSize > queueCapacity */
     private final ResourceLimits.EndpointAndGlobal reserveCapacityInBytes;
 
-    private volatile long submitted = 0;        // updated with cas
+    private volatile long submittedCount = 0;   // updated with cas
     private volatile long overloadCount = 0;    // updated with cas
     private volatile long overloadBytes = 0;    // updated with cas
     private long expiredCount = 0;              // updated with queue lock held
@@ -139,6 +138,27 @@ public class OutboundConnection
     private long sentBytes;                     // updated by delivery thread only
     private long successfulConnections;         // updated by event loop only
     private long failedConnectionAttempts;      // updated by event loop only
+
+    private static final int pendingByteBits = 42;
+    private static boolean isMaxPendingCount(long pendingCountAndBytes)
+    {
+        return (pendingCountAndBytes & (-1L << pendingByteBits)) == (-1L << pendingByteBits);
+    }
+
+    private static int pendingCount(long pendingCountAndBytes)
+    {
+        return (int) (pendingCountAndBytes >>> pendingByteBits);
+    }
+
+    private static long pendingBytes(long pendingCountAndBytes)
+    {
+        return pendingCountAndBytes & (-1L >>> (64 - pendingByteBits));
+    }
+
+    private static long pendingCountAndBytes(long pendingCount, long pendingBytes)
+    {
+        return (pendingCount << pendingByteBits) | pendingBytes;
+    }
 
     /*
      * The following four fields define our connection behaviour; the template contains the user-specified desired properties,
@@ -203,9 +223,9 @@ public class OutboundConnection
         this.settings = template.withDefaults(type, messagingVersion);
         this.type = type;
         this.eventLoop = NettyFactory.instance.defaultGroup().next();
-        this.queueCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
+        this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
-        this.queue = new OutboundMessageQueue(this::onTimeout, this::onNotEmpty);
+        this.queue = new OutboundMessageQueue(this::onTimeout);
         this.delivery = type == Type.LARGE_MESSAGE
                         ? new LargeMessageDelivery()
                         : new EventLoopDelivery();
@@ -235,15 +255,15 @@ public class OutboundConnection
                 return;
         }
 
-        // TODO: maybe extract onNotEmpty triggering to our size updater
         queue.add(message);
+        delivery.execute();
 
         // we might race with the channel closing; if this happens, to ensure this message eventually arrives
         // we need to remove ourselves from the queue and throw a ClosedChannelException, so that another channel
         // can be opened in our place to try and send on.
         if (isClosed() && queue.undoAdd(message))
         {
-            releaseCapacity(canonicalSize(message));
+            releaseCapacity(1, canonicalSize(message));
             throw new ClosedChannelException();
         }
     }
@@ -265,18 +285,29 @@ public class OutboundConnection
      *
      * In the happy path, this is still efficient as we simply CAS
      */
-    @VisibleForTesting
-    Outcome acquireCapacity(long amount)
+    private Outcome acquireCapacity(long bytes)
     {
+        return acquireCapacity(1, bytes);
+    }
+
+    private Outcome acquireCapacity(long count, long bytes)
+    {
+        long increment = pendingCountAndBytes(count, bytes);
         long unusedClaimedReserve = 0;
         Outcome outcome = null;
         loop: while (true)
         {
-            long currentQueueSize = queueSizeInBytes;
-            long newQueueSize = currentQueueSize + amount;
-            if (newQueueSize <= queueCapacityInBytes)
+            long current = pendingCountAndBytes;
+            if (isMaxPendingCount(current))
             {
-                if (queueSizeInBytesUpdater.compareAndSet(this, currentQueueSize, newQueueSize))
+                outcome = INSUFFICIENT_ENDPOINT;
+                break;
+            }
+
+            long next = current + increment;
+            if (pendingBytes(next) <= pendingCapacityInBytes)
+            {
+                if (pendingCountAndBytesUpdater.compareAndSet(this, current, next))
                 {
                     outcome = SUCCESS;
                     break;
@@ -290,7 +321,7 @@ public class OutboundConnection
                 break;
             }
 
-            long requiredReserve = min(amount, newQueueSize - queueCapacityInBytes);
+            long requiredReserve = min(bytes, pendingBytes(next) - pendingCapacityInBytes);
             if (unusedClaimedReserve < requiredReserve)
             {
                 long extraGlobalReserve = requiredReserve - unusedClaimedReserve;
@@ -304,7 +335,7 @@ public class OutboundConnection
                 }
             }
 
-            if (queueSizeInBytesUpdater.compareAndSet(this, currentQueueSize, newQueueSize))
+            if (pendingCountAndBytesUpdater.compareAndSet(this, current, next))
             {
                 unusedClaimedReserve -= requiredReserve;
                 break;
@@ -321,12 +352,13 @@ public class OutboundConnection
      * Mark a number of pending bytes as flushed to the network, releasing their capacity for new outbound messages.
      */
     @VisibleForTesting
-    void releaseCapacity(long amount)
+    void releaseCapacity(long count, long bytes)
     {
-        long prevQueueSize = queueSizeInBytesUpdater.getAndAdd(this, -amount);
-        if (prevQueueSize > queueCapacityInBytes)
+        long decrement = pendingCountAndBytes(count, bytes);
+        long prev = pendingCountAndBytesUpdater.getAndAdd(this, -decrement);
+        if (pendingBytes(prev) > pendingCapacityInBytes)
         {
-            long excess = min(prevQueueSize - queueCapacityInBytes, amount);
+            long excess = min(pendingBytes(prev) - pendingCapacityInBytes, bytes);
             reserveCapacityInBytes.release(excess);
         }
     }
@@ -341,7 +373,7 @@ public class OutboundConnection
         noSpamLogger.warn("{} overloaded; dropping {} message (queue: {} local, {} endpoint, {} global)",
                           id(),
                           FBUtilities.prettyPrintMemory(canonicalSize(msg)),
-                          FBUtilities.prettyPrintMemory(queueSizeInBytes),
+                          FBUtilities.prettyPrintMemory(pendingBytes()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
@@ -355,7 +387,7 @@ public class OutboundConnection
      */
     private boolean onTimeout(Message<?> msg)
     {
-        releaseCapacity(canonicalSize(msg));
+        releaseCapacity(1, canonicalSize(msg));
         expiredCount += 1;
         expiredBytes += canonicalSize(msg);
         noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), msg.verb);
@@ -371,7 +403,7 @@ public class OutboundConnection
     private boolean onError(Message<?> msg, Throwable t)
     {
         JVMStabilityInspector.inspectThrowable(t);
-        releaseCapacity(canonicalSize(msg));
+        releaseCapacity(1, canonicalSize(msg));
         errorCount += 1;
         errorBytes += canonicalSize(msg);
         logger.warn("{} dropping message of type {} due to error", id(), msg.verb, t);
@@ -386,17 +418,9 @@ public class OutboundConnection
      */
     private boolean onDiscardOnClosing(Message<?> msg)
     {
-        releaseCapacity(canonicalSize(msg));
+        releaseCapacity(1, canonicalSize(msg));
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
         return true;
-    }
-
-    /**
-     * Ensure that we are connected and the Delivery task is scheduled to run.
-     */
-    private void onNotEmpty()
-    {
-        delivery.schedule();
     }
 
     /**
@@ -408,14 +432,25 @@ public class OutboundConnection
      *    NOT to coincide with delivery for its duration, including any data that is being flushed (e.g. for closing channels)
      *      - this feature is *not* efficient, and should only be used for infrequent operations
      */
-    private abstract class Delivery implements Runnable
+    private abstract class Delivery extends AtomicInteger implements Runnable
     {
         final ExecutorService executor;
 
-        private static final int NOT_RUNNING = 0;
-        private static final int RUNNING     = 1;
-        private static final int RUN_AGAIN   = 2;
-        private final AtomicInteger scheduled = new AtomicInteger();
+        // the AtomicInteger we extend always contains some combination of these bit flags, representing our current run state
+
+        /** Not running, and will not be scheduled again until transitioned to a new state */
+        private static final int STOPPED               = 0;
+        /** Currently executing (may only be scheduled to execute, or may be about to terminate);
+         *  will stop at end of this run, without rescheduling */
+        private static final int EXECUTING             = 1;
+        /** Another execution has been requested; a new execution will begin some time after this state is taken */
+        private static final int EXECUTE_AGAIN         = 2;
+        /** We are currently executing and will submit another execution before we terminate */
+        private static final int EXECUTING_AGAIN       = EXECUTING | EXECUTE_AGAIN;
+        /** Will begin a new execution some time after this state is taken, but only once some condition is met.
+         *  This state will initially be taken in tandem with EXECUTING, but if delivery completes without clearing
+         *  the state, the condition will be held on its own until {@link #executeAgain} is invoked */
+        private static final int WAITING_TO_EXECUTE = 4;
 
         /**
          * Force all task execution to stop, once any currently in progress work is completed
@@ -431,7 +466,7 @@ public class OutboundConnection
          *
          * This should be updated and read only on the Delivery thread.
          */
-        private boolean inProgress;
+        private boolean inProgress = false;
 
         /**
          * Request a task's execution while there is no delivery work in progress.
@@ -447,25 +482,60 @@ public class OutboundConnection
         }
 
         /**
-         * Ensure that any messages that were queued prior to this invocation will be seen by at least
+         * Ensure that any messages or stopAndRun that were queued prior to this invocation will be seen by at least
          * one future invocation of the delivery task, unless delivery has already been terminated.
          */
-        public void schedule()
+        public void execute()
         {
-            if (NOT_RUNNING == scheduled.getAndUpdate(i -> min(RUN_AGAIN, i + 1)))
+            if (get() < EXECUTE_AGAIN && STOPPED == getAndUpdate(i -> i == STOPPED ? EXECUTING: i | EXECUTE_AGAIN))
+                executor.execute(this);
+        }
+
+        private boolean isExecuting(int state)
+        {
+            return 0 != (state & EXECUTING);
+        }
+
+        /**
+         * This method is typically invoked after WAITING_TO_EXECUTE is set.
+         *
+         * However WAITING_TO_EXECUTE does not need to be set; all this method needs to ensure is that
+         * delivery unconditionally performs one new execution promptly.
+         */
+        void executeAgain()
+        {
+            /**
+             * if we are already executing, set EXECUTING_AGAIN and leaves scheduling to the currently running one
+             * otherwise, set ourselves unconditionally to EXECUTING and schedule ourselves immediately
+             */
+            if (!isExecuting(getAndUpdate(i -> isExecuting(i) ? EXECUTING : EXECUTING_AGAIN)))
                 executor.execute(this);
         }
 
         /**
-         * Immediately clears any RUN_AGAIN flag, so this listener should only
-         * be created when the Future it is passed to is guaranteed to be completed.
-         *
-         * Returns a listener that will schedule delivery when it is completed, successfully or otherwise.
+         * Invoke this when we cannot make further progress now, but we guarantee that we will execute later when we can.
+         * This simply communicates to {@link #run} that we should not schedule ourselves again, just unset the EXECUTING bit.
          */
-        private <F extends Future<?>> GenericFutureListener<F> scheduleOnCompletion()
+        void promiseToExecuteLater()
         {
-            scheduled.updateAndGet(i -> min(RUNNING, i));
-            return f -> schedule();
+            set(EXECUTING | WAITING_TO_EXECUTE);
+        }
+
+        /**
+         * Called when exiting {@link #run} to schedule another run if necessary.
+         *
+         * If we are currently executing, we only reschedule if the present state is EXECUTING_AGAIN.
+         * If this is the case, we clear the EXECUTE_AGAIN bit (setting ourselves to EXECUTING), and reschedule.
+         * Otherwise, we clear the EXECUTING bit and terminate, which will set us to either STOPPED or WAITING_TO_EXECUTE
+         * (or possibly WAITING_TO_EXECUTE | EXECUTE_AGAIN, which is logically the same as WAITING_TO_EXECUTE)
+         */
+        private void maybeExecuteAgain()
+        {
+            /**
+             * If we are
+             */
+            if (EXECUTING_AGAIN == getAndUpdate(i -> i == EXECUTING_AGAIN ? EXECUTING : (i & ~EXECUTING)))
+                executor.execute(this);
         }
 
         /**
@@ -490,9 +560,10 @@ public class OutboundConnection
          */
         void setInProgress(boolean inProgress)
         {
+            boolean wasInProgress = this.inProgress;
             this.inProgress = inProgress;
-            if (!inProgress && null != stopAndRun.get())
-                schedule();
+            if (!inProgress && wasInProgress)
+                executeAgain();
         }
 
         /**
@@ -526,56 +597,47 @@ public class OutboundConnection
         /**
          * Perform some delivery work.
          *
-         * Must never be invoked directly, only via {@link #schedule}
+         * Must never be invoked directly, only via {@link #execute()}
          */
         public void run()
         {
-            /** try/finally to ensure we reschedule in face of exception */
-            try
+            /** do/while handling setup for {@link #doRun()}, and repeat invocations thereof */
+            do
             {
-                /** do/while handling immediate execution of a pending {@link #schedule()} that occurs before we exit */
-                do
+                if (terminated)
+                    return;
+
+                if (null != stopAndRun.get())
                 {
-                    /** do/while handling setup for {@link #doRun()}, and repeat invocations thereof */
-                    do
+                    // if we have an external request to perform, attempt it - if no async delivery is in progress
+
+                    if (inProgress)
                     {
-                        if (terminated)
-                            return;
-
-                        if (null != stopAndRun.get())
-                        {
-                            // if we have an external request to perform, attempt it if no async delivery in progress
-                            if (inProgress)
-                                break; // exit loop, but only return if no pending schedule()
-
-                            stopAndRun.getAndSet(null).run();
-                        }
-
-                        if (!isConnected())
-                        {
-                            // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
-                            // we try to reconnect before running another stopAndRun so that we do not infinite loop in close
-                            if (!queue.isEmpty() || null != stopAndRun.get())
-                            {
-                                // note that we depend on scheduleOnCompletion clearing RUN_AGAIN to avoid possible
-                                // infinite loops on self-rescheduling stopAndRun tasks during disconnect
-                                requestConnect().addListener(scheduleOnCompletion());
-                            }
-                            // exit the loop, but only return if no new pending schedule() - could include the one we just submitted
-                            break;
-                        }
+                        // if we are in progress, we cannot do anything;
+                        // so, exit and rely on setInProgress(false) executing us
+                        // (which must happen later, since it must happen on this thread)
+                        promiseToExecuteLater();
+                        break;
                     }
-                    while (doRun());
+
+                    stopAndRun.getAndSet(null).run();
                 }
-                while (RUN_AGAIN == scheduled.getAndDecrement());
+
+                if (!isConnected())
+                {
+                    // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
+                    // we try to reconnect before running another stopAndRun so that we do not infinite loop in close
+                    if (hasPending() || null != stopAndRun.get())
+                    {
+                        promiseToExecuteLater();
+                        requestConnect().addListener(f -> executeAgain());
+                    }
+                    break;
+                }
             }
-            catch (Throwable t)
-            {
-                // in case of unexpected untrapped exception, submit ourselves again immediately if still in RUNNING state
-                if (RUNNING <= scheduled.get())
-                    executor.execute(this);
-                throw t;
-            }
+            while (doRun());
+
+            maybeExecuteAgain();
         }
 
         /**
@@ -597,7 +659,7 @@ public class OutboundConnection
         void stopAndRun(Runnable run)
         {
             stopAndRun.accumulateAndGet(run, OutboundConnection::andThen);
-            schedule();
+            execute();
         }
 
         /**
@@ -643,11 +705,11 @@ public class OutboundConnection
             if (!isWritable)
                 return false;
 
-            // queueSizeInBytes is updated before queue.size() (which triggers notEmpty, and begins delivery),
+            // pendingBytes is updated before queue.size() (which triggers notEmpty, and begins delivery),
             // so it is safe to use it here to exit delivery
             // this number is inaccurate for old versions, but we don't mind terribly - we'll send at least one message,
             // and get round to it eventually (though we could add a fudge factor for some room for older versions)
-            int maxSendBytes = (int) min(queueSizeInBytes - flushingBytes, LARGE_MESSAGE_THRESHOLD);
+            int maxSendBytes = (int) min(pendingBytes() - flushingBytes, LARGE_MESSAGE_THRESHOLD);
             if (maxSendBytes == 0)
                 return false;
 
@@ -655,7 +717,7 @@ public class OutboundConnection
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
             int sendingBytes = 0;
             int sendingCount = 0;
-            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(System.nanoTime(), this::schedule))
+            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(System.nanoTime(), this::execute))
             {
                 if (withLock == null)
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
@@ -710,10 +772,10 @@ public class OutboundConnection
                     return false;
 
                 sending.finish();
-                ChannelFuture result = AsyncChannelPromise.writeAndFlush(channel, sending);
+                ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(channel, sending);
                 sending = null;
 
-                if (result.isSuccess())
+                if (flushResult.isSuccess())
                 {
                     sent += sendingCount;
                     sentBytes += sendingBytes;
@@ -725,15 +787,18 @@ public class OutboundConnection
 
                     boolean hasOverflowed = flushingBytes >= settings.flushHighWaterMark;
                     if (hasOverflowed)
+                    {
                         isWritable = false;
+                        promiseToExecuteLater();
+                    }
 
                     int releaseBytesFinal = canonicalSize;
                     int sendingBytesFinal = sendingBytes;
                     int sendingCountFinal = sendingCount;
                     Channel closeChannelOnFailure = channel;
-                    result.addListener(future -> {
+                    flushResult.addListener(future -> {
 
-                        releaseCapacity(releaseBytesFinal);
+                        releaseCapacity(sendingCountFinal, releaseBytesFinal);
                         flushingBytes -= releaseBytesFinal;
                         if (flushingBytes == 0)
                             setInProgress(false);
@@ -741,7 +806,7 @@ public class OutboundConnection
                         if (!isWritable && flushingBytes <= settings.flushLowWaterMark)
                         {
                             isWritable = true;
-                            schedule();
+                            executeAgain();
                         }
 
                         if (future.isSuccess())
@@ -768,13 +833,13 @@ public class OutboundConnection
             finally
             {
                 if (canonicalSize > 0)
-                    releaseCapacity(canonicalSize);
+                    releaseCapacity(sendingCount, canonicalSize);
 
                 if (sending != null)
                     sending.release();
 
-                if (!queue.isEmpty() && isWritable)
-                    schedule();
+                if (pendingBytes() > flushingBytes && isWritable)
+                    execute();
             }
 
             return false;
@@ -835,7 +900,7 @@ public class OutboundConnection
         @SuppressWarnings("resource")
         boolean doRun()
         {
-            Message<?> send = queue.tryPoll(System.nanoTime(), this::schedule);
+            Message<?> send = queue.tryPoll(System.nanoTime(), this::execute);
             if (send == null)
                 return false;
 
@@ -852,8 +917,8 @@ public class OutboundConnection
                 out.close();
                 sent += 1;
                 sentBytes += messageSize;
-                releaseCapacity(canonicalSize(send));
-                return queueSizeInBytes > 0;
+                releaseCapacity(1, canonicalSize(send));
+                return hasPending();
             }
             catch (Throwable t)
             {
@@ -920,7 +985,7 @@ public class OutboundConnection
 
             JVMStabilityInspector.inspectThrowable(cause);
             isFailingToConnect = true;
-            if (!queue.isEmpty())
+            if (hasPending())
                 connecting = eventLoop.schedule(this::attempt, max(100, retryRateMillis), MILLISECONDS);
             else
                 assert connecting == null;
@@ -1279,7 +1344,7 @@ public class OutboundConnection
          */
 
         Runnable clearQueue = () -> queue.runEventually(System.nanoTime(), withLock -> withLock.consume(this::onDiscardOnClosing));
-        
+
         if (flushQueue)
         {
             // just keep scheduling on delivery executor a check to see if we're done; there should always be one
@@ -1288,7 +1353,7 @@ public class OutboundConnection
             {
                 public void run()
                 {
-                    if (queue.isEmpty())
+                    if (!hasPending())
                         delivery.stopAndRunOnEventLoop(eventLoopCleanup);
                     else
                         delivery.stopAndRun(() -> {
@@ -1354,14 +1419,19 @@ public class OutboundConnection
         return id();
     }
 
+    public boolean hasPending()
+    {
+        return 0 != pendingCountAndBytes;
+    }
+
     public int pendingCount()
     {
-        return queue.size();
+        return pendingCount(pendingCountAndBytes);
     }
 
     public long pendingBytes()
     {
-        return queueSizeInBytes;
+        return pendingBytes(pendingCountAndBytes);
     }
 
     public long sentCount()
@@ -1379,7 +1449,7 @@ public class OutboundConnection
     public long submittedCount()
     {
         // not volatile, but shouldn't matter
-        return submitted;
+        return submittedCount;
     }
 
     public long dropped()
@@ -1455,7 +1525,7 @@ public class OutboundConnection
     @VisibleForTesting
     void unsafeAddToQueue(Message<?> msg)
     {
-        queueSizeInBytesUpdater.addAndGet(this, canonicalSize(msg));
+        pendingCountAndBytesUpdater.addAndGet(this, pendingCountAndBytes(1, canonicalSize(msg)));
         queue.unsafeAdd(msg);
     }
 
@@ -1463,12 +1533,6 @@ public class OutboundConnection
     int messagingVersion()
     {
         return messagingVersion;
-    }
-
-    @VisibleForTesting
-    int queueSize()
-    {
-        return queue.size();
     }
 
     @VisibleForTesting
@@ -1481,7 +1545,7 @@ public class OutboundConnection
     @VisibleForTesting
     void unsafeStartDelivery()
     {
-        delivery.schedule();
+        delivery.execute();
     }
 
     @VisibleForTesting
@@ -1523,9 +1587,15 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
+    boolean unsafeAcquireCapacity(long count, long amount)
+    {
+        return SUCCESS == acquireCapacity(count, amount);
+    }
+
+    @VisibleForTesting
     void unsafeReleaseCapacity(long amount)
     {
-        releaseCapacity(amount);
+        releaseCapacity(1, amount);
     }
 
 }

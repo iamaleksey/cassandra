@@ -23,6 +23,15 @@ import java.util.Collection;
 
 import net.nicoulaj.compilecommand.annotations.Inline;
 
+/**
+ * An abstract frame decoder for frames utilising a fixed length header of 8 bytes or smaller.
+ * Implements a generic frame decode method, that is backed by the four abstract methods
+ * (three of which simply decode and verify the header as a long).
+ *
+ * Implementors are expected to declare their implementation methods final, and an outer decode
+ * method implemented to invoke this class' {@link #decode}, so that it may be inlined with the
+ * abstract method implementations then inlined into it.
+ */
 abstract class FrameDecoderWith8bHeader extends FrameDecoder
 {
     /**
