@@ -73,9 +73,10 @@ import static org.apache.cassandra.net.async.ResourceLimits.Outcome.SUCCESS;
  * TODO: complete this description
  *
  * Aside from a few administrative methods, the main entry point to sending a message is {@link #enqueue(Message)}.
- * As a producer, any thread may send a message (which enqueues the message to {@link #queue}; but there is only
- * one consuming thread for processing the messages on it.  Other threads may temporarily take ownership of the queue
- * in order to perform book keeping, pruning, etc. to ensure system stability.
+ * Any thread may send a message (enqueueing it to {@link #queue}), but only one thread may consume messages from this
+ * queue.  There is a single delivery thread - either the event loop, or a companion thread - that has logical ownership
+ * of the queue, but other threads may temporarily take ownership in order to perform book keeping, pruning, etc.,
+ * to ensure system stability.
  *
  * {@link Delivery#run()} is the main entry point for consuming messages from the queue, and executes either on the event
  * loop or on a non-dedicated companion thread.  This processing is activated via {@link Delivery#schedule()}, which
@@ -231,8 +232,10 @@ public class OutboundConnection
                     break;
             case INSUFFICIENT_GLOBAL:
                 onOverload(message);
+                return;
         }
 
+        // TODO: maybe extract onNotEmpty triggering to our size updater
         queue.add(message);
 
         // we might race with the channel closing; if this happens, to ensure this message eventually arrives
@@ -642,6 +645,8 @@ public class OutboundConnection
 
             // queueSizeInBytes is updated before queue.size() (which triggers notEmpty, and begins delivery),
             // so it is safe to use it here to exit delivery
+            // this number is inaccurate for old versions, but we don't mind terribly - we'll send at least one message,
+            // and get round to it eventually (though we could add a fudge factor for some room for older versions)
             int maxSendBytes = (int) min(queueSizeInBytes - flushingBytes, LARGE_MESSAGE_THRESHOLD);
             if (maxSendBytes == 0)
                 return false;
@@ -715,7 +720,7 @@ public class OutboundConnection
                 }
                 else
                 {
-                    flushingBytes += sendingBytes;
+                    flushingBytes += canonicalSize;
                     setInProgress(true);
 
                     boolean hasOverflowed = flushingBytes >= settings.flushHighWaterMark;
@@ -729,7 +734,7 @@ public class OutboundConnection
                     result.addListener(future -> {
 
                         releaseCapacity(releaseBytesFinal);
-                        flushingBytes -= sendingBytesFinal;
+                        flushingBytes -= releaseBytesFinal;
                         if (flushingBytes == 0)
                             setInProgress(false);
 
@@ -1452,6 +1457,12 @@ public class OutboundConnection
     {
         queueSizeInBytesUpdater.addAndGet(this, canonicalSize(msg));
         queue.unsafeAdd(msg);
+    }
+
+    @VisibleForTesting
+    int messagingVersion()
+    {
+        return messagingVersion;
     }
 
     @VisibleForTesting

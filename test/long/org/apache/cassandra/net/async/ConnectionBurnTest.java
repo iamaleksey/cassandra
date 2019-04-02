@@ -16,25 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra;
+package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
-import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
-import java.util.BitSet;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
+import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -50,142 +47,22 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.ConnectionTest;
-import org.apache.cassandra.net.async.FutureCombiner;
-import org.apache.cassandra.net.async.InboundConnectionSettings;
-import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.InboundSockets;
-import org.apache.cassandra.net.async.MessageCallbacks;
-import org.apache.cassandra.net.async.OutboundConnection;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
-import org.apache.cassandra.net.async.OutboundConnections;
-import org.apache.cassandra.net.async.ResourceLimits;
+import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.concurrent.WaitQueue;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
 
 public class ConnectionBurnTest extends ConnectionTest
 {
-    private static class GlobalInboundSettings
-    {
-        final int queueCapacity;
-        final long endpointReserveLimit;
-        final long globalReserveLimit;
-        final InboundConnectionSettings template;
-
-        private GlobalInboundSettings()
-        {
-            this(0, 0, 0, null);
-        }
-
-        private GlobalInboundSettings(int queueCapacity, long endpointReserveLimit, long globalReserveLimit, InboundConnectionSettings template)
-        {
-            this.queueCapacity = queueCapacity;
-            this.endpointReserveLimit = endpointReserveLimit;
-            this.globalReserveLimit = globalReserveLimit;
-            this.template = template;
-        }
-
-        GlobalInboundSettings withQueueCapacity(int queueCapacity)
-        {
-            return new GlobalInboundSettings(queueCapacity, endpointReserveLimit, globalReserveLimit, template);
-        }
-        GlobalInboundSettings withEndpointReserveLimit(int endpointReserveLimit)
-        {
-            return new GlobalInboundSettings(queueCapacity, endpointReserveLimit, globalReserveLimit, template);
-        }
-        GlobalInboundSettings withGlobalReserveLimit(int globalReserveLimit)
-        {
-            return new GlobalInboundSettings(queueCapacity, endpointReserveLimit, globalReserveLimit, template);
-        }
-        GlobalInboundSettings withTemplate(InboundConnectionSettings template)
-        {
-            return new GlobalInboundSettings(queueCapacity, endpointReserveLimit, globalReserveLimit, template);
-        }
-    }
-
-    private static class Inbound
-    {
-        private final Map<InetAddressAndPort, InboundMessageHandlers> handlers;
-        private final InboundSockets sockets;
-
-        private Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<MessageCallbacks, MessageCallbacks> callbacks)
-        {
-            ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
-            InboundMessageHandler.WaitQueue globalWaitQueue = new InboundMessageHandler.WaitQueue(globalLimit);
-            Map<InetAddressAndPort, InboundMessageHandlers> handlers = new HashMap<>();
-            for (InetAddressAndPort endpoint : endpoints)
-                handlers.put(endpoint, new InboundMessageHandlers(endpoint, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, process, callbacks));
-            this.handlers = handlers;
-            InboundConnectionSettings template = settings.template.withHandlers(handlers::get);
-            this.sockets = new InboundSockets(endpoints.stream()
-                                                       .map(template::withBindAddress)
-                                                       .collect(Collectors.toList()));
-        }
-    }
-
     static Map<InetAddressAndPort, OutboundConnections> getOutbound(List<InetAddressAndPort> endpoints, OutboundConnectionSettings template)
     {
         Map<InetAddressAndPort, OutboundConnections> result = new HashMap<>();
         for (InetAddressAndPort endpoint : endpoints)
             result.put(endpoint, OutboundConnections.unsafeCreate(template.toEndpoint(endpoint), null));
         return result;
-    }
-
-    private static abstract class MessageGenerator
-    {
-        final long seed;
-        final Random random;
-
-        private MessageGenerator(long seed)
-        {
-            this.seed = seed;
-            this.random = new Random();
-        }
-
-        Message.Builder<Object> builder(long id)
-        {
-            random.setSeed(id ^ seed);
-            return Message.builder(Verb._TEST_2, null)
-                          .withExpiresAt(System.nanoTime() + TimeUnit.DAYS.toNanos(1L)); // don't expire for now
-        }
-        abstract Message<?> generate(long id);
-        abstract MessageGenerator copy();
-    }
-
-    private static final class UniformPayloadGenerator extends MessageGenerator
-    {
-        final int minSize;
-        final int maxSize;
-        final byte[] fillWithBytes;
-        private UniformPayloadGenerator(long seed, int minSize, int maxSize)
-        {
-            super(seed);
-            this.minSize = minSize;
-            this.maxSize = maxSize;
-            this.fillWithBytes = new byte[32];
-            random.setSeed(seed);
-            random.nextBytes(fillWithBytes);
-        }
-
-        Message<?> generate(long id)
-        {
-            Message.Builder<Object> builder = builder(id);
-            byte[] payload = new byte[minSize + random.nextInt(maxSize - minSize)];
-            ByteBuffer wrapped = ByteBuffer.wrap(payload);
-            while (wrapped.hasRemaining())
-                wrapped.put(fillWithBytes, 0, Math.min(fillWithBytes.length, wrapped.remaining()));
-            builder.withPayload(payload);
-            return builder.build();
-        }
-
-        MessageGenerator copy()
-        {
-            return new UniformPayloadGenerator(seed, minSize, maxSize);
-        }
     }
 
     private static final class MessageGenerators
@@ -241,6 +118,7 @@ public class ConnectionBurnTest extends ConnectionTest
 
         private static final int messageIdsPerChannel = 1 << 20;
         private static final int messageIdsPerConnection = messageIdsPerChannel * 4;
+        final int version;
         final List<InetAddressAndPort> endpoints;
         final Map<InetAddressAndPort, OutboundConnections> outbound;
         final Inbound inbound;
@@ -253,6 +131,7 @@ public class ConnectionBurnTest extends ConnectionTest
             this.outbound = getOutbound(endpoints, outboundTemplate);
             this.inbound = new Inbound(endpoints, inboundSettings, this, this::wrap);
             this.testRunners = new PerConnectionLookup(outbound.values(), messageGenerators);
+            this.version = outboundTemplate.acceptVersions.max;
         }
 
         public void run() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException
@@ -275,7 +154,7 @@ public class ConnectionBurnTest extends ConnectionTest
             }
         }
 
-        static class PerConnection
+        class PerConnection
         {
             class PerChannel implements MessageCallbacks, MessageProcessor
             {
@@ -288,7 +167,9 @@ public class ConnectionBurnTest extends ConnectionTest
 
                 private long nextSendId;
                 private long nextReceiveId;
-                private final BitSet missed = new BitSet();
+                private final ConcurrentSkipListMap<Long, Long> inFlight = new ConcurrentSkipListMap<>();
+                private final WaitQueue waitQueue = new WaitQueue();
+
                 PerChannel(Semaphore sendLimit, OutboundConnection outbound, MessageGenerator generator, long minId, long maxId)
                 {
                     this.sendLimit = sendLimit;
@@ -309,6 +190,7 @@ public class ConnectionBurnTest extends ConnectionTest
                     {
                         Message<?> msg = generator.generate(id).withId(id);
                         sendLimit.acquireUninterruptibly(msg.serializedSize(current_version));
+                        inFlight.put(id, (long) msg.serializedSize(version));
                         outbound.enqueue(msg);
                     }
                     catch (ClosedChannelException e)
@@ -318,12 +200,16 @@ public class ConnectionBurnTest extends ConnectionTest
                     }
                 }
 
-                public synchronized void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
+                public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
                 {
                     sendLimit.release(messageSize);
-                    Message<?> canon = corroborator.generate(message.id);
+                    Message<?> canon;
+                    synchronized (this)
+                    {
+                        canon = corroborator.generate(message.id);
+                    }
                     Assert.assertArrayEquals((byte[])canon.payload, (byte[]) message.payload);
-                    checkReceivedId(message.id);
+                    checkReceived(messageSize, message.id);
                     callbacks.onProcessed(messageSize);
                 }
 
@@ -343,6 +229,7 @@ public class ConnectionBurnTest extends ConnectionTest
 
                 public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
                 {
+                    System.out.println("Failed: " + id);
                     onFailed(messageSize, id);
                 }
 
@@ -351,27 +238,41 @@ public class ConnectionBurnTest extends ConnectionTest
                     sendLimit.release(messageSize);
                     Message<?> canon = corroborator.generate(id);
                     Assert.assertEquals(canon.serializedSize(current_version), messageSize);
-                    checkReceivedId(id);
+                    checkReceived(messageSize, id);
                 }
 
-                private synchronized void checkReceivedId(long id)
+                private void checkReceived(int messageSize, long id)
                 {
-                    if (id == nextReceiveId)
+                    Assert.assertEquals((long)inFlight.remove(id), (long)messageSize);
+
+                    Map.Entry<Long, Long> oldest;
+                    synchronized (this)
                     {
-                        ++nextReceiveId;
-                        return;
+                        if (id == nextReceiveId && nextReceiveId != maxId)
+                            ++nextReceiveId;
+                        else if (id == nextReceiveId)
+                            nextReceiveId = minId;
+                        else if (id - nextReceiveId < messageIdsPerChannel / 2)
+                            nextReceiveId = id + 1;
                     }
-                    if (id - nextReceiveId < messageIdsPerChannel / 2)
+
+                    waitQueue.signalAll();
+                    oldest = inFlight.firstEntry();
+                    if (oldest != null && nextReceiveId - oldest.getKey() > 16)
                     {
-                        while (nextReceiveId < id)
-                            missed.set((int) nextReceiveId++);
-                        nextReceiveId = id + 1;
+                        long waitUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100L);
+                        while (true)
+                        {
+                            WaitQueue.Signal signal = waitQueue.register();
+                            oldest = inFlight.firstEntry();
+                            if (oldest == null || nextReceiveId - oldest.getKey() <= 16)
+                            {
+                                signal.cancel();
+                                return;
+                            }
+                            Assert.assertTrue(signal.awaitUntilUninterruptibly(waitUntil));
+                        }
                     }
-                    else
-                    {
-                        missed.clear((int) (id - minId));
-                    }
-                    Assert.assertTrue("" + missed.cardinality(), missed.cardinality() < 16);
                 }
             }
 
@@ -399,7 +300,7 @@ public class ConnectionBurnTest extends ConnectionTest
             }
         }
 
-        static class PerConnectionLookup
+        class PerConnectionLookup
         {
             final PerConnection[] perConnections;
 
@@ -512,7 +413,7 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withEndpointReserveLimit(1 << 20)
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
-        test(inboundSettings, new OutboundConnectionSettings(null));
+        test(inboundSettings, new OutboundConnectionSettings(null).withAcceptVersions(legacy));
     }
 
 }

@@ -114,7 +114,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     }
 
     ByteBuffer stash;
-    private final Deque<Frame> frames = new ArrayDeque<>();
+    private final Deque<Frame> frames = new ArrayDeque<>(4);
     private boolean active = true;
     private ChannelHandlerContext ctx;
     private ChannelConfig config;
@@ -164,6 +164,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         if (msg instanceof BufferPoolAllocator.Wrapped)
         {
             buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
+            BufferPool.putUnusedPortion(buf, false); // netty will probably have mis-predicted the space needed
         }
         else
         {

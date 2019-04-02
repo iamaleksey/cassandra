@@ -45,6 +45,9 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
@@ -80,6 +83,8 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 
 public class ConnectionTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(ConnectionTest.class);
+
     private final Map<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> serializers = new HashMap<>();
     private final Map<Verb, Supplier<? extends IVerbHandler<?>>> handlers = new HashMap<>();
 
@@ -170,9 +175,9 @@ public class ConnectionTest
             .withRequireClientAuth(false)
             .withCipherSuites("TLS_RSA_WITH_AES_128_CBC_SHA");
 
-    private static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
+    static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
 
-    private static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
+    static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
         settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
                             .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
         settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
@@ -180,7 +185,7 @@ public class ConnectionTest
         settings -> settings.outbound(outbound -> outbound.withCompression(true))
     );
 
-    private static final List<Settings> SETTINGS = applyPowerSet(
+    static final List<Settings> SETTINGS = applyPowerSet(
         ImmutableList.of(Settings.SMALL, Settings.LARGE),
         MODIFIERS
     );
@@ -237,6 +242,7 @@ public class ConnectionTest
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundTemplate, reserveCapacityInBytes);
         try
         {
+            logger.info("Running {} {} -> {}", outbound.messagingVersion(), outbound.settings(), inboundSettings);
             test.accept(settings, inbound, outbound, endpoint);
         }
         finally
@@ -374,7 +380,8 @@ public class ConnectionTest
             });
             unsafeSetHandler(Verb._TEST_1, () -> msg -> delivered.incrementAndGet());
             outbound.enqueue(message);
-            done.await(10L, SECONDS);
+            if (!done.await(10L, SECONDS))
+                throw new AssertionError();
             Assert.assertEquals(0, delivered.get());
                  check(outbound).submitted( 1)
                                 .sent     ( 0,  0)

@@ -24,6 +24,7 @@ import java.util.Collection;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
@@ -42,22 +43,6 @@ class FrameDecoderLegacy extends FrameDecoder
         ByteBuffer in = newBytes.get();
         try
         {
-            if (remainingBytesInLargeMessage > 0)
-            {
-                if (remainingBytesInLargeMessage >= newBytes.readableBytes())
-                {
-                    remainingBytesInLargeMessage -= newBytes.readableBytes();
-                    into.add(new IntactFrame(false, newBytes.sliceAndConsume(newBytes.readableBytes())));
-                    return;
-                }
-                else
-                {
-                    Frame frame = new IntactFrame(false, newBytes.sliceAndConsume(remainingBytesInLargeMessage));
-                    remainingBytesInLargeMessage = 0;
-                    into.add(frame);
-                }
-            }
-
             if (stash != null)
             {
                 int length = Message.serializer.messageSize(stash, 0, stash.position(), messagingVersion);
@@ -79,24 +64,49 @@ class FrameDecoderLegacy extends FrameDecoder
                     }
                 }
 
-                if (length > stash.limit() && length <= LARGE_MESSAGE_THRESHOLD)
+                final boolean isSelfContained;
+                if (length <= LARGE_MESSAGE_THRESHOLD)
                 {
-                    stash = ensureCapacity(stash, length);
+                    isSelfContained = true;
+
+                    if (length > stash.capacity())
+                        stash = ensureCapacity(stash, length);
+
+                    stash.limit(length);
+                    BufferPool.putUnusedPortion(stash); // we may be overcapacity from earlier doubling
                     if (!copyToSize(in, stash, length))
                         return;
                 }
-
-                boolean isSelfContained = true;
-                if (length > LARGE_MESSAGE_THRESHOLD)
+                else
                 {
                     isSelfContained = false;
-                    remainingBytesInLargeMessage = length - stash.limit();
+                    remainingBytesInLargeMessage = length - stash.position();
+
+                    stash.limit(stash.position());
+                    BufferPool.putUnusedPortion(stash);
                 }
 
                 stash.flip();
+                assert !isSelfContained || stash.limit() == length;
                 SharedBytes stashed = SharedBytes.wrap(stash);
                 into.add(new IntactFrame(isSelfContained, stashed));
                 stash = null;
+            }
+
+            if (remainingBytesInLargeMessage > 0)
+            {
+                if (remainingBytesInLargeMessage >= newBytes.readableBytes())
+                {
+                    remainingBytesInLargeMessage -= newBytes.readableBytes();
+                    into.add(new IntactFrame(false, newBytes.sliceAndConsume(newBytes.readableBytes())));
+                    return;
+                }
+                else
+                {
+                    Frame frame = new IntactFrame(false, newBytes.sliceAndConsume(remainingBytesInLargeMessage));
+                    remainingBytesInLargeMessage = 0;
+                    into.add(frame);
+                }
             }
 
             int begin = in.position();
@@ -140,8 +150,9 @@ class FrameDecoderLegacy extends FrameDecoder
         }
         catch (Message.InvalidLegacyProtocolMagic e)
         {
-            discard();
+            e.printStackTrace();
             into.add(CorruptFrame.unrecoverable(e.read, Message.PROTOCOL_MAGIC));
+            discard();
         }
         finally
         {

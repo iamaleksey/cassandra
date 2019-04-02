@@ -790,7 +790,7 @@ public class Message<T>
             if (index > limit)
                 return -1;
 
-            int paramsSize = serializedParamsSizePre40(buf, index);
+            int paramsSize = serializedParamsSizePre40(buf, index, limit);
             if (paramsSize < 0)
                 return -1;
             index += paramsSize;
@@ -994,10 +994,9 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private int serializedParamsSizePre40(ByteBuffer buf, int readerIndex)
+        private int serializedParamsSizePre40(ByteBuffer buf, int readerIndex, int limit)
         {
             int index = readerIndex;
-            final int limit = buf.limit();
 
             index += 4;
             if (index > limit)
@@ -1015,6 +1014,7 @@ public class Message<T>
                 // try to read length and skip to the end of the param value
                 index += 4;
                 if (index > limit)
+                    return -1;
                 index += buf.getInt(index - 4);
             }
 
