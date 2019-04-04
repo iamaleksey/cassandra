@@ -115,7 +115,7 @@ public class ConnectionBurnTest extends ConnectionTest
 
     private static class Test implements MessageProcessor, MessageCallbacks
     {
-
+        private static final int reportIntervalPerChannel = 1 << 16;
         private static final int messageIdsPerChannel = 1 << 20;
         private static final int messageIdsPerConnection = messageIdsPerChannel * 4;
         final int version;
@@ -184,6 +184,9 @@ public class ConnectionBurnTest extends ConnectionTest
 
                 void sendOne()
                 {
+                    if (outbound.submittedCount() % reportIntervalPerChannel == 0)
+                        System.out.println(outbound + " : " + FBUtilities.prettyPrintMemory(outbound.sentBytes()));
+
                     long id = nextSendId++;
                     if (nextSendId == maxId)
                         nextSendId = minId;
