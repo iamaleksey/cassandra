@@ -21,6 +21,7 @@ package org.apache.cassandra.net.async;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.nio.channels.ClosedChannelException;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -95,6 +97,8 @@ public class OutboundConnection
     public enum Type
     {
         URGENT(0), LARGE_MESSAGE (1), SMALL_MESSAGE (2), STREAM (3);
+
+        public static final List<Type> MESSAGING = ImmutableList.of(URGENT, SMALL_MESSAGE, LARGE_MESSAGE);
 
         public final int id;
         Type(int id)
@@ -869,7 +873,7 @@ public class OutboundConnection
      */
     class LargeMessageDelivery extends Delivery
     {
-        private static final int DEFAULT_BUFFER_SIZE = 32 * 1024;
+        static final int DEFAULT_BUFFER_SIZE = 32 * 1024;
 
         LargeMessageDelivery()
         {
