@@ -30,14 +30,15 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
     /**
      * Exception thrown when closure was explicitly requested.
      */
-    static final class InputClosedException extends EOFException
-    {
-    }
+    private static final class InputClosedException extends EOFException {}
 
-    // EMPTY is used to signal AsyncMessagingInputPlus that it should close itself
-    private static final SharedBytes CLOSE_INPUT = SharedBytes.EMPTY;
+    // used to signal AsyncMessagingInputPlus that it should close itself
+    private static final SharedBytes CLOSE_INPUT = new SharedBytes.Empty();
 
     private final Queue<SharedBytes> queue;
+    // SpscUnboundedArrayQueue does not provide volatile write semantics, so we write to this instead
+    @SuppressWarnings("unused")
+    private volatile boolean writeBarrier;
 
     private final IntConsumer onReleased;
 
@@ -49,8 +50,8 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
 
     AsyncMessagingInputPlus(IntConsumer onReleased)
     {
-        super(SharedBytes.EMPTY.get());
-        this.current = SharedBytes.EMPTY;
+        super(SharedBytes.Empty.instance.get());
+        this.current = SharedBytes.Empty.instance;
         this.currentSize = 0;
 
         this.queue = new SpscUnboundedArrayQueue<>(16);
@@ -104,6 +105,7 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
             throw new IllegalStateException("Cannot supply a buffer to a closed AsyncMessagingInputPlus");
 
         queue.add(bytes);
+        writeBarrier = true;
         maybeUnpark();
     }
 
@@ -137,6 +139,7 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
             throw new IllegalStateException("Cannot close an already closed AsyncMessagingInputPlus");
 
         queue.add(CLOSE_INPUT);
+        writeBarrier = true;
         maybeUnpark();
     }
 

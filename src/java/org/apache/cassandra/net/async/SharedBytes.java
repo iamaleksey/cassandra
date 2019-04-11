@@ -30,12 +30,14 @@ import org.apache.cassandra.utils.memory.BufferPool;
  */
 class SharedBytes
 {
-    public static final SharedBytes EMPTY = new SharedBytes(ByteBufferUtil.EMPTY_BYTE_BUFFER)
+    public static final class Empty extends SharedBytes
     {
-        SharedBytes atomic() { return EMPTY; }
-        SharedBytes retain() { return EMPTY; }
+        public static final Empty instance = new Empty();
+        public Empty() { super(ByteBufferUtil.EMPTY_BYTE_BUFFER); }
+        SharedBytes atomic() { return this; }
+        SharedBytes retain() { return this; }
         void release() {}
-    };
+    }
 
     private final ByteBuffer bytes;
     private final SharedBytes owner;
