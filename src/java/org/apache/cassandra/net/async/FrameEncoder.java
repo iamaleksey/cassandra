@@ -30,12 +30,22 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
 {
+    /**
+     * An abstraction useful for transparently allocating buffers that can be written to upstream
+     * of the {@code FrameEncoder} without knowledge of the encoder's frame layout, while ensuring
+     * enough space to write the remainder of the frame's contents is reserved.
+     */
     static class Payload
     {
+        // isSelfContained is a flag in the Frame API, indicating if the contents consists of only complete messages
         private boolean isSelfContained;
+        // the buffer to write to
         final ByteBuffer buffer;
+        // the number of header bytes to reserve
         final int headerLength;
+        // the number of trailer bytes to reserve
         final int trailerLength;
+        // an API-misuse detector
         private boolean isFinished = false;
 
         Payload(boolean isSelfContained, int payloadCapacity)
