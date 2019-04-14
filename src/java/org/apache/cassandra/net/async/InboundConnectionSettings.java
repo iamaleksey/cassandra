@@ -43,6 +43,7 @@ public class InboundConnectionSettings
     public final Integer applicationReceiveQueueCapacityInBytes;
     public final AcceptVersions acceptMessaging;
     public final AcceptVersions acceptStreaming;
+    public final SocketFactory socketFactory;
     public final Function<InetAddressAndPort, InboundMessageHandlers> handlers;
 
     private InboundConnectionSettings(IInternodeAuthenticator authenticator,
@@ -51,7 +52,9 @@ public class InboundConnectionSettings
                                       Integer socketReceiveBufferSizeInBytes,
                                       Integer applicationReceiveQueueCapacityInBytes,
                                       AcceptVersions acceptMessaging,
-                                      AcceptVersions acceptStreaming, Function<InetAddressAndPort, InboundMessageHandlers> handlers)
+                                      AcceptVersions acceptStreaming,
+                                      SocketFactory socketFactory,
+                                      Function<InetAddressAndPort, InboundMessageHandlers> handlers)
     {
         this.authenticator = authenticator;
         this.bindAddress = bindAddress;
@@ -60,12 +63,13 @@ public class InboundConnectionSettings
         this.applicationReceiveQueueCapacityInBytes = applicationReceiveQueueCapacityInBytes;
         this.acceptMessaging = acceptMessaging;
         this.acceptStreaming = acceptStreaming;
+        this.socketFactory = socketFactory;
         this.handlers = handlers;
     }
 
     public InboundConnectionSettings()
     {
-        this(null, null, null, null, null, null, null, null);
+        this(null, null, null, null, null, null, null, null, null);
     }
 
     public boolean authenticate(InetAddressAndPort endpoint)
@@ -81,14 +85,14 @@ public class InboundConnectionSettings
     public String toString()
     {
         return format("address: (%s), nic: %s, encryption: %s",
-                             bindAddress, FBUtilities.getNetworkInterface(bindAddress.address), NettyFactory.encryptionLogStatement(encryption));
+                      bindAddress, FBUtilities.getNetworkInterface(bindAddress.address), SocketFactory.encryptionLogStatement(encryption));
     }
 
     public InboundConnectionSettings withAuthenticator(IInternodeAuthenticator authenticator)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     @SuppressWarnings("unused")
@@ -96,21 +100,21 @@ public class InboundConnectionSettings
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withEncryption(ServerEncryptionOptions encryption)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withSocketReceiveBufferSizeInBytes(int socketReceiveBufferSizeInBytes)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     @SuppressWarnings("unused")
@@ -118,28 +122,35 @@ public class InboundConnectionSettings
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withAcceptMessaging(AcceptVersions acceptMessaging)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptMessaging, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withAcceptStreaming(AcceptVersions acceptMessaging)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptStreaming, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
+    }
+
+    public InboundConnectionSettings withSocketFactory(SocketFactory socketFactory)
+    {
+        return new InboundConnectionSettings(authenticator, bindAddress, encryption,
+                                             socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withHandlers(Function<InetAddressAndPort, InboundMessageHandlers> handlers)
     {
         return new InboundConnectionSettings(authenticator, bindAddress, encryption,
                                              socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes,
-                                             acceptStreaming, acceptStreaming, handlers);
+                                             acceptMessaging, acceptStreaming, socketFactory, handlers);
     }
 
     public InboundConnectionSettings withLegacyDefaults()
@@ -168,6 +179,7 @@ public class InboundConnectionSettings
         Integer applicationReceiveQueueCapacityInBytes = this.applicationReceiveQueueCapacityInBytes;
         AcceptVersions acceptMessaging = this.acceptMessaging;
         AcceptVersions acceptStreaming = this.acceptStreaming;
+        SocketFactory socketFactory = this.socketFactory;
         Function<InetAddressAndPort, InboundMessageHandlers> handlersFactory = this.handlers;
 
         if (authenticator == null)
@@ -188,12 +200,15 @@ public class InboundConnectionSettings
         if (acceptStreaming == null)
             acceptStreaming = accept_streaming;
 
+        if (socketFactory == null)
+            socketFactory = instance().socketFactory;
+
         if (handlersFactory == null)
             handlersFactory = MessagingService.instance()::getInbound;
 
         Preconditions.checkArgument(socketReceiveBufferSizeInBytes == 0 || socketReceiveBufferSizeInBytes >= 1 << 10, "illegal socket send buffer size: " + socketReceiveBufferSizeInBytes);
         Preconditions.checkArgument(applicationReceiveQueueCapacityInBytes >= 1 << 10, "illegal application receive queue capacity: " + applicationReceiveQueueCapacityInBytes);
 
-        return new InboundConnectionSettings(authenticator, bindAddress, encryption, socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes, acceptMessaging, acceptStreaming, handlersFactory);
+        return new InboundConnectionSettings(authenticator, bindAddress, encryption, socketReceiveBufferSizeInBytes, applicationReceiveQueueCapacityInBytes, acceptMessaging, acceptStreaming, socketFactory, handlersFactory);
     }
 }

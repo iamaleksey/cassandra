@@ -52,7 +52,6 @@ import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.async.StreamingInboundHandler;
-import org.apache.cassandra.utils.CoalescingStrategies;
 
 import static java.lang.Math.*;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
@@ -60,8 +59,8 @@ import static org.apache.cassandra.net.MessagingService.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
-import static org.apache.cassandra.net.async.NettyFactory.WIRETRACE;
-import static org.apache.cassandra.net.async.NettyFactory.newSslHandler;
+import static org.apache.cassandra.net.async.SocketFactory.WIRETRACE;
+import static org.apache.cassandra.net.async.SocketFactory.newSslHandler;
 
 public class InboundConnectionInitiator
 {
@@ -122,9 +121,10 @@ public class InboundConnectionInitiator
     {
         logger.info("Listening on {}", initializer.settings);
 
-        ServerBootstrap bootstrap = NettyFactory.instance.newServerBootstrap()
-                                                         .option(ChannelOption.SO_BACKLOG, 1 << 9)
-                                                         .childHandler(initializer);
+        ServerBootstrap bootstrap = initializer.settings.socketFactory
+                                    .newServerBootstrap()
+                                    .option(ChannelOption.SO_BACKLOG, 1 << 9)
+                                    .childHandler(initializer);
 
         int socketReceiveBufferSizeInBytes = initializer.settings.socketReceiveBufferSizeInBytes;
         if (socketReceiveBufferSizeInBytes > 0)
@@ -416,10 +416,13 @@ public class InboundConnectionInitiator
             frameDecoder.addLastTo(pipeline);
 
             logger.info("connection established from {}, version = {}, compress = {}, encryption = {}", from, useMessagingVersion, initiate.withCompression,
-                        NettyFactory.encryptionLogStatement(settings.encryption));
+                        SocketFactory.encryptionLogStatement(settings.encryption));
 
             InboundMessageHandler handler =
-                settings.handlers.apply(from).createHandler(frameDecoder, pipeline.channel(), useMessagingVersion);
+                settings.handlers.apply(from).createHandler(frameDecoder,
+                                                            settings.socketFactory.synchronousWorkExecutor,
+                                                            pipeline.channel(),
+                                                            useMessagingVersion);
             pipeline.addLast("deserialize", handler);
 
             pipeline.remove(this);

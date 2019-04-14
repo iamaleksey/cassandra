@@ -61,7 +61,7 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.NettyFactory.isConnectionResetException;
+import static org.apache.cassandra.net.async.SocketFactory.isConnectionResetException;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateMessaging;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 import static org.apache.cassandra.net.async.ResourceLimits.Outcome.INSUFFICIENT_ENDPOINT;
@@ -226,7 +226,7 @@ public class OutboundConnection
         this.template = template;
         this.settings = template.withDefaults(type, messagingVersion);
         this.type = type;
-        this.eventLoop = NettyFactory.instance.defaultGroup().next();
+        this.eventLoop = settings.socketFactory.defaultGroup().next();
         this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
         this.queue = new OutboundMessageQueue(this::onTimeout);
@@ -877,7 +877,7 @@ public class OutboundConnection
 
         LargeMessageDelivery()
         {
-            super(NettyFactory.instance.synchronousWorkExecutor);
+            super(settings.socketFactory.synchronousWorkExecutor);
         }
 
         /**
@@ -1042,7 +1042,7 @@ public class OutboundConnection
 
                     logger.info("{} successfully connected, version = {}, compress = {}, coalescing = {}, encryption = {}", id(), messagingVersion, settings.withCompression,
                                      settings.coalescingStrategy != null ? settings.coalescingStrategy : CoalescingStrategies.Strategy.DISABLED,
-                                     NettyFactory.encryptionLogStatement(settings.encryption));
+                                SocketFactory.encryptionLogStatement(settings.encryption));
                     break;
 
                 case RETRY:
@@ -1579,7 +1579,7 @@ public class OutboundConnection
     @VisibleForTesting
     void unsafeSetClosed(boolean closed)
     {
-        closingUpdater.set(this, closed ? NettyFactory.instance.defaultGroup().next().newSucceededFuture(null) : null);
+        closingUpdater.set(this, closed ? eventLoop.newSucceededFuture(null) : null);
         this.isConnected = false;
         this.isClosed = true;
     }

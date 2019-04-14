@@ -20,10 +20,12 @@ package org.apache.cassandra.net;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -51,13 +53,14 @@ import org.apache.cassandra.net.async.MessageCallbacks;
 import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
-import org.apache.cassandra.net.async.NettyFactory;
+import org.apache.cassandra.net.async.SocketFactory;
 import org.apache.cassandra.net.async.ResourceLimits;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -108,11 +111,14 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
 
+    public final SocketFactory socketFactory = new SocketFactory();
     public final MessagingMetrics metrics = new MessagingMetrics();
     public final LatencySubscribers latency = new LatencySubscribers();
     public final MessageSink messageSink = new MessageSink();
     public final Callbacks callbacks = new Callbacks(this);
-    public final InboundSockets inbound = new InboundSockets(new InboundConnectionSettings().withHandlers(this::getInbound));
+    public final InboundSockets inbound = new InboundSockets(new InboundConnectionSettings()
+                                                             .withHandlers(this::getInbound)
+                                                             .withSocketFactory(socketFactory));
     public final ResourceLimits.Limit reserveSendQueueGlobalLimitInBytes =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
@@ -403,7 +409,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         shutdown(1L, MINUTES, true, true);
     }
 
-    public void shutdown(long timeout, TimeUnit units, boolean shutdownGracefully, boolean shutdownNetty)
+    public void shutdown(long timeout, TimeUnit units, boolean shutdownGracefully, boolean shutdownExecutors)
     {
         isShuttingDown = true;
         logger.info("Waiting for messaging service to quiesce");
@@ -421,11 +427,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
                       () -> inbound.close().get(),
                       () -> {
-                          if (shutdownNetty)
-                          {
-                              NettyFactory.instance.shutdownNow();
-                              NettyFactory.instance.awaitTerminationUntil(deadline);
-                          }
+                          if (shutdownExecutors)
+                              shutdownExecutors(deadline);
                       },
                       messageSink::clear);
         }
@@ -440,14 +443,17 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             long deadline = System.nanoTime() + units.toNanos(timeout);
             maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
                       () -> {
-                          if (shutdownNetty)
-                          {
-                              NettyFactory.instance.shutdownNow();
-                              NettyFactory.instance.awaitTerminationUntil(deadline);
-                          }
+                          if (shutdownExecutors)
+                              shutdownExecutors(deadline);
                       },
                       messageSink::clear);
         }
+    }
+
+    private void shutdownExecutors(long deadlineNanos) throws TimeoutException, InterruptedException
+    {
+        socketFactory.shutdownNow();
+        socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
     public void process(Message message, int messageSize, MessageCallbacks callbacks)

@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.net.async;
 
-import org.junit.AfterClass;
+import org.junit.After;
 import org.junit.Test;
 
 import io.netty.util.concurrent.ImmediateEventExecutor;
@@ -25,8 +25,8 @@ import io.netty.util.concurrent.Promise;
 
 public class AsyncPromiseTest extends TestAbstractAsyncPromise
 {
-    @AfterClass
-    public static void shutdown()
+    @After
+    public void shutdown()
     {
         exec.shutdownNow();
     }

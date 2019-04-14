@@ -2,33 +2,26 @@ package org.apache.cassandra.net.async;
 
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
-import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.zip.CRC32;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
 
 import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.ServerChannel;
+import io.netty.channel.SingleThreadEventLoop;
 import io.netty.channel.epoll.EpollChannelOption;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
@@ -37,40 +30,35 @@ import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.channel.unix.Errors;
-import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import io.netty.util.concurrent.EventExecutor;
-import io.netty.util.concurrent.FastThreadLocal;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
-import net.jpountz.lz4.LZ4Factory;
-import net.jpountz.xxhash.XXHashFactory;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.service.NativeTransportService;
+import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
-import static com.google.common.collect.Iterables.*;
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
-import static java.util.Collections.*;
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
-import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 /**
  * A factory for building Netty {@link Channel}s. Channels here are setup with a pipeline to participate
  * in the internode protocol handshake, either the inbound or outbound side as per the method invoked.
  */
-public final class NettyFactory
+public final class SocketFactory
 {
-    private static final Logger logger = LoggerFactory.getLogger(NettyFactory.class);
+    private static final Logger logger = LoggerFactory.getLogger(SocketFactory.class);
 
     private static final int EVENT_THREADS = Integer.getInteger(Config.PROPERTY_PREFIX + "internode-event-threads", FBUtilities.getAvailableProcessors());
+
+    public enum Provider { EPOLL, NIO }
+    public static final Provider DEFAULT_PROVIDER = NativeTransportService.useEpoll() ? Provider.EPOLL : Provider.NIO;
 
     /** a useful addition for debugging; simply set to true to get more data in your logs */
     static final boolean WIRETRACE = false;
@@ -80,74 +68,94 @@ public final class NettyFactory
             InternalLoggerFactory.setDefaultFactory(Slf4JLoggerFactory.INSTANCE);
     }
 
-    public static final boolean USE_EPOLL = NativeTransportService.useEpoll();
-
-    /**
-     * A factory instance that all normal, runtime code should use. Separate instances should only be used for testing.
-     */
-    public static final NettyFactory instance = new NettyFactory(USE_EPOLL);
-
-    private final boolean useEpoll;
-
     private final EventLoopGroup acceptGroup;
     private final EventLoopGroup defaultGroup;
     // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
     private final EventLoopGroup outboundStreamingGroup;
-    final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("MessagingService-SynchronousWork"));
+    public final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("MessagingService-SynchronousWork"));
 
-    /**
-     * Constructor that allows modifying the {@link NettyFactory#useEpoll} for testing purposes. Otherwise, use the
-     * default {@link #instance}.
-     */
-    private NettyFactory(boolean useEpoll)
+    public SocketFactory() { this(DEFAULT_PROVIDER); }
+    public SocketFactory(Provider provider)
     {
-        this.useEpoll = useEpoll;
-        this.acceptGroup = getEventLoopGroup(useEpoll, 1, "Messaging-AcceptLoop");
-        this.defaultGroup = getEventLoopGroup(useEpoll, EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
-        this.outboundStreamingGroup = getEventLoopGroup(useEpoll, EVENT_THREADS, "Streaming-EventLoop");
+        this.acceptGroup = getEventLoopGroup(provider, 1, "Messaging-AcceptLoop");
+        this.defaultGroup = getEventLoopGroup(provider, EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
+        this.outboundStreamingGroup = getEventLoopGroup(provider, EVENT_THREADS, "Streaming-EventLoop");
+        assert    provider == providerOf(acceptGroup)
+               && provider == providerOf(defaultGroup)
+               && provider == providerOf(outboundStreamingGroup);
     }
 
-    private static EventLoopGroup getEventLoopGroup(boolean useEpoll, int threadCount, String threadNamePrefix)
+    private static EventLoopGroup getEventLoopGroup(Provider provider, int threadCount, String threadNamePrefix)
     {
-        if (useEpoll)
+        switch (provider)
         {
-            logger.debug("using netty epoll event loop for pool prefix {}", threadNamePrefix);
-            return new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
+            case EPOLL:
+                logger.debug("using netty epoll event loop for pool prefix {}", threadNamePrefix);
+                return new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
+            case NIO:
+                logger.debug("using netty nio event loop for pool prefix {}", threadNamePrefix);
+                return new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
+            default:
+                throw new IllegalStateException();
         }
-
-        logger.debug("using netty nio event loop for pool prefix {}", threadNamePrefix);
-        return new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
     }
 
-    Bootstrap newBootstrap(EventLoop eventLoop, int tcpUserTimeoutInMS)
+    static Provider providerOf(EventLoopGroup eventLoopGroup)
+    {
+        while (eventLoopGroup instanceof SingleThreadEventLoop)
+            eventLoopGroup = ((SingleThreadEventLoop) eventLoopGroup).parent();
+
+        if (eventLoopGroup instanceof EpollEventLoopGroup)
+            return Provider.EPOLL;
+        if (eventLoopGroup instanceof NioEventLoopGroup)
+            return Provider.NIO;
+        throw new IllegalStateException();
+    }
+
+    static Bootstrap newBootstrap(EventLoop eventLoop, int tcpUserTimeoutInMS)
     {
         if (eventLoop == null)
             throw new IllegalArgumentException("must provide eventLoop");
 
-        Class<? extends Channel> transport = useEpoll ? EpollSocketChannel.class
-                                                      : NioSocketChannel.class;
-
         Bootstrap bootstrap = new Bootstrap()
                               .group(eventLoop)
-                              .channel(transport)
                               .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
                               .option(ChannelOption.SO_KEEPALIVE, true);
-        if (useEpoll)
-            bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, tcpUserTimeoutInMS);
 
+        switch (providerOf(eventLoop))
+        {
+            case EPOLL:
+                bootstrap.channel(EpollSocketChannel.class);
+                bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, tcpUserTimeoutInMS);
+                break;
+            case NIO:
+                bootstrap.channel(NioSocketChannel.class);
+        }
         return bootstrap;
     }
 
     ServerBootstrap newServerBootstrap()
     {
-        Class<? extends ServerChannel> transport = useEpoll ? EpollServerSocketChannel.class
-                                                            : NioServerSocketChannel.class;
+        return newServerBootstrap(acceptGroup, defaultGroup);
+    }
 
-        return new ServerBootstrap()
+    static ServerBootstrap newServerBootstrap(EventLoopGroup acceptGroup, EventLoopGroup defaultGroup)
+    {
+        ServerBootstrap bootstrap = new ServerBootstrap()
                .group(acceptGroup, defaultGroup)
-               .channel(transport)
                .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
                .option(ChannelOption.SO_REUSEADDR, true);
+
+        switch (providerOf(defaultGroup))
+        {
+            case EPOLL:
+               bootstrap.channel(EpollServerSocketChannel.class);
+               break;
+            case NIO:
+               bootstrap.channel(NioServerSocketChannel.class);
+        }
+
+        return bootstrap;
     }
 
     /**
@@ -196,18 +204,13 @@ public final class NettyFactory
         acceptGroup.shutdownGracefully(0, 2, SECONDS);
         defaultGroup.shutdownGracefully(0, 2, SECONDS);
         outboundStreamingGroup.shutdownGracefully(0, 2, SECONDS);
-        synchronousWorkExecutor.shutdown();
+        synchronousWorkExecutor.shutdownNow();
     }
 
     public void awaitTerminationUntil(long deadlineNanos) throws InterruptedException, TimeoutException
     {
         List<ExecutorService> groups = ImmutableList.of(acceptGroup, defaultGroup, outboundStreamingGroup, synchronousWorkExecutor);
-        for (ExecutorService executor : concat(groups, singleton(synchronousWorkExecutor)))
-        {
-            long wait = deadlineNanos - System.nanoTime();
-            if (wait <= 0 || !executor.awaitTermination(wait, NANOSECONDS))
-                throw new TimeoutException();
-        }
+        ExecutorUtils.awaitTerminationUntil(deadlineNanos, groups);
     }
 
     public static boolean isConnectionResetException(Throwable t)

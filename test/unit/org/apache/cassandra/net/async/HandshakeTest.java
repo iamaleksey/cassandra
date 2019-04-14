@@ -45,6 +45,8 @@ import static org.apache.cassandra.net.async.OutboundConnectionInitiator.*;
 // TODO: test failure due to exception, timeout, etc
 public class HandshakeTest
 {
+    private static final SocketFactory factory = new SocketFactory();
+
     @BeforeClass
     public static void startup()
     {
@@ -54,7 +56,7 @@ public class HandshakeTest
     @AfterClass
     public static void cleanup() throws InterruptedException
     {
-        NettyFactory.instance.shutdownNow();
+        factory.shutdownNow();
     }
 
     private Result handshake(int req, int outMin, int outMax) throws ExecutionException, InterruptedException
@@ -73,12 +75,12 @@ public class HandshakeTest
             inbound.open();
             InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
             Future<Result<MessagingSuccess>> future =
-            initiateMessaging(NettyFactory.instance.defaultGroup().next(),
-                                                 SMALL_MESSAGE,
-                                                 new OutboundConnectionSettings(endpoint)
+            initiateMessaging(factory.defaultGroup().next(),
+                              SMALL_MESSAGE,
+                              new OutboundConnectionSettings(endpoint)
                                                     .withAcceptVersions(acceptOutbound)
                                                     .withDefaults(SMALL_MESSAGE, req),
-                                                 req);
+                              req);
             return future.get();
         }
         finally

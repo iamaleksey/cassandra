@@ -33,7 +33,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.LockSupport;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -69,7 +68,6 @@ import org.apache.cassandra.net.MessagingService.AcceptVersions;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Pair;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.SECONDS;
@@ -85,6 +83,7 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 public class ConnectionTest
 {
     private static final Logger logger = LoggerFactory.getLogger(ConnectionTest.class);
+    private static final SocketFactory factory = new SocketFactory();
 
     private final Map<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> serializers = new HashMap<>();
     private final Map<Verb, Supplier<? extends IVerbHandler<?>>> handlers = new HashMap<>();
@@ -117,7 +116,7 @@ public class ConnectionTest
     @AfterClass
     public static void cleanup() throws InterruptedException
     {
-        NettyFactory.instance.shutdownNow();
+        factory.shutdownNow();
     }
 
     interface SendTest
@@ -235,10 +234,12 @@ public class ConnectionTest
     {
         InetAddressAndPort endpoint = FBUtilities.getBroadcastAddressAndPort();
         InboundConnectionSettings inboundSettings = settings.inbound.apply(new InboundConnectionSettings())
-                                                                    .withBindAddress(endpoint);
+                                                                    .withBindAddress(endpoint)
+                                                                    .withSocketFactory(factory);
         InboundSockets inbound = new InboundSockets(Collections.singletonList(inboundSettings));
         OutboundConnectionSettings outboundTemplate = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
-                                                                       .withDefaultReserveLimits();
+                                                                       .withDefaultReserveLimits()
+                                                                       .withSocketFactory(factory);
         ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundTemplate.applicationReserveSendQueueEndpointCapacityInBytes), outboundTemplate.applicationReserveSendQueueGlobalCapacityInBytes);
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundTemplate, reserveCapacityInBytes);
         try

@@ -40,12 +40,14 @@ import java.util.stream.IntStream;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
@@ -410,7 +412,7 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
         test(inboundSettings, new OutboundConnectionSettings(null));
-        NettyFactory.instance.shutdownNow();
+        MessagingService.instance().socketFactory.shutdownNow();
 //        test(inboundSettings, new OutboundConnectionSettings(null).withAcceptVersions(legacy));
     }
 

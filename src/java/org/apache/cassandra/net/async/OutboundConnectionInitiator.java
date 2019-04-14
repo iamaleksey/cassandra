@@ -62,14 +62,13 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.async.HandshakeProtocol.*;
-import static org.apache.cassandra.net.async.NettyFactory.*;
-import static org.apache.cassandra.net.async.NettyFactory.newSslHandler;
+import static org.apache.cassandra.net.async.SocketFactory.*;
+import static org.apache.cassandra.net.async.SocketFactory.newSslHandler;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.incompatible;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.messagingSuccess;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.retry;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.streamingSuccess;
-import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
 /**
  * A {@link ChannelHandler} to execute the send-side of the internode handshake protocol.
@@ -170,13 +169,13 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      */
     private Bootstrap createBootstrap(EventLoop eventLoop)
     {
-        Bootstrap bootstrap = instance.newBootstrap(eventLoop, settings.tcpUserTimeoutInMS)
-                              .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, settings.tcpConnectTimeoutInMS)
-                              .option(ChannelOption.SO_KEEPALIVE, true)
-                              .option(ChannelOption.SO_REUSEADDR, true)
-                              .option(ChannelOption.TCP_NODELAY, settings.tcpNoDelay)
-                              .option(ChannelOption.MESSAGE_SIZE_ESTIMATOR, NoSizeEstimator.instance)
-                              .handler(new Initializer());
+        Bootstrap bootstrap = SocketFactory.newBootstrap(eventLoop, settings.tcpUserTimeoutInMS)
+                                           .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, settings.tcpConnectTimeoutInMS)
+                                           .option(ChannelOption.SO_KEEPALIVE, true)
+                                           .option(ChannelOption.SO_REUSEADDR, true)
+                                           .option(ChannelOption.TCP_NODELAY, settings.tcpNoDelay)
+                                           .option(ChannelOption.MESSAGE_SIZE_ESTIMATOR, NoSizeEstimator.instance)
+                                           .handler(new Initializer());
 
         if (settings.socketSendBufferSizeInBytes > 0)
             bootstrap.option(ChannelOption.SO_SNDBUF, settings.socketSendBufferSizeInBytes);

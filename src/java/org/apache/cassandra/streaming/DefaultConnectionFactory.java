@@ -25,8 +25,7 @@ import com.google.common.annotations.VisibleForTesting;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
-import org.apache.cassandra.net.async.NettyFactory;
-import org.apache.cassandra.net.async.OutboundConnectionInitiator;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
@@ -42,7 +41,7 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
     @Override
     public Channel createConnection(OutboundConnectionSettings template, int messagingVersion) throws IOException
     {
-        EventLoop eventLoop = NettyFactory.instance.outboundStreamingGroup().next();
+        EventLoop eventLoop = MessagingService.instance().socketFactory.outboundStreamingGroup().next();
 
         int attempts = 0;
         while (true)

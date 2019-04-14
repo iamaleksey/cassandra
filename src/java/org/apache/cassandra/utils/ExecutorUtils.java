@@ -60,6 +60,11 @@ public class ExecutorUtils
     public static void awaitTermination(long timeout, TimeUnit unit, Collection<?> executors) throws InterruptedException, TimeoutException
     {
         long deadline = System.nanoTime() + unit.toNanos(timeout);
+        awaitTerminationUntil(deadline, executors);
+    }
+
+    public static void awaitTerminationUntil(long deadline, Collection<?> executors) throws InterruptedException, TimeoutException
+    {
         for (Object executor : executors)
         {
             long wait = deadline - System.nanoTime();

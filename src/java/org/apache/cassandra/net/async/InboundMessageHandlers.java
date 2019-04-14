@@ -19,6 +19,7 @@ package org.apache.cassandra.net.async;
 
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
@@ -86,7 +87,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
         this.metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(InboundMessageHandler.ReadSwitch readSwitch, Channel channel, int version)
+    InboundMessageHandler createHandler(InboundMessageHandler.ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, Channel channel, int version)
     {
         InboundMessageHandler handler =
             new InboundMessageHandler(readSwitch,
@@ -96,7 +97,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
                                       version,
 
                                       OutboundConnections.LARGE_MESSAGE_THRESHOLD,
-                                      NettyFactory.instance.synchronousWorkExecutor,
+                                      synchronousWorkExecutor,
 
                                       queueCapacity,
                                       endpointReserveCapacity,

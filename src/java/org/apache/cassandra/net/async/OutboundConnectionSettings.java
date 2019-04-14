@@ -21,6 +21,7 @@ package org.apache.cassandra.net.async;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
+import io.netty.channel.EventLoopGroup;
 import io.netty.channel.WriteBufferWaterMark;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.Config;
@@ -36,7 +37,7 @@ import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.net.async.NettyFactory.encryptionLogStatement;
+import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
@@ -70,6 +71,7 @@ public class OutboundConnectionSettings
     public final Integer tcpUserTimeoutInMS;
     public final AcceptVersions acceptVersions;
     public final InetAddressAndPort from;
+    public final SocketFactory socketFactory;
 
     public OutboundConnectionSettings(InetAddressAndPort endpoint)
     {
@@ -78,7 +80,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings(InetAddressAndPort endpoint, InetAddressAndPort preferred)
     {
-        this(null, endpoint, preferred, null, null, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null);
+        this(null, endpoint, preferred, null, null, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null, null);
     }
 
     private OutboundConnectionSettings(IInternodeAuthenticator authenticator,
@@ -97,7 +99,8 @@ public class OutboundConnectionSettings
                                        Integer tcpConnectTimeoutInMS,
                                        Integer tcpUserTimeoutInMS,
                                        AcceptVersions acceptVersions,
-                                       InetAddressAndPort from)
+                                       InetAddressAndPort from,
+                                       SocketFactory socketFactory)
     {
         this.authenticator = authenticator;
         this.endpoint = endpoint;
@@ -117,6 +120,7 @@ public class OutboundConnectionSettings
         this.tcpUserTimeoutInMS = tcpUserTimeoutInMS;
         this.acceptVersions = acceptVersions;
         this.from = from;
+        this.socketFactory = socketFactory;
     }
 
     public boolean authenticate()
@@ -152,7 +156,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     @SuppressWarnings("unused")
@@ -162,7 +166,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withConnectTo(InetAddressAndPort connectTo)
@@ -171,7 +175,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withEncryption(ServerEncryptionOptions encryptionOptions)
@@ -180,7 +184,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     @SuppressWarnings("unused")
@@ -190,7 +194,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withCrc(boolean crc)
@@ -199,7 +203,7 @@ public class OutboundConnectionSettings
                                               crc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withCoalescingStrategy(CoalescingStrategy coalescingStrategy)
@@ -208,7 +212,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withSocketSendBufferSizeInBytes(int socketSendBufferSizeInBytes)
@@ -217,7 +221,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     @SuppressWarnings("unused")
@@ -227,7 +231,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withApplicationReserveSendQueueCapacityInBytes(Integer applicationReserveSendQueueEndpointCapacityInBytes, ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes)
@@ -236,7 +240,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     @SuppressWarnings("unused")
@@ -246,7 +250,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     @SuppressWarnings("unused")
@@ -256,7 +260,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withTcpConnectTimeoutInMS(int tcpConnectTimeoutInMS)
@@ -265,7 +269,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withTcpUserTimeoutInMS(int tcpUserTimeoutInMS)
@@ -274,7 +278,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withAcceptVersions(AcceptVersions acceptVersions)
@@ -283,7 +287,7 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withFrom(InetAddressAndPort from)
@@ -292,7 +296,16 @@ public class OutboundConnectionSettings
                                               withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
+    }
+
+    public OutboundConnectionSettings withSocketFactory(SocketFactory socketFactory)
+    {
+        return new OutboundConnectionSettings(authenticator, endpoint, connectTo, encryption, withCompression,
+                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+                                              applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
+                                              tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
+                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     public OutboundConnectionSettings withDefaultReserveLimits()
@@ -334,6 +347,7 @@ public class OutboundConnectionSettings
         Integer tcpConnectTimeoutInMS = this.tcpConnectTimeoutInMS;
         Integer tcpUserTimeoutInMS = this.tcpUserTimeoutInMS;
         AcceptVersions acceptVersions = this.acceptVersions;
+        SocketFactory socketFactory = this.socketFactory;
 
         IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
         InetAddressAndPort self = getBroadcastAddressAndPort();
@@ -394,6 +408,9 @@ public class OutboundConnectionSettings
         if (acceptVersions == null)
             acceptVersions = type == STREAM ? MessagingService.accept_streaming : MessagingService.accept_messaging;
 
+        if (socketFactory == null)
+            socketFactory = MessagingService.instance().socketFactory;
+
         Preconditions.checkArgument(socketSendBufferSizeInBytes == 0 || socketSendBufferSizeInBytes >= 1 << 10, "illegal socket send buffer size: " + socketSendBufferSizeInBytes);
         Preconditions.checkArgument(applicationSendQueueCapacityInBytes >= 1 << 10, "illegal application send queue capacity: " + applicationSendQueueCapacityInBytes);
         Preconditions.checkArgument(tcpUserTimeoutInMS >= 0, "tcp user timeout must be non negative: " + tcpUserTimeoutInMS);
@@ -405,7 +422,7 @@ public class OutboundConnectionSettings
                                               applicationReserveSendQueueEndpointCapacityInBytes,
                                               applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark,
-                                              tcpConnectTimeoutInMS, tcpUserTimeoutInMS, acceptVersions, from);
+                                              tcpConnectTimeoutInMS, tcpUserTimeoutInMS, acceptVersions, from, socketFactory);
     }
 
     private static boolean isInLocalDC(IEndpointSnitch snitch, InetAddressAndPort localHost, InetAddressAndPort remoteHost)

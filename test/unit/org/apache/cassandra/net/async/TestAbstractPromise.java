@@ -35,9 +35,9 @@ import net.openhft.chronicle.core.util.ThrowingFunction;
 
 abstract class TestAbstractPromise
 {
-    static final ExecutorService exec = Executors.newCachedThreadPool();
+    final ExecutorService exec = Executors.newCachedThreadPool();
 
-    static class Async
+    class Async
     {
         final List<ThrowingBiConsumer<Long, TimeUnit, ?>> waitingOn = new ArrayList<>();
         void verify()
