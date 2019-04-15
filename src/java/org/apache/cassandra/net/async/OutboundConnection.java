@@ -48,9 +48,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
-import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.FBUtilities;
@@ -61,11 +59,11 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.SocketFactory.isConnectionResetException;
-import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateMessaging;
+import static org.apache.cassandra.net.async.OutboundConnectionInitiator.*;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
-import static org.apache.cassandra.net.async.ResourceLimits.Outcome.INSUFFICIENT_ENDPOINT;
-import static org.apache.cassandra.net.async.ResourceLimits.Outcome.SUCCESS;
+import static org.apache.cassandra.net.async.ResourceLimits.*;
+import static org.apache.cassandra.net.async.ResourceLimits.Outcome.*;
+import static org.apache.cassandra.net.async.SocketFactory.*;
 
 /**
  * Represents a connection type to a peer, and handles the state transistions on the connection and the netty {@link Channel}.
@@ -129,7 +127,7 @@ public class OutboundConnection
     private volatile long pendingCountAndBytes = 0;
     /** global shared limits that we use only if our local limits are exhausted;
      *  we allocate from here whenever queueSize > queueCapacity */
-    private final ResourceLimits.EndpointAndGlobal reserveCapacityInBytes;
+    private final EndpointAndGlobal reserveCapacityInBytes;
 
     private volatile long submittedCount = 0;   // updated with cas
     private volatile long overloadCount = 0;    // updated with cas
@@ -218,7 +216,7 @@ public class OutboundConnection
      */
     private Future<?> connecting;
 
-    OutboundConnection(Type type, OutboundConnectionSettings template, ResourceLimits.EndpointAndGlobal reserveCapacityInBytes)
+    OutboundConnection(Type type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
     {
         // use the best guessed messaging version for a node
         // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
@@ -370,7 +368,7 @@ public class OutboundConnection
     /**
      * Take any necessary cleanup action after a message has been rejected before reaching the queue
      */
-    private boolean onOverload(Message<?> msg)
+    private void onOverload(Message<?> msg)
     {
         droppedDueToOverloadUpdater.incrementAndGet(this);
         droppedBytesDueToOverloadUpdater.addAndGet(this, canonicalSize(msg));
@@ -381,7 +379,6 @@ public class OutboundConnection
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
-        return true;
     }
 
     /**
@@ -404,7 +401,7 @@ public class OutboundConnection
      *
      * Only to be invoked by the delivery thread
      */
-    private boolean onError(Message<?> msg, Throwable t)
+    private void onError(Message<?> msg, Throwable t)
     {
         JVMStabilityInspector.inspectThrowable(t);
         releaseCapacity(1, canonicalSize(msg));
@@ -412,7 +409,6 @@ public class OutboundConnection
         errorBytes += canonicalSize(msg);
         logger.warn("{} dropping message of type {} due to error", id(), msg.verb, t);
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
-        return true;
     }
 
     /**
@@ -420,11 +416,10 @@ public class OutboundConnection
      * Note that this is only for messages that were queued prior to closing without graceful flush, OR
      * for those that are unceremoniously dropped when we decide close has been trying to complete for too long.
      */
-    private boolean onDiscardOnClosing(Message<?> msg)
+    private void onDiscardOnClosing(Message<?> msg)
     {
         releaseCapacity(1, canonicalSize(msg));
         MessagingService.instance().callbacks.removeAndExpire(msg.id);
-        return true;
     }
 
     /**
@@ -901,7 +896,6 @@ public class OutboundConnection
             }
         }
 
-        @SuppressWarnings("resource")
         boolean doRun()
         {
             Message<?> send = queue.tryPoll(System.nanoTime(), this::execute);
@@ -1042,7 +1036,7 @@ public class OutboundConnection
 
                     logger.info("{} successfully connected, version = {}, compress = {}, coalescing = {}, encryption = {}", id(), messagingVersion, settings.withCompression,
                                      settings.coalescingStrategy != null ? settings.coalescingStrategy : CoalescingStrategies.Strategy.DISABLED,
-                                SocketFactory.encryptionLogStatement(settings.encryption));
+                                encryptionLogStatement(settings.encryption));
                     break;
 
                 case RETRY:
@@ -1321,7 +1315,7 @@ public class OutboundConnection
                     catch (Throwable t2)
                     {
                         t.addSuppressed(t2);
-                        logger.error("Failed to close connection cleanly: {}", t);
+                        logger.error("Failed to close connection cleanly:", t);
                     }
                     throw t;
                 }

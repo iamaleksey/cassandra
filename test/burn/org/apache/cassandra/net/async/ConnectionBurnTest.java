@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -30,7 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
@@ -40,7 +41,6 @@ import java.util.stream.IntStream;
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
-import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -86,7 +86,7 @@ public class ConnectionBurnTest extends ConnectionTest
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;
         final InboundSockets sockets;
 
-        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, InboundMessageHandler.MessageProcessor process, Function<MessageCallbacks, MessageCallbacks> callbacks)
+        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<MessageCallbacks, MessageCallbacks> callbacks)
         {
             ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
             InboundMessageHandler.WaitQueue globalWaitQueue = new InboundMessageHandler.WaitQueue(globalLimit);
@@ -152,12 +152,11 @@ public class ConnectionBurnTest extends ConnectionTest
             {
                 for (InetAddressAndPort sender : endpoints)
                 {
-                    Semaphore sendLimit = new Semaphore(1 << 22);
                     InboundMessageHandlers inboundHandlers = inbound.handlersByRecipientThenSender.get(recipient).get(sender);
                     OutboundConnections connections = OutboundConnections.unsafeCreate(outboundTemplate.toEndpoint(recipient).withFrom(sender), null);
                     for (Type type : Type.MESSAGING)
                     {
-                        this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), sendLimit, messageGenerators.get(type), minId, maxId, version);
+                        this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId, version);
                         this.connectionMessageIds[i] = minId;
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
@@ -208,12 +207,32 @@ public class ConnectionBurnTest extends ConnectionTest
                         }
                     });
                 }
+                executor.execute(() -> {
+                    Thread.currentThread().setName("Test-SetInFlight");
+                    ThreadLocalRandom random = ThreadLocalRandom.current();
+                    List<Connection> connections = new ArrayList<>(Arrays.asList(this.connections));
+                    while (deadline > System.nanoTime())
+                    {
+                        Collections.shuffle(connections);
+                        int total = random.nextInt(1 << 20, 128 << 20);
+                        for (int i = connections.size() - 1; i >= 1 ; --i)
+                        {
+                            int average = total / (i + 1);
+                            int max = random.nextInt(0, 2 * average);
+                            int min = random.nextInt(0, max);
+                            connections.get(i).controller.setInFlightByteBounds(min, max);
+                            total -= max;
+                        }
+                        connections.get(0).controller.setInFlightByteBounds(total, random.nextInt(0, total));
+                        Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.SECONDS);
+                    }
+                });
 
-                Reporter reporter = new Reporter();
+                Reporters reporters = new Reporters(endpoints, connections);
                 while (deadline > System.nanoTime() && fail.isEmpty())
                 {
-                    reporter.update();
-                    reporter.print();
+                    reporters.update();
+                    reporters.print();
                     Uninterruptibles.awaitUninterruptibly(done, 30L, TimeUnit.SECONDS);
                 }
 
@@ -239,123 +258,46 @@ public class ConnectionBurnTest extends ConnectionTest
             }
         }
 
-        class Reporter
+        class WrappedCallbacks implements MessageCallbacks
         {
-            long[][] totalSentBytes = new long[endpoints.size()][endpoints.size() * 3];
-            String[][] print = new String[2 + endpoints.size()][2 + endpoints.size() * 3];
-            int[] width = new int[2 + endpoints.size() * 3];
-            long[] columnTotals = new long[1 + endpoints.size() * 3];
-
-            Reporter()
+            final MessageCallbacks wrapped;
+            WrappedCallbacks(MessageCallbacks wrapped)
             {
-                print[0][0] = "Recipient";
-                print[print.length - 1][0] = "Total";
-                print[0][width.length - 1] = "Total";
-                for (int row = 0 ; row < endpoints.size() ; ++row)
-                    print[1 + row][0] = Integer.toString(1 + row);
-                for (int column = 0 ; column < endpoints.size() * 3 ; column += 3)
-                {
-                    String endpoint = Integer.toString(1 + column / 3);
-                    print[0][1 + column] = endpoint + " Urgent";
-                    print[0][2 + column] = endpoint + " Small";
-                    print[0][3 + column] = endpoint + " Large";
-                }
+                this.wrapped = wrapped;
             }
 
-            void update()
+            public void onProcessed(int messageSize)
             {
-                Arrays.fill(columnTotals, 0);
-                int row = 0, connection = 0;
-                for (InetAddressAndPort recipient : endpoints)
-                {
-                    int column = 0;
-                    long rowTotal = 0;
-                    for (InetAddressAndPort sender : endpoints)
-                    {
-                        for (Type type : Type.MESSAGING)
-                        {
-                            assert recipient.equals(connections[connection].recipient);
-                            assert sender.equals(connections[connection].sender);
-                            assert type == connections[connection].outbound.type();
-
-                            long cur = connections[connection].outbound.sentBytes();
-                            long prev = totalSentBytes[row][column];
-                            totalSentBytes[row][column] = cur;
-                            print[1 + row][1 + column] = prettyPrintMemory(cur - prev);
-                            columnTotals[column] += cur - prev;
-                            rowTotal += cur - prev;
-                            ++column;
-                            ++connection;
-                        }
-                    }
-                    columnTotals[column] += rowTotal;
-                    print[1 + row][1 + column] = prettyPrintMemory(rowTotal);
-                    ++row;
-                }
-                for (int column = 0 ; column < columnTotals.length ; ++column)
-                    print[print.length - 1][1 + column] = prettyPrintMemory(columnTotals[column]);
+                throw new IllegalStateException(); // only the wrapped Callbacks should be invoked
             }
 
-            void print()
+            public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
             {
-                Arrays.fill(width, 0);
-                for (int row = 0 ; row < print.length ; ++row)
-                {
-                    for (int column = 0 ; column < width.length ; ++column)
-                    {
-                        width[column] = Math.max(width[column], print[row][column].length());
-                    }
-                }
+                forId(id).onExpired(messageSize, id, verb, timeElapsed, unit);
+                wrapped.onExpired(messageSize, id, verb, timeElapsed, unit);
+            }
 
-                for (int row = 0 ; row < print.length ; ++row)
-                {
-                    StringBuilder builder = new StringBuilder();
-                    for (int column = 0 ; column < width.length ; ++column)
-                    {
-                        String s = print[row][column];
-                        int pad = width[column] - s.length();
-                        for (int i = 0 ; i < pad ; ++i)
-                            builder.append(' ');
-                        builder.append(s);
-                        builder.append("  ");
-                    }
-                    System.out.println(builder.toString());
-                }
+            public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            {
+                forId(id).onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
+                wrapped.onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
+            }
+
+            public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+            {
+                forId(id).onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
+                wrapped.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
             }
         }
 
-        public MessageCallbacks wrap(MessageCallbacks wrapped)
+        public MessageCallbacks wrap(MessageCallbacks wrap)
         {
-            return new MessageCallbacks()
-            {
-                public void onProcessed(int messageSize)
-                {
-                    wrapped.onProcessed(messageSize);
-                }
-
-                public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
-                {
-                    forId(id).onExpired(messageSize, id, verb, timeElapsed, unit);
-                    wrapped.onExpired(messageSize, id, verb, timeElapsed, unit);
-                }
-
-                public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
-                {
-                    forId(id).onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
-                    wrapped.onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
-                }
-
-                public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
-                {
-                    forId(id).onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
-                    wrapped.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
-                }
-            };
+            return new WrappedCallbacks(wrap);
         }
 
         public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
         {
-            forId(message.id).process(message, messageSize, callbacks);
+            forId(message.id).process(message, messageSize, ((WrappedCallbacks)callbacks).wrapped);
         }
     }
 
@@ -413,7 +355,6 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withTemplate(new InboundConnectionSettings());
         test(inboundSettings, new OutboundConnectionSettings(null));
         MessagingService.instance().socketFactory.shutdownNow();
-//        test(inboundSettings, new OutboundConnectionSettings(null).withAcceptVersions(legacy));
     }
 
 }

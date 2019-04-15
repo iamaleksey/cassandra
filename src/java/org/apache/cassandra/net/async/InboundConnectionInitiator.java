@@ -60,6 +60,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.async.SocketFactory.WIRETRACE;
+import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
 import static org.apache.cassandra.net.async.SocketFactory.newSslHandler;
 
 public class InboundConnectionInitiator
@@ -416,7 +417,7 @@ public class InboundConnectionInitiator
             frameDecoder.addLastTo(pipeline);
 
             logger.info("connection established from {}, version = {}, compress = {}, encryption = {}", from, useMessagingVersion, initiate.withCompression,
-                        SocketFactory.encryptionLogStatement(settings.encryption));
+                        encryptionLogStatement(settings.encryption));
 
             InboundMessageHandler handler =
                 settings.handlers.apply(from).createHandler(frameDecoder,

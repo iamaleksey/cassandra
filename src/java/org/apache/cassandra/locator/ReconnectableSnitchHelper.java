@@ -24,7 +24,6 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 
 import org.slf4j.Logger;

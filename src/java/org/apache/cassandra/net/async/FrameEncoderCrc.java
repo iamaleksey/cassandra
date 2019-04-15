@@ -27,8 +27,7 @@ import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.net.async.Crc.crc24;
-import static org.apache.cassandra.net.async.Crc.crc32;
+import static org.apache.cassandra.net.async.Crc.*;
 
 @ChannelHandler.Sharable
 public class FrameEncoderCrc extends FrameEncoder

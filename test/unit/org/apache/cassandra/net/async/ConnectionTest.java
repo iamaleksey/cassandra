@@ -75,7 +75,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.ConnectionUtils.check;
+import static org.apache.cassandra.net.async.ConnectionUtils.*;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;

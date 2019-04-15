@@ -29,9 +29,7 @@ import net.jpountz.lz4.LZ4FastDecompressor;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.net.async.Crc.crc24;
-import static org.apache.cassandra.net.async.Crc.crc32;
-import static org.apache.cassandra.net.async.Crc.updateCrc32;
+import static org.apache.cassandra.net.async.Crc.*;
 
 final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
 {

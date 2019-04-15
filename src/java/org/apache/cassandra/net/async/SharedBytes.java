@@ -62,6 +62,7 @@ class SharedBytes
 
     ByteBuffer get()
     {
+        assert owner.count != 0;
         return bytes;
     }
 

@@ -21,7 +21,6 @@ package org.apache.cassandra.net.async;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 
-import io.netty.channel.EventLoopGroup;
 import io.netty.channel.WriteBufferWaterMark;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.Config;
@@ -37,8 +36,8 @@ import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
 import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
+import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
 /**

@@ -31,8 +31,7 @@ import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.net.async.Crc.crc24;
-import static org.apache.cassandra.net.async.Crc.crc32;
+import static org.apache.cassandra.net.async.Crc.*;
 
 @ChannelHandler.Sharable
 class FrameEncoderLZ4 extends FrameEncoder

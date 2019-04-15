@@ -36,6 +36,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
+import org.apache.cassandra.net.async.InboundMessageHandler.ReadSwitch;
 
 public final class InboundMessageHandlers implements MessageCallbacks
 {
@@ -52,7 +53,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
     private final InternodeInboundMetrics metrics;
 
     private final MessageProcessor messageProcessor;
-    private final MessageCallbacks messageCallbacks;
+    private final Function<MessageCallbacks, MessageCallbacks> callbackAdapter;
 
     public InboundMessageHandlers(InetAddressAndPort peer,
                                   int queueCapacity,
@@ -70,7 +71,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
                                   MessageProcessor messageProcessor,
-                                  Function<MessageCallbacks, MessageCallbacks> messageCallbacks)
+                                  Function<MessageCallbacks, MessageCallbacks> callbackAdapter)
     {
         this.peer = peer;
         this.messageProcessor = messageProcessor;
@@ -78,7 +79,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
         this.queueCapacity = queueCapacity;
         this.endpointReserveCapacity = new ResourceLimits.Concurrent(endpointReserveCapacity);
         this.globalReserveCapacity = globalReserveCapacity;
-        this.messageCallbacks = messageCallbacks.apply(this);
+        this.callbackAdapter = callbackAdapter;
 
         this.endpointWaitQueue = new InboundMessageHandler.WaitQueue(this.endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
@@ -87,7 +88,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
         this.metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(InboundMessageHandler.ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, Channel channel, int version)
+    InboundMessageHandler createHandler(ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, Channel channel, int version)
     {
         InboundMessageHandler handler =
             new InboundMessageHandler(readSwitch,
@@ -106,7 +107,8 @@ public final class InboundMessageHandlers implements MessageCallbacks
                                       globalWaitQueue,
 
                                       this::onHandlerClosed,
-                                      messageCallbacks,
+                                      this,
+                                      callbackAdapter,
                                       this::process);
         handlers.add(handler);
         return handler;
@@ -142,7 +144,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
     public void onProcessed(int messageSize)
     {
         pendingCountUpdater.decrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, -messageSize);
+        long pending = pendingBytesUpdater.addAndGet(this, -messageSize);
 
         processedCountUpdater.incrementAndGet(this);
         processedBytesUpdater.addAndGet(this, messageSize);

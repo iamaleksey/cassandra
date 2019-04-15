@@ -58,6 +58,9 @@ public class InboundSockets
          */
         private volatile ChannelFuture binding;
 
+        // purely to prevent close racing with open
+        private boolean closedWithoutOpening;
+
         /**
          * A group of the open, inbound {@link Channel}s connected to this node. This is mostly interesting so that all of
          * the inbound connections/channels can be closed when the listening socket itself is being closed.
@@ -80,6 +83,8 @@ public class InboundSockets
                     return new SucceededFuture<>(GlobalEventExecutor.INSTANCE, null);
                 if (binding != null)
                     return binding;
+                if (closedWithoutOpening)
+                    throw new IllegalStateException();
                 binding = InboundConnectionInitiator.bind(settings, connections);
             }
 
@@ -104,7 +109,7 @@ public class InboundSockets
 
             Runnable close = () -> {
                 List<Future<Void>> closing = new ArrayList<>();
-                if (listen.isOpen())
+                if (listen != null)
                     closing.add(listen.close());
                 closing.add(connections.close());
                 new FutureCombiner(closing)
@@ -114,8 +119,11 @@ public class InboundSockets
 
             synchronized (this)
             {
-                if (listen == null && binding == null) // never opened
+                if (listen == null && binding == null)
+                {
+                    closedWithoutOpening = true;
                     return new SucceededFuture<>(GlobalEventExecutor.INSTANCE, null);
+                }
 
                 if (listen != null)
                 {

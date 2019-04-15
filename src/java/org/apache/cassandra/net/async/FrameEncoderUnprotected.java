@@ -19,16 +19,12 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.zip.CRC32;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static org.apache.cassandra.net.async.Crc.crc24;
-import static org.apache.cassandra.net.async.Crc.crc32;
 import static org.apache.cassandra.net.async.FrameEncoderCrc.HEADER_LENGTH;
 import static org.apache.cassandra.net.async.FrameEncoderCrc.writeHeader;
 

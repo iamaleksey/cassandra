@@ -22,7 +22,6 @@ import java.nio.channels.ClosedChannelException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -42,7 +41,7 @@ class Connection implements MessageCallbacks, MessageProcessor
     final InetAddressAndPort sender;
     final InetAddressAndPort recipient;
     final InboundMessageHandlers inboundHandlers;
-    final Semaphore sendLimit;
+    final BytesInFlightController controller;
     final OutboundConnection outbound;
     final MessageGenerator sendGenerator;
     final MessageGenerator receiveGenerator;
@@ -56,12 +55,12 @@ class Connection implements MessageCallbacks, MessageProcessor
     private final ConcurrentSkipListMap<Long, Long> inFlight = new ConcurrentSkipListMap<>();
     private final WaitQueue waitQueue = new WaitQueue();
 
-    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, InboundMessageHandlers inboundHandlers, OutboundConnection outbound, Semaphore sendLimit, MessageGenerator generator, long minId, long maxId, int version)
+    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, InboundMessageHandlers inboundHandlers, OutboundConnection outbound, MessageGenerator generator, long minId, long maxId, int version)
     {
         this.sender = sender;
         this.recipient = recipient;
         this.outbound = outbound;
-        this.sendLimit = sendLimit;
+        this.controller = new BytesInFlightController(1 << 20);
         this.sendGenerator = generator.copy();
         this.receiveGenerator = generator.copy();
         this.minId = minId;
@@ -74,7 +73,7 @@ class Connection implements MessageCallbacks, MessageProcessor
                                                               : OutboundConnection.LargeMessageDelivery.DEFAULT_BUFFER_SIZE;
     }
 
-    void sendOne()
+    void sendOne() throws InterruptedException
     {
         long id = nextSendId.getAndUpdate(i -> i == maxId ? minId : i + 1);
         try
@@ -84,7 +83,7 @@ class Connection implements MessageCallbacks, MessageProcessor
             {
                 msg = sendGenerator.generate(id).withId(id);
             }
-            sendLimit.acquireUninterruptibly(msg.serializedSize(current_version));
+            controller.send(msg.serializedSize(current_version));
             inFlight.put(id, (long) msg.serializedSize(version));
             outbound.enqueue(msg);
         }
@@ -97,7 +96,7 @@ class Connection implements MessageCallbacks, MessageProcessor
 
     public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
     {
-        sendLimit.release(messageSize);
+        controller.process(messageSize, callbacks);
         Message<?> canon;
         synchronized (receiveGenerator)
         {
@@ -105,12 +104,12 @@ class Connection implements MessageCallbacks, MessageProcessor
         }
         if (!Arrays.equals((byte[])canon.payload, (byte[]) message.payload)) // assertArrayEquals is EXTREMELY inefficient
             Assert.assertArrayEquals((byte[])canon.payload, (byte[]) message.payload);
-        checkReceived(messageSize, message.id);
-        callbacks.onProcessed(messageSize);
+        checkReceived(messageSize, message.id, true);
     }
 
     public void onProcessed(int messageSize)
     {
+        throw new IllegalStateException();
     }
 
     public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
@@ -130,14 +129,14 @@ class Connection implements MessageCallbacks, MessageProcessor
 
     private void onFailed(int messageSize, long id)
     {
-        sendLimit.release(messageSize);
+        controller.fail(messageSize);
         Message<?> canon;
         synchronized (receiveGenerator)
         {
             canon = receiveGenerator.generate(id);
         }
         Assert.assertEquals(canon.serializedSize(current_version), messageSize);
-        checkReceived(messageSize, id);
+        checkReceived(messageSize, id, false);
     }
 
     private long difference(long newest, long oldest)
@@ -145,9 +144,9 @@ class Connection implements MessageCallbacks, MessageProcessor
         return newest > oldest ? newest - oldest : (newest - minId) + (maxId - oldest);
     }
 
-    private void checkReceived(int messageSize, long id)
+    private void checkReceived(int messageSize, long id, boolean success)
     {
-        System.out.println("C " + id);
+//        System.out.println("C " + id);
         Map.Entry<Long, Long> oldest;
         oldest = inFlight.ceilingEntry(minReceiveId);
         if (oldest == null)
@@ -159,7 +158,9 @@ class Connection implements MessageCallbacks, MessageProcessor
 
         if (oldest.getValue() <= onEventLoopThreshold)
         {
-            if (messageSize <= onEventLoopThreshold ? oldest.getKey() != id : oldest.getKey() < id)
+            // if the oldest value we are waiting for was processed on the event loop, then we must be that message
+            // as we process messages in order on the event loop
+            if (oldest.getKey() != id)
             {
                 synchronized (this)
                 {
@@ -167,6 +168,8 @@ class Connection implements MessageCallbacks, MessageProcessor
                 }
             }
         }
+        // TODO: special case <= onEventLoopThreshold?
+        // TODO: must discount those that have failed before sending
         else if (difference(id, oldest.getKey()) > 16)
         {
             long waitUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100L);

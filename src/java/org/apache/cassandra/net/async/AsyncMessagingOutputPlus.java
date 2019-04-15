@@ -19,23 +19,12 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.ClosedChannelException;
-import java.nio.channels.FileChannel;
-import java.nio.channels.WritableByteChannel;
-import java.util.concurrent.locks.LockSupport;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelPromise;
 import io.netty.channel.WriteBufferWaterMark;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
-import org.apache.cassandra.net.async.SharedDefaultFileRegion.SharedFileChannel;
-import org.apache.cassandra.streaming.StreamManager.StreamRateLimiter;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;

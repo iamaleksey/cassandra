@@ -21,12 +21,11 @@ package org.apache.cassandra.net.async;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.Collection;
-import java.util.Deque;
 import java.util.zip.CRC32;
 
 import io.netty.channel.ChannelPipeline;
 
-import static org.apache.cassandra.net.async.Crc.crc24;
+import static org.apache.cassandra.net.async.Crc.*;
 import static org.apache.cassandra.net.async.Crc.updateCrc32;
 
 public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
@@ -102,7 +101,7 @@ public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
         ByteBuffer in = bytes.get();
         boolean isSelfContained = isSelfContained(header6b);
 
-        CRC32 crc = Crc.crc32();
+        CRC32 crc = crc32();
         int readFullCrc = in.getInt(end - TRAILER_LENGTH);
         if (in.order() == ByteOrder.BIG_ENDIAN)
             readFullCrc = Integer.reverseBytes(readFullCrc);
