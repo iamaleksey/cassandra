@@ -30,13 +30,9 @@ import com.google.common.primitives.Ints;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.utils.UUIDSerializer;
 

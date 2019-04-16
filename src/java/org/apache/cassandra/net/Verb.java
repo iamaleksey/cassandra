@@ -41,7 +41,7 @@ import org.apache.cassandra.db.ReadResponse;
 import org.apache.cassandra.db.SnapshotCommand;
 import org.apache.cassandra.db.TruncateResponse;
 import org.apache.cassandra.db.TruncateVerbHandler;
-import org.apache.cassandra.db.Truncation;
+import org.apache.cassandra.db.TruncateRequest;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.gms.GossipDigestAck;
 import org.apache.cassandra.gms.GossipDigestAck2;
@@ -101,7 +101,7 @@ public enum Verb
     PAXOS_COMMIT_REQ     (35, P2, writeTimeout,    MUTATION,          () -> Commit.serializer,               () -> CommitVerbHandler.instance,          PAXOS_COMMIT_RSP    ),
 
     TRUNCATE_RSP         (79, P0, truncateTimeout, REQUEST_RESPONSE,  () -> TruncateResponse.serializer,     () -> ResponseVerbHandler.instance                             ),
-    TRUNCATE_REQ         (19, P0, truncateTimeout, MUTATION,          () -> Truncation.serializer,           () -> TruncateVerbHandler.instance,        TRUNCATE_RSP        ),
+    TRUNCATE_REQ         (19, P0, truncateTimeout, MUTATION,          () -> TruncateRequest.serializer,      () -> TruncateVerbHandler.instance,        TRUNCATE_RSP        ),
 
     COUNTER_MUTATION_RSP (84, P1, counterTimeout,  REQUEST_RESPONSE,  () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     COUNTER_MUTATION_REQ (24, P2, counterTimeout,  COUNTER_MUTATION,  () -> CounterMutation.serializer,      () -> CounterMutationVerbHandler.instance, COUNTER_MUTATION_RSP),
@@ -119,7 +119,7 @@ public enum Verb
     ECHO_RSP             (91, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
     ECHO_REQ             (31, P0, rpcTimeout,      GOSSIP,            () -> NoPayload.serializer,            () -> EchoVerbHandler.instance,            ECHO_RSP            ),
     PING_RSP             (97, P1, pingTimeout,     GOSSIP,            () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),
-    PING_REQ             (37, P1, pingTimeout,     GOSSIP,            () -> PingMessage.serializer,          () -> PingVerbHandler.instance,            PING_RSP            ),
+    PING_REQ             (37, P1, pingTimeout,     GOSSIP,            () -> PingRequest.serializer,          () -> PingVerbHandler.instance,            PING_RSP            ),
 
     // P1 because messages can be arbitrarily large or aren't crucial
     SCHEMA_PUSH_RSP      (98, P1, rpcTimeout,      MIGRATION,         () -> NoPayload.serializer,            () -> ResponseVerbHandler.instance                             ),

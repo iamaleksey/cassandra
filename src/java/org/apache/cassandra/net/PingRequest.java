@@ -32,29 +32,29 @@ import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSA
 /**
  * Indicates to the recipient which {@link OutboundConnection.Type} should be used for the response.
  */
-public class PingMessage
+public class PingRequest
 {
-    public static IVersionedSerializer<PingMessage> serializer = new PingMessageSerializer();
+    public static IVersionedSerializer<PingRequest> serializer = new Serializer();
 
-    public static final PingMessage forSmall = new PingMessage(SMALL_MESSAGE);
-    public static final PingMessage forLarge = new PingMessage(LARGE_MESSAGE);
-    public static final PingMessage forUrgent = new PingMessage(URGENT);
+    public static final PingRequest forSmall = new PingRequest(SMALL_MESSAGE);
+    public static final PingRequest forLarge = new PingRequest(LARGE_MESSAGE);
+    public static final PingRequest forUrgent = new PingRequest(URGENT);
 
     public final OutboundConnection.Type connectionType;
 
-    public PingMessage(OutboundConnection.Type connectionType)
+    public PingRequest(OutboundConnection.Type connectionType)
     {
         this.connectionType = connectionType;
     }
 
-    public static class PingMessageSerializer implements IVersionedSerializer<PingMessage>
+    public static class Serializer implements IVersionedSerializer<PingRequest>
     {
-        public void serialize(PingMessage t, DataOutputPlus out, int version) throws IOException
+        public void serialize(PingRequest t, DataOutputPlus out, int version) throws IOException
         {
             out.writeByte(t.connectionType.id);
         }
 
-        public PingMessage deserialize(DataInputPlus in, int version) throws IOException
+        public PingRequest deserialize(DataInputPlus in, int version) throws IOException
         {
             OutboundConnection.Type connectionType = OutboundConnection.Type.fromId(in.readByte());
             switch (connectionType)
@@ -70,7 +70,7 @@ public class PingMessage
             }
         }
 
-        public long serializedSize(PingMessage t, int version)
+        public long serializedSize(PingRequest t, int version)
         {
             return 1;
         }

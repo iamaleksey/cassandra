@@ -40,7 +40,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.BackPressureState;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.PingMessage;
+import org.apache.cassandra.net.PingRequest;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.OutboundConnection.Type;
 
@@ -84,7 +84,7 @@ public class OutboundConnectionsTest
     @Test
     public void getConnection_SmallMessage()
     {
-        Message message = Message.out(Verb.PING_REQ, PingMessage.forSmall);
+        Message message = Message.out(Verb.PING_REQ, PingRequest.forSmall);
         Assert.assertEquals(Type.SMALL_MESSAGE, connections.connectionFor(message).type());
     }
 

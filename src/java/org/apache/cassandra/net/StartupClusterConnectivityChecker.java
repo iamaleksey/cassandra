@@ -201,8 +201,8 @@ public class StartupClusterConnectivityChecker
             }
         };
 
-        Message<PingMessage> small = Message.out(PING_REQ, PingMessage.forSmall);
-        Message<PingMessage> large = Message.out(PING_REQ, PingMessage.forLarge);
+        Message<PingRequest> small = Message.out(PING_REQ, PingRequest.forSmall);
+        Message<PingRequest> large = Message.out(PING_REQ, PingRequest.forLarge);
         for (InetAddressAndPort peer : peers)
         {
             MessagingService.instance().sendRR(small, peer, responseHandler, SMALL_MESSAGE);

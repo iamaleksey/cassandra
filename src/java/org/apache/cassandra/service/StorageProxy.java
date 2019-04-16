@@ -2374,8 +2374,7 @@ public class StorageProxy implements StorageProxyMBean
 
         // Send out the truncate calls and track the responses with the callbacks.
         Tracing.trace("Enqueuing truncate messages to hosts {}", allEndpoints);
-        final Truncation truncation = new Truncation(keyspace, cfname);
-        Message<Truncation> message = Message.out(TRUNCATE_REQ, truncation);
+        Message<TruncateRequest> message = Message.out(TRUNCATE_REQ, new TruncateRequest(keyspace, cfname));
         for (InetAddressAndPort endpoint : allEndpoints)
             MessagingService.instance().sendRR(message, endpoint, responseHandler);
 

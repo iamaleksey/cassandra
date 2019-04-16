@@ -26,19 +26,19 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.tracing.Tracing;
 
-public class TruncateVerbHandler implements IVerbHandler<Truncation>
+public class TruncateVerbHandler implements IVerbHandler<TruncateRequest>
 {
     public static final TruncateVerbHandler instance = new TruncateVerbHandler();
 
     private static final Logger logger = LoggerFactory.getLogger(TruncateVerbHandler.class);
 
-    public void doVerb(Message<Truncation> message)
+    public void doVerb(Message<TruncateRequest> message)
     {
-        Truncation t = message.payload;
-        Tracing.trace("Applying truncation of {}.{}", t.keyspace, t.columnFamily);
+        TruncateRequest t = message.payload;
+        Tracing.trace("Applying truncation of {}.{}", t.keyspace, t.table);
         try
         {
-            ColumnFamilyStore cfs = Keyspace.open(t.keyspace).getColumnFamilyStore(t.columnFamily);
+            ColumnFamilyStore cfs = Keyspace.open(t.keyspace).getColumnFamilyStore(t.table);
             cfs.truncateBlocking();
         }
         catch (Exception e)
@@ -51,14 +51,14 @@ public class TruncateVerbHandler implements IVerbHandler<Truncation>
         }
         Tracing.trace("Enqueuing response to truncate operation to {}", message.from);
 
-        TruncateResponse response = new TruncateResponse(t.keyspace, t.columnFamily, true);
+        TruncateResponse response = new TruncateResponse(t.keyspace, t.table, true);
         logger.trace("{} applied.  Enqueuing response to {}@{} ", t, message.id, message.from);
         MessagingService.instance().sendResponse(message.responseWith(response), message.from);
     }
 
-    private static void respondError(Truncation t, Message truncateRequestMessage)
+    private static void respondError(TruncateRequest t, Message truncateRequestMessage)
     {
-        TruncateResponse response = new TruncateResponse(t.keyspace, t.columnFamily, false);
+        TruncateResponse response = new TruncateResponse(t.keyspace, t.table, false);
         MessagingService.instance().sendOneWay(truncateRequestMessage.responseWith(response), truncateRequestMessage.from);
     }
 }

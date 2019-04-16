@@ -17,12 +17,12 @@
  */
 package org.apache.cassandra.net;
 
-public class PingVerbHandler implements IVerbHandler<PingMessage>
+public class PingVerbHandler implements IVerbHandler<PingRequest>
 {
     public static final PingVerbHandler instance = new PingVerbHandler();
 
     @Override
-    public void doVerb(Message<PingMessage> message)
+    public void doVerb(Message<PingRequest> message)
     {
         MessagingService.instance().sendResponse(message.emptyResponse(), message.from, message.payload.connectionType);
     }

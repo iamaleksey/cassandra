@@ -22,48 +22,47 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Verb;
 
 /**
  * A truncate operation descriptor
  */
-public class Truncation
+public class TruncateRequest
 {
-    public static final IVersionedSerializer<Truncation> serializer = new TruncationSerializer();
+    public static final IVersionedSerializer<TruncateRequest> serializer = new Serializer();
 
     public final String keyspace;
-    public final String columnFamily;
+    public final String table;
 
-    public Truncation(String keyspace, String columnFamily)
+    public TruncateRequest(String keyspace, String table)
     {
         this.keyspace = keyspace;
-        this.columnFamily = columnFamily;
+        this.table = table;
     }
 
+    @Override
     public String toString()
     {
-        return "Truncation(" + "keyspace='" + keyspace + '\'' + ", cf='" + columnFamily + "\')";
-    }
-}
-
-class TruncationSerializer implements IVersionedSerializer<Truncation>
-{
-    public void serialize(Truncation t, DataOutputPlus out, int version) throws IOException
-    {
-        out.writeUTF(t.keyspace);
-        out.writeUTF(t.columnFamily);
+        return String.format("TruncateRequest(keyspace='%s', table='%s')'", keyspace, table);
     }
 
-    public Truncation deserialize(DataInputPlus in, int version) throws IOException
+    private static class Serializer implements IVersionedSerializer<TruncateRequest>
     {
-        String keyspace = in.readUTF();
-        String columnFamily = in.readUTF();
-        return new Truncation(keyspace, columnFamily);
-    }
+        public void serialize(TruncateRequest request, DataOutputPlus out, int version) throws IOException
+        {
+            out.writeUTF(request.keyspace);
+            out.writeUTF(request.table);
+        }
 
-    public long serializedSize(Truncation truncation, int version)
-    {
-        return TypeSizes.sizeof(truncation.keyspace) + TypeSizes.sizeof(truncation.columnFamily);
+        public TruncateRequest deserialize(DataInputPlus in, int version) throws IOException
+        {
+            String keyspace = in.readUTF();
+            String table = in.readUTF();
+            return new TruncateRequest(keyspace, table);
+        }
+
+        public long serializedSize(TruncateRequest request, int version)
+        {
+            return TypeSizes.sizeof(request.keyspace) + TypeSizes.sizeof(request.table);
+        }
     }
 }
