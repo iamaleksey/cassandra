@@ -85,7 +85,7 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
     public void close()
     {
         if (isClosed)
-            throw new IllegalStateException("Cannot close an already closed AsyncMessagingInputPlus");
+            return;
 
         releaseCurrentBuf();
 
