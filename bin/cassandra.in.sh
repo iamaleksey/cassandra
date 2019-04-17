@@ -108,18 +108,7 @@ JVM_VERSION=${jvmver%_*}
 JAVA_VERSION=11
 if [ "$JVM_VERSION" = "1.8.0" ]  ; then
     JVM_PATCH_VERSION=${jvmver#*_}
-    if [ "$JVM_VERSION" \< "1.8" ] || [ "$JVM_VERSION" \> "1.8.2" ] ; then
-        echo "Cassandra 4.0 requires either Java 8 (update 151 or newer) or Java 11 (or newer). Java $JVM_VERSION is not supported."
-        exit 1;
-    fi
-    if [ "$JVM_PATCH_VERSION" -lt 151 ] ; then
-        echo "Cassandra 4.0 requires either Java 8 (update 151 or newer) or Java 11 (or newer). Java 8 update $JVM_PATCH_VERSION is not supported."
-        exit 1;
-    fi
     JAVA_VERSION=8
-elif [ "$JVM_VERSION" \< "11" ] ; then
-    echo "Cassandra 4.0 requires either Java 8 (update 151 or newer) or Java 11 (or newer)."
-    exit 1;
 fi
 
 jvm=`echo "$java_ver_output" | grep -A 1 '[openjdk|java] version' | awk 'NR==2 {print $1}'`
