@@ -19,20 +19,24 @@
 package org.apache.cassandra.net.async;
 
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.function.LongFunction;
 import java.util.function.ToLongFunction;
 
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.utils.Pair;
 
 class Reporters
 {
     final Collection<InetAddressAndPort> endpoints;
     final Connection[] connections;
     final List<Reporter> reporters;
+    final long start = System.nanoTime();
 
     Reporters(Collection<InetAddressAndPort> endpoints, Connection[] connections)
     {
@@ -58,10 +62,10 @@ class Reporters
 
     void print()
     {
+        System.out.println(prettyPrintElapsed(System.nanoTime() - start));
         for (Reporter reporter : reporters)
         {
             reporter.print();
-            System.out.println();
         }
     }
 
@@ -147,16 +151,23 @@ class Reporters
                 }
                 columnTotals[column] += rowTotal;
                 table.set(row, column, print.apply(rowTotal));
+                table.displayRow(row, rowTotal > 0);
                 ++row;
             }
+
+            boolean displayTotalRow = false;
             for (int column = 0 ; column < columnTotals.length ; ++column)
+            {
                 table.set(endpoints.size(), column, print.apply(columnTotals[column]));
+                table.displayColumn(column, columnTotals[column] > 0);
+                displayTotalRow |= columnTotals[column] > 0;
+            }
+            table.displayRow(endpoints.size(), displayTotalRow);
         }
 
         public void print()
         {
-            System.out.println("===" + name + "===");
-            table.print();
+            table.print("===" + name + "===");
         }
     }
 
@@ -168,6 +179,7 @@ class Reporters
         final LongFunction<String> print;
         final long[][] previousValue;
         final long[] columnTotals = new long[1 + endpoints.size()];
+
         final Table table;
 
         InboundReporter(boolean accumulates, String name, ToLongFunction<InboundMessageHandlers> get, LongFunction<String> print)
@@ -230,16 +242,22 @@ class Reporters
                 }
                 columnTotals[column] += rowTotal;
                 table.set(row, column, print.apply(rowTotal));
+                table.displayRow(row, rowTotal > 0);
                 ++row;
             }
+            boolean displayTotalRow = false;
             for (int column = 0 ; column < columnTotals.length ; ++column)
+            {
                 table.set(endpoints.size(), column, print.apply(columnTotals[column]));
+                table.displayColumn(column, columnTotals[column] > 0);
+                displayTotalRow |= columnTotals[column] > 0;
+            }
+            table.displayRow(endpoints.size(), displayTotalRow);
         }
 
         public void print()
         {
-            System.out.println("===" + name + "===");
-            table.print();
+            table.print("===" + name + "===");
         }
     }
 
@@ -247,6 +265,9 @@ class Reporters
     {
         final String[][] print;
         final int[] width;
+        final BitSet rowMask = new BitSet();
+        final BitSet columnMask = new BitSet();
+
         public Table(String[] rowNames, String[] columnNames, String rowNameHeader)
         {
             print = new String[rowNames.length + 1][columnNames.length + 1];
@@ -263,8 +284,22 @@ class Reporters
             print[row + 1][column + 1] = value;
         }
 
-        void print()
+        void displayRow(int row, boolean display)
         {
+            rowMask.set(row, display);
+        }
+
+        void displayColumn(int column, boolean display)
+        {
+            columnMask.set(column, display);
+        }
+
+        void print(String heading)
+        {
+            if (rowMask.isEmpty() && columnMask.isEmpty())
+                return;
+
+            System.out.println(heading);
             Arrays.fill(width, 0);
             for (int row = 0 ; row < print.length ; ++row)
             {
@@ -276,9 +311,15 @@ class Reporters
 
             for (int row = 0 ; row < print.length ; ++row)
             {
+                if (row > 0 && !rowMask.get(row - 1))
+                    continue;
+
                 StringBuilder builder = new StringBuilder();
                 for (int column = 0 ; column < width.length ; ++column)
                 {
+                    if (column > 0 && !columnMask.get(column - 1))
+                        continue;
+
                     String s = print[row][column];
                     int pad = width[column] - s.length();
                     for (int i = 0 ; i < pad ; ++i)
@@ -288,7 +329,60 @@ class Reporters
                 }
                 System.out.println(builder.toString());
             }
+            System.out.println();
         }
+    }
+
+    private static final class OneTimeUnit
+    {
+        final TimeUnit unit;
+        final String symbol;
+        final long nanos;
+
+        private OneTimeUnit(TimeUnit unit, String symbol)
+        {
+            this.unit = unit;
+            this.symbol = symbol;
+            this.nanos = unit.toNanos(1L);
+        }
+    }
+
+    private static final List<OneTimeUnit> prettyPrintElapsed = ImmutableList.of(
+        new OneTimeUnit(TimeUnit.DAYS, "d"),
+        new OneTimeUnit(TimeUnit.HOURS, "h"),
+        new OneTimeUnit(TimeUnit.MINUTES, "m"),
+        new OneTimeUnit(TimeUnit.SECONDS, "s"),
+        new OneTimeUnit(TimeUnit.MILLISECONDS, "ms"),
+        new OneTimeUnit(TimeUnit.MICROSECONDS, "us"),
+        new OneTimeUnit(TimeUnit.NANOSECONDS, "ns")
+    );
+
+    private static String prettyPrintElapsed(long nanos)
+    {
+        if (nanos == 0)
+            return "0ns";
+
+        int count = 0;
+        StringBuilder builder = new StringBuilder();
+        for (OneTimeUnit unit : prettyPrintElapsed)
+        {
+            if (count == 2)
+                break;
+
+            if (nanos >= unit.nanos)
+            {
+                if (count > 0)
+                    builder.append(' ');
+                long inUnit = unit.unit.convert(nanos, TimeUnit.NANOSECONDS);
+                nanos -= unit.unit.toNanos(inUnit);
+                builder.append(inUnit);
+                builder.append(unit.symbol);
+                ++count;
+            } else if (count > 0)
+                ++count;
+        }
+
+        return builder.toString();
     }
 
 }
