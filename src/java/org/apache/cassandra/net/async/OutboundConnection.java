@@ -896,6 +896,7 @@ public class OutboundConnection
             }
         }
 
+        @SuppressWarnings("resource") // this suppression is for the ecj compiler
         boolean doRun()
         {
             Message<?> send = queue.tryPoll(System.nanoTime(), this::execute);
