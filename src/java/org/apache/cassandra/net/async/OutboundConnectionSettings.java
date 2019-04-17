@@ -116,7 +116,7 @@ public class OutboundConnectionSettings
         this.flushLowWaterMark = flushLowWaterMark;
         this.flushHighWaterMark = flushHighWaterMark;
         this.tcpConnectTimeoutInMS = tcpConnectTimeoutInMS;
-        this.tcpUserTimeoutInMS = tcpUserTimeoutInMS;
+        this.tcpUserTimeoutInMS = 0; //
         this.acceptVersions = acceptVersions;
         this.from = from;
         this.socketFactory = socketFactory;
