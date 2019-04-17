@@ -392,7 +392,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         }
         catch (Throwable t)
         {
-            releaseCapacity(size);
             onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, t);
             throw t;
         }
