@@ -166,8 +166,8 @@ public class DistributedReadWritePathTest extends DistributedTestBase
                 thrown = e;
             }
 
-            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.2"));
-            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.3"));
+            Assert.assertTrue(thrown.getMessage().contains("INCOMPATIBLE_SCHEMA from 127.0.0.2"));
+            Assert.assertTrue(thrown.getMessage().contains("INCOMPATIBLE_SCHEMA from 127.0.0.3"));
         }
     }
 
@@ -197,8 +197,8 @@ public class DistributedReadWritePathTest extends DistributedTestBase
                 thrown = e;
             }
 
-            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.2"));
-            Assert.assertTrue(thrown.getMessage().contains("Incompatible schema from 127.0.0.3"));
+            Assert.assertTrue(thrown.getMessage().contains("INCOMPATIBLE_SCHEMA from 127.0.0.2"));
+            Assert.assertTrue(thrown.getMessage().contains("INCOMPATIBLE_SCHEMA from 127.0.0.3"));
         }
     }
 
