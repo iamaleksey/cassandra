@@ -55,6 +55,7 @@ import org.apache.cassandra.net.async.OutboundConnection.Type;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
+import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
 
 public class ConnectionBurnTest extends ConnectionTest
@@ -218,12 +219,12 @@ public class ConnectionBurnTest extends ConnectionTest
                         for (int i = connections.size() - 1; i >= 1 ; --i)
                         {
                             int average = total / (i + 1);
-                            int max = random.nextInt(0, 2 * average);
+                            int max = random.nextInt(1, min(2 * average, total - 2));
                             int min = random.nextInt(0, max);
                             connections.get(i).controller.setInFlightByteBounds(min, max);
                             total -= max;
                         }
-                        connections.get(0).controller.setInFlightByteBounds(total, random.nextInt(0, total));
+                        connections.get(0).controller.setInFlightByteBounds(random.nextInt(0, total), total);
                         Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.SECONDS);
                     }
                 });
