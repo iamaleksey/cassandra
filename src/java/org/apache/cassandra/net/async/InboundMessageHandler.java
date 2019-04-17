@@ -340,15 +340,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
             return true;
         }
 
-        switch (acquireCapacity(endpointReserve, globalReserve, size))
-        {
-            case INSUFFICIENT_ENDPOINT:
-                enterCapacityWaitQueue(endpointWaitQueue, size, expiresAtNanos, this::onEndpointReserveCapacityRegained);
-                return false;
-            case INSUFFICIENT_GLOBAL:
-                enterCapacityWaitQueue(globalWaitQueue, size, expiresAtNanos, this::onGlobalReserveCapacityRegained);
-                return false;
-        }
+//        switch (acquireCapacity(endpointReserve, globalReserve, size))
+//        {
+//            case INSUFFICIENT_ENDPOINT:
+//                enterCapacityWaitQueue(endpointWaitQueue, size, expiresAtNanos, this::onEndpointReserveCapacityRegained);
+//                return false;
+//            case INSUFFICIENT_GLOBAL:
+//                enterCapacityWaitQueue(globalWaitQueue, size, expiresAtNanos, this::onGlobalReserveCapacityRegained);
+//                return false;
+//        }
 
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
@@ -539,15 +539,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
 
     private void releaseCapacity(int bytes)
     {
-        long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
-        if (oldQueueSize > queueCapacity)
-        {
-            long excess = min(oldQueueSize - queueCapacity, bytes);
-            ResourceLimits.release(endpointReserveCapacity, globalReserveCapacity, excess);
-
-            endpointWaitQueue.signal();
-            globalWaitQueue.signal();
-        }
+//        long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
+//        if (oldQueueSize > queueCapacity)
+//        {
+//            long excess = min(oldQueueSize - queueCapacity, bytes);
+//            ResourceLimits.release(endpointReserveCapacity, globalReserveCapacity, excess);
+//
+//            endpointWaitQueue.signal();
+//            globalWaitQueue.signal();
+//        }
     }
 
     @Override
