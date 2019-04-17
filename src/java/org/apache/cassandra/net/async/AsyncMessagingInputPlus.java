@@ -25,6 +25,21 @@ import java.util.function.IntConsumer;
 import org.apache.cassandra.io.util.RebufferingInputStream;
 import org.jctools.queues.SpscUnboundedArrayQueue;
 
+/**
+ * A {@link RebufferingInputStream} that takes its input asynchronously from a Netty event loop thread.
+ *
+ * A producer thread (Netty event loop) supplies the {@link SharedBytes} it receives to the {@link AsyncMessagingInputPlus},
+ * non-blockingly; they are later consumed - blockingly - by a consumer thread outside of the event loop.
+ *
+ * {@link #supply(SharedBytes)}, {@link #requestClosure()}, and {@link #supplyAndRequestClosure(SharedBytes)} methods
+ * MUST only be invoked by the producer thread. {@link #close()} method MUST only be invoked by the consumer thread.
+ *
+ * The producer thread MUST invoke {@link #requestClosure()} or {@link #supplyAndRequestClosure(SharedBytes)} in the end,
+ * otherwise the consumer thread might be blocked forever.
+ *
+ * The consumer thread MUST invoke {@link #close()} in the end, to guarantee that under any circumstancies, the last
+ * supplied {@link SharedBytes} are released.
+ */
 class AsyncMessagingInputPlus extends RebufferingInputStream
 {
     /**
@@ -58,6 +73,83 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
         this.onReleased = onReleased;
     }
 
+    /*
+     * Methods intended to be invoked by the producer thread only
+     */
+
+    /**
+     * Supply a {@link SharedBytes} buffer to the consumer.
+     *
+     * Intended to be invoked by the producer thread only.
+     */
+    void supply(SharedBytes bytes)
+    {
+        if (isClosed)
+            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncMessagingInputPlus");
+
+        queue.add(bytes);
+        writeBarrier = true;
+
+        maybeUnpark();
+    }
+
+    /**
+     * Ask {@link AsyncMessagingInputPlus} to close itself on the consumer thread.
+     *
+     * Intended to be invoked by the producer thread only.
+     */
+    void requestClosure()
+    {
+        if (isClosed)
+            throw new IllegalStateException("Cannot close an already closed AsyncMessagingInputPlus");
+
+        queue.add(CLOSE_INPUT);
+        writeBarrier = true;
+
+        maybeUnpark();
+    }
+
+    /**
+     * Supply a {@link SharedBytes} buffer to {@link AsyncMessagingInputPlus} and ask it to close itself on the consumer thread.
+     *
+     * Intended to be invoked by the producer thread only.
+     */
+    void supplyAndRequestClosure(SharedBytes bytes)
+    {
+        if (isClosed)
+            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncMessagingInputPlus");
+
+        queue.add(bytes);
+        queue.add(CLOSE_INPUT);
+        writeBarrier = true;
+
+        maybeUnpark();
+    }
+
+    private void maybeUnpark()
+    {
+        Thread thread = parkedThread;
+        if (null != thread)
+            LockSupport.unpark(thread);
+    }
+
+    /*
+     * Methods intended to be invoked by the consumer thread only
+     */
+
+    private SharedBytes pollBlockingly()
+    {
+        SharedBytes buf = queue.poll();
+        if (null != buf)
+            return buf;
+
+        parkedThread = Thread.currentThread();
+        while ((buf = queue.poll()) == null)
+            LockSupport.park();
+        parkedThread = null;
+        return buf;
+    }
+
     @Override
     protected void reBuffer() throws InputClosedException
     {
@@ -76,10 +168,10 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
     }
 
     /**
-     * Must be invoked by the owning thread only.
+     * Will block and wait until {@link #requestClosure} is invoked by the producer thread, skipping over and releasing
+     * any buffers encountered while waiting for an input-close marker.
      *
-     * Will blockingly wait until {@link #requestClosure} is invoked, skipping over and releasing
-     * any buffers encountered while waiting for the CLOSE_INPUT marker.
+     * Must be invoked by the owning thread only.
      */
     @Override
     public void close()
@@ -99,25 +191,6 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
         isClosed = true;
     }
 
-    void supply(SharedBytes bytes)
-    {
-        if (isClosed)
-            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncMessagingInputPlus");
-
-        queue.add(bytes);
-        writeBarrier = true;
-        maybeUnpark();
-    }
-
-    void supplyAndCloseWithoutSignaling(SharedBytes bytes)
-    {
-        if (isClosed)
-            throw new IllegalStateException("Cannot supply a buffer to a closed AsyncMessagingInputPlus");
-
-        queue.add(bytes);
-        queue.add(CLOSE_INPUT);
-    }
-
     private void releaseCurrentBuf()
     {
         current.release();
@@ -126,40 +199,5 @@ class AsyncMessagingInputPlus extends RebufferingInputStream
         current = null;
         currentSize = 0;
         buffer = null;
-    }
-
-    /**
-     * Ask {@link AsyncMessagingInputPlus} to close itself.
-     *
-     * This close method is designed to be invoked by the non-owning thread.
-     */
-    void requestClosure()
-    {
-        if (isClosed)
-            throw new IllegalStateException("Cannot close an already closed AsyncMessagingInputPlus");
-
-        queue.add(CLOSE_INPUT);
-        writeBarrier = true;
-        maybeUnpark();
-    }
-
-    private SharedBytes pollBlockingly()
-    {
-        SharedBytes buf = queue.poll();
-        if (null != buf)
-            return buf;
-
-        parkedThread = Thread.currentThread();
-        while ((buf = queue.poll()) == null)
-            LockSupport.park();
-        parkedThread = null;
-        return buf;
-    }
-
-    private void maybeUnpark()
-    {
-        Thread thread = parkedThread;
-        if (null != thread)
-            LockSupport.unpark(thread);
     }
 }

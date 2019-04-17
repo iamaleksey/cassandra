@@ -417,7 +417,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         receivedBytes += size;
 
         LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
-        boolean isKeepingUp = coprocessor.supplyAndCloseWithoutSignaling(bytes.sliceAndConsume(size).atomic());
+        boolean isKeepingUp = coprocessor.supplyAndRequestClosure(bytes.sliceAndConsume(size).atomic());
         largeExecutor.submit(coprocessor);
         return isKeepingUp;
     }
@@ -706,10 +706,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
             return unconsumed <= maxUnconsumedBytes;
         }
 
-        boolean supplyAndCloseWithoutSignaling(SharedBytes bytes)
+        boolean supplyAndRequestClosure(SharedBytes bytes)
         {
             int unconsumed = largeUnconsumedBytesUpdater.addAndGet(InboundMessageHandler.this, bytes.readableBytes());
-            input.supplyAndCloseWithoutSignaling(bytes);
+            input.supplyAndRequestClosure(bytes);
             return unconsumed <= maxUnconsumedBytes;
         }
 
