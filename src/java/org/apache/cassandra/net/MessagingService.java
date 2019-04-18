@@ -122,7 +122,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     public final ResourceLimits.Limit reserveReceiveQueueGlobalLimitInBytes =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes());
-    public final InboundMessageHandler.WaitQueue inboundHandlerWaitQueue = new InboundMessageHandler.WaitQueue(reserveReceiveQueueGlobalLimitInBytes);
+    public final InboundMessageHandler.WaitQueue inboundHandlerWaitQueue = InboundMessageHandler.WaitQueue.global(reserveReceiveQueueGlobalLimitInBytes);
 
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();

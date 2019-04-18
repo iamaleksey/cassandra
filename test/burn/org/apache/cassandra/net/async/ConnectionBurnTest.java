@@ -90,7 +90,7 @@ public class ConnectionBurnTest extends ConnectionTest
         Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<MessageCallbacks, MessageCallbacks> callbacks)
         {
             ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
-            InboundMessageHandler.WaitQueue globalWaitQueue = new InboundMessageHandler.WaitQueue(globalLimit);
+            InboundMessageHandler.WaitQueue globalWaitQueue = InboundMessageHandler.WaitQueue.global(globalLimit);
             Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender = new HashMap<>();
             List<InboundConnectionSettings> bind = new ArrayList<>();
             for (InetAddressAndPort recipient : endpoints)

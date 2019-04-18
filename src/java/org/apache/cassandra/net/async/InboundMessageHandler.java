@@ -23,12 +23,10 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
-import java.util.function.Consumer;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -53,6 +51,7 @@ import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
+import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -341,10 +340,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         switch (acquireCapacity(endpointReserve, globalReserve, size))
         {
             case INSUFFICIENT_ENDPOINT:
-                enterCapacityWaitQueue(endpointWaitQueue, size, expiresAtNanos, this::onEndpointReserveCapacityRegained);
+                ticket = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
             case INSUFFICIENT_GLOBAL:
-                enterCapacityWaitQueue(globalWaitQueue, size, expiresAtNanos, this::onGlobalReserveCapacityRegained);
+                ticket = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
         }
 
@@ -356,11 +355,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return processMessageOffEventLoopContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
         else
             return processMessageOffEventLoopUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-    }
-
-    private void enterCapacityWaitQueue(WaitQueue queue, int bytesRequested, long expiresAtNanos, Consumer<Limit> onCapacityRegained)
-    {
-        ticket = queue.registerAndSignal(bytesRequested, expiresAtNanos, channel.eventLoop(), onCapacityRegained, this::exceptionCaught, this::resumeIfNotBlocked);
     }
 
     private boolean processMessageOnEventLoop(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
@@ -510,6 +504,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (!isClosed && !isBlocked)
             readSwitch.resume();
+    }
+
+    private EventLoop eventLoop()
+    {
+        return channel.eventLoop();
     }
 
     private Outcome acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes)
@@ -727,6 +726,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     public static final class WaitQueue
     {
+        enum Kind { ENDPOINT_CAPACITY, GLOBAL_CAPACITY }
+
         /*
          * Callback scheduler states
          */
@@ -738,23 +739,31 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private static final AtomicIntegerFieldUpdater<WaitQueue> scheduledUpdater =
             AtomicIntegerFieldUpdater.newUpdater(WaitQueue.class, "scheduled");
 
+        private final Kind kind;
         private final Limit reserveCapacity;
 
-        private final ConcurrentLinkedQueue<Ticket> queue = new ConcurrentLinkedQueue<>();
+        // TODO: do I trust this queue to behave?
+        private final MpscLinkedQueue<Ticket> queue = MpscLinkedQueue.newMpscLinkedQueue();
 
-        public WaitQueue(Limit reserveCapacity)
+        private WaitQueue(Limit reserveCapacity, Kind kind)
         {
             this.reserveCapacity = reserveCapacity;
+            this.kind = kind;
         }
 
-        private Ticket registerAndSignal(int bytesRequested,
-                                         long expiresAtNanos,
-                                         EventLoop eventLoop,
-                                         Consumer<Limit> processOneCallback,
-                                         Consumer<Throwable> errorCallback,
-                                         Runnable resumeCallback)
+        public static WaitQueue endpoint(Limit endpointReserveCapacity)
         {
-            Ticket ticket = new Ticket(this, bytesRequested, expiresAtNanos, eventLoop, processOneCallback, errorCallback, resumeCallback);
+            return new WaitQueue(endpointReserveCapacity, Kind.ENDPOINT_CAPACITY);
+        }
+
+        public static WaitQueue global(Limit globalReserveCapacity)
+        {
+            return new WaitQueue(globalReserveCapacity, Kind.GLOBAL_CAPACITY);
+        }
+
+        private Ticket registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+        {
+            Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
             queue.add(ticket);
             signal();
             return ticket;
@@ -786,7 +795,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 if (!t.call()) // invalidated
                 {
-                    queue.poll();
+                    if (t != queue.poll())
+                        throw new RuntimeException("Queue peek() != poll()");
+
                     continue;
                 }
 
@@ -799,7 +810,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (null == tasks)
                     tasks = new IdentityHashMap<>();
 
-                tasks.computeIfAbsent(t.eventLoop, e -> new ResumeProcessing()).add(queue.poll());
+                if (t != queue.poll())
+                    throw new RuntimeException("Queue peek() != poll()");
+
+                tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ResumeProcessing()).add(t);
             }
 
             if (null != tasks)
@@ -833,13 +847,16 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     {
                         try
                         {
-                            ticket.processOneCallback.accept(limit);
+                            if (kind == Kind.ENDPOINT_CAPACITY)
+                                ticket.handler.onEndpointReserveCapacityRegained(limit);
+                            else
+                                ticket.handler.onGlobalReserveCapacityRegained(limit);
                         }
                         catch (Throwable t)
                         {
                             try
                             {
-                                ticket.errorCallback.accept(t);
+                                ticket.handler.exceptionCaught(t);
                             }
                             catch (Throwable e)
                             {
@@ -864,13 +881,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 {
                     try
                     {
-                        ticket.resumeCallback.run();
+                        ticket.handler.resumeIfNotBlocked();
                     }
                     catch (Throwable t)
                     {
                         try
                         {
-                            ticket.errorCallback.accept(t);
+                            ticket.handler.exceptionCaught(t);
                         }
                         catch (Throwable e)
                         {
@@ -892,30 +909,16 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 AtomicIntegerFieldUpdater.newUpdater(Ticket.class, "state");
 
             private final WaitQueue waitQueue;
+            private final InboundMessageHandler handler;
             private final int bytesRequested;
             private final long expiresAtNanos;
-            private final EventLoop eventLoop;
 
-            private final Consumer<Limit> processOneCallback;
-            private final Consumer<Throwable> errorCallback;
-            private final Runnable resumeCallback;
-
-            private Ticket(WaitQueue waitQueue,
-                           int bytesRequested,
-                           long expiresAtNanos,
-                           EventLoop eventLoop,
-                           Consumer<Limit> processOneCallback,
-                           Consumer<Throwable> errorCallback,
-                           Runnable resumeCallback)
+            private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
             {
                 this.waitQueue = waitQueue;
+                this.handler = handler;
                 this.bytesRequested = bytesRequested;
                 this.expiresAtNanos = expiresAtNanos;
-                this.eventLoop = eventLoop;
-
-                this.processOneCallback = processOneCallback;
-                this.errorCallback = errorCallback;
-                this.resumeCallback = resumeCallback;
             }
 
             boolean isInvalidated()

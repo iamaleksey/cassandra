@@ -81,7 +81,7 @@ public final class InboundMessageHandlers implements MessageCallbacks
         this.globalReserveCapacity = globalReserveCapacity;
         this.callbackAdapter = callbackAdapter;
 
-        this.endpointWaitQueue = new InboundMessageHandler.WaitQueue(this.endpointReserveCapacity);
+        this.endpointWaitQueue = InboundMessageHandler.WaitQueue.endpoint(this.endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
 
         this.handlers = new CopyOnWriteArrayList<>();
