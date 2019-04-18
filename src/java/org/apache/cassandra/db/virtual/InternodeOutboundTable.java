@@ -49,8 +49,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
     private static final String OVERFLOW_COUNT = "overflow_count";
     private static final String OVERFLOW_BYTES = "overflow_bytes";
     private static final String ACTIVE_CONNECTION_COUNT = "active_connections";
+    private static final String CONNECTION_ATTEMPTS = "connection_attempts";
     private static final String SUCCESSFUL_CONNECTION_ATTEMPTS = "successful_connection_attempts";
-    private static final String FAILED_CONNECTION_ATTEMPTS = "failed_connection_attempts";
 
     InternodeOutboundTable(String keyspace)
     {
@@ -70,8 +70,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                            .addRegularColumn(OVERFLOW_COUNT, LongType.instance)
                            .addRegularColumn(OVERFLOW_BYTES, LongType.instance)
                            .addRegularColumn(ACTIVE_CONNECTION_COUNT, LongType.instance)
+                           .addRegularColumn(CONNECTION_ATTEMPTS, LongType.instance)
                            .addRegularColumn(SUCCESSFUL_CONNECTION_ATTEMPTS, LongType.instance)
-                           .addRegularColumn(FAILED_CONNECTION_ATTEMPTS, LongType.instance)
                            .build());
     }
 
@@ -114,8 +114,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                .column(OVERFLOW_COUNT, sum(connections, OutboundConnection::overloadBytes))
                .column(OVERFLOW_BYTES, sum(connections, OutboundConnection::overloadCount))
                .column(ACTIVE_CONNECTION_COUNT, sum(connections, c -> c.isConnected() ? 1 : 0))
-               .column(SUCCESSFUL_CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::successfulConnections))
-               .column(FAILED_CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::failedConnectionAttempts));
+               .column(CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::connectionAttempts))
+               .column(SUCCESSFUL_CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::successfulConnections));
     }
 
     private static long sum(OutboundConnections connections, ToLongFunction<OutboundConnection> f)

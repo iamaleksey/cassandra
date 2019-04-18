@@ -178,6 +178,7 @@ public class ConnectionBurnTest extends ConnectionTest
 
         public void run() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException, TimeoutException
         {
+            Reporters reporters = new Reporters(endpoints, connections);
             try
             {
                 long deadline = System.nanoTime() + runForNanos;
@@ -200,7 +201,8 @@ public class ConnectionBurnTest extends ConnectionTest
                         }
                         catch (Throwable t)
                         {
-                            fail.add(t);
+                            if (!(t instanceof InterruptedException))
+                                fail.add(t);
                         }
                         finally
                         {
@@ -229,7 +231,6 @@ public class ConnectionBurnTest extends ConnectionTest
                     }
                 });
 
-                Reporters reporters = new Reporters(endpoints, connections);
                 while (deadline > System.nanoTime() && fail.isEmpty())
                 {
                     reporters.update();
@@ -251,6 +252,9 @@ public class ConnectionBurnTest extends ConnectionTest
             }
             finally
             {
+                reporters.update();
+                reporters.print();
+
                 inbound.sockets.close().get();
                 new FutureCombiner(Arrays.stream(connections)
                                          .map(c -> c.outbound.close(false))

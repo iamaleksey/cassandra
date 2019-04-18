@@ -139,7 +139,7 @@ public class OutboundConnection
     private long sent;                          // updated by delivery thread only
     private long sentBytes;                     // updated by delivery thread only
     private long successfulConnections;         // updated by event loop only
-    private long failedConnectionAttempts;      // updated by event loop only
+    private long connectionAttempts;            // updated by event loop only
 
     private static final int pendingByteBits = 42;
     private static boolean isMaxPendingCount(long pendingCountAndBytes)
@@ -990,7 +990,6 @@ public class OutboundConnection
                 assert connecting == null;
 
             retryRateMillis = min(1000, retryRateMillis * 2);
-            ++failedConnectionAttempts;
         }
 
         void onCompletedHandshake(Result<MessagingSuccess> result)
@@ -1073,6 +1072,7 @@ public class OutboundConnection
          */
         void attempt()
         {
+            ++connectionAttempts;
             // system defaults etc might have changed, so refresh before connect
             settings = template.withDefaults(type, messagingVersion);
             if (messagingVersion > settings.acceptVersions.max)
@@ -1491,9 +1491,9 @@ public class OutboundConnection
         return successfulConnections;
     }
 
-    public long failedConnectionAttempts()
+    public long connectionAttempts()
     {
-        return failedConnectionAttempts;
+        return connectionAttempts;
     }
 
     private static Runnable andThen(Runnable a, Runnable b)
