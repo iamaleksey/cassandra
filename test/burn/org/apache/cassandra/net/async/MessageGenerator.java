@@ -18,12 +18,14 @@
 
 package org.apache.cassandra.net.async;
 
+import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
+import sun.misc.Unsafe;
 
 abstract class MessageGenerator
 {
@@ -53,8 +55,8 @@ abstract class MessageGenerator
         UniformPayloadGenerator(long seed, int minSize, int maxSize)
         {
             super(seed);
-            this.minSize = minSize;
-            this.maxSize = maxSize;
+            this.minSize = Math.max(8, minSize);
+            this.maxSize = Math.max(8, maxSize);
             this.fillWithBytes = new byte[32];
             random.setSeed(seed);
             random.nextBytes(fillWithBytes);
@@ -65,6 +67,8 @@ abstract class MessageGenerator
             Message.Builder<Object> builder = builder(id);
             byte[] payload = new byte[minSize + random.nextInt(maxSize - minSize)];
             ByteBuffer wrapped = ByteBuffer.wrap(payload);
+            setId(payload, id);
+            wrapped.position(8);
             while (wrapped.hasRemaining())
                 wrapped.put(fillWithBytes, 0, Math.min(fillWithBytes.length, wrapped.remaining()));
             builder.withPayload(payload);
@@ -76,6 +80,32 @@ abstract class MessageGenerator
             return new UniformPayloadGenerator(seed, minSize, maxSize);
         }
     }
+
+    static long getId(byte[] payload)
+    {
+        return unsafe.getLong(payload, BYTE_ARRAY_BASE_OFFSET);
+    }
+
+    static void setId(byte[] payload, long id)
+    {
+        unsafe.putLong(payload, BYTE_ARRAY_BASE_OFFSET, id);
+    }
+
+    private static final Unsafe unsafe;
+    static
+    {
+        try
+        {
+            Field field = sun.misc.Unsafe.class.getDeclaredField("theUnsafe");
+            field.setAccessible(true);
+            unsafe = (sun.misc.Unsafe) field.get(null);
+        }
+        catch (Exception e)
+        {
+            throw new AssertionError(e);
+        }
+    }
+    private static final long BYTE_ARRAY_BASE_OFFSET = unsafe.arrayBaseOffset(byte[].class);
 
 }
 

@@ -32,6 +32,22 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 public class ExecutorUtils
 {
 
+    public static Runnable runWithThreadName(Runnable runnable, String threadName)
+    {
+        return () -> {
+            String oldThreadName = Thread.currentThread().getName();
+            try
+            {
+                Thread.currentThread().setName(threadName);
+                runnable.run();
+            }
+            finally
+            {
+                Thread.currentThread().setName(oldThreadName);
+            }
+        };
+    }
+
     public static void shutdownNow(Collection<?> executors)
     {
         for (Object executor : executors)

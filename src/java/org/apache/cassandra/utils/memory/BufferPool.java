@@ -67,6 +67,7 @@ public class BufferPool
 
     private final static BufferPoolMetrics metrics = new BufferPoolMetrics();
 
+    // TODO: this should not be using FileCacheSizeInMB
     @VisibleForTesting
     public static long MEMORY_USAGE_THRESHOLD = DatabaseDescriptor.getFileCacheSizeInMB() * 1024L * 1024L;
 
@@ -416,9 +417,8 @@ public class BufferPool
 
         /**
          * Invoked by an existing LocalPool, to create a child pool
-         * @param parent
          */
-        public LocalPool(LocalPool parent)
+        private LocalPool(LocalPool parent)
         {
             this.parent = () -> {
                 ByteBuffer buffer = parent.get(TINY_CHUNK_SIZE, false);
@@ -520,7 +520,7 @@ public class BufferPool
 
             // ask the free method to take exclusive ownership of the act of recycling
             // if we are either: already not owned by anyone, or owned by ourselves
-            long free = chunk.free(buffer, owner == null | (returnChunkToGlobalPoolIfFree & owner == this));
+            long free = chunk.free(buffer, owner == null || (returnChunkToGlobalPoolIfFree & owner == this));
             if (free == 0L)
             {
                 // 0L => we own recycling responsibility, so must recycle;

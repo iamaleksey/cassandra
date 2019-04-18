@@ -224,6 +224,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
         long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
 
+        callbacks.onArrived(id);
+
         if (expiresAtNanos < currentTimeNanos)
         {
             callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
@@ -318,6 +320,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         long id = serializer.getId(buf, version);
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
         long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
+
+        callbacks.onArrived(id);
 
         if (expiresAtNanos < currentTimeNanos)
         {
@@ -427,6 +431,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         return new MessageCallbacks()
         {
+            public void onArrived(long id)
+            {
+                callbacks.onArrived(id);
+            }
+
             @Override
             public void onProcessed(int messageSize)
             {

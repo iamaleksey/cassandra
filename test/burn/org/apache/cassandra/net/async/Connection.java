@@ -19,61 +19,77 @@
 package org.apache.cassandra.net.async;
 
 import java.nio.channels.ClosedChannelException;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.concurrent.ConcurrentSkipListMap;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
-import org.junit.Assert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
-import org.apache.cassandra.utils.concurrent.WaitQueue;
+import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
+import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
 class Connection implements MessageCallbacks, MessageProcessor
 {
+    private static final Logger logger = LoggerFactory.getLogger(Connection.class);
+
     final InetAddressAndPort sender;
     final InetAddressAndPort recipient;
     final InboundMessageHandlers inboundHandlers;
     final BytesInFlightController controller;
     final OutboundConnection outbound;
+    final Verifier verifier;
     final MessageGenerator sendGenerator;
-    final MessageGenerator receiveGenerator;
+    final String linkId;
     final long minId;
     final long maxId;
-    final int version;
-    final long onEventLoopThreshold;
 
     private final AtomicLong nextSendId = new AtomicLong();
-    private volatile long minReceiveId;
-    private final ConcurrentSkipListMap<Long, Long> inFlight = new ConcurrentSkipListMap<>();
-    private final WaitQueue waitQueue = new WaitQueue();
 
-    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, InboundMessageHandlers inboundHandlers, OutboundConnection outbound, MessageGenerator generator, long minId, long maxId, int version)
+    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, InboundMessageHandlers inboundHandlers, OutboundConnection outbound, MessageGenerator generator, long minId, long maxId)
     {
         this.sender = sender;
         this.recipient = recipient;
         this.outbound = outbound;
         this.controller = new BytesInFlightController(1 << 20);
         this.sendGenerator = generator.copy();
-        this.receiveGenerator = generator.copy();
         this.minId = minId;
         this.maxId = maxId;
         this.inboundHandlers = inboundHandlers;
-        this.minReceiveId = minId;
-        this.version = version;
         this.nextSendId.set(minId);
-        this.onEventLoopThreshold = version < current_version ? LARGE_MESSAGE_THRESHOLD
-                                                              : OutboundConnection.LargeMessageDelivery.DEFAULT_BUFFER_SIZE;
+        this.linkId = sender.toString(false) + "->" + recipient.toString(false) + "-" + outbound.type();
+        this.verifier = new Verifier(outbound.type());
     }
 
-    void sendOne() throws InterruptedException
+    void start(Runnable onFailure, Executor executor, long deadlineNanos)
+    {
+        executor.execute(runWithThreadName(() -> verifier.run(onFailure, deadlineNanos), "Verify-" + linkId));
+        executor.execute(runWithThreadName(() -> send(onFailure, deadlineNanos), "Generate-" + linkId));
+    }
+
+    private void send(Runnable onFailure, long deadlineNanos)
+    {
+        try
+        {
+            while (ApproximateTime.nanoTime() < deadlineNanos && !Thread.currentThread().isInterrupted())
+                sendOne();
+        }
+        catch (Throwable t)
+        {
+            if (t instanceof InterruptedException)
+                return;
+            logger.error("Unexpected exception", t);
+            onFailure.run();
+        }
+    }
+
+    private void sendOne() throws InterruptedException
     {
         long id = nextSendId.getAndUpdate(i -> i == maxId ? minId : i + 1);
         try
@@ -83,9 +99,11 @@ class Connection implements MessageCallbacks, MessageProcessor
             {
                 msg = sendGenerator.generate(id).withId(id);
             }
+
             controller.send(msg.serializedSize(current_version));
-            inFlight.put(id, (long) msg.serializedSize(version));
+            Verifier.EnqueueMessageEvent e = verifier.enqueue(msg);
             outbound.enqueue(msg);
+            e.complete(verifier);
         }
         catch (ClosedChannelException e)
         {
@@ -94,17 +112,25 @@ class Connection implements MessageCallbacks, MessageProcessor
         }
     }
 
+    public void onSerialize(long id, int messagingVersion)
+    {
+        verifier.serialize(id, messagingVersion);
+    }
+
+    public void onDeserialize(long id, int messagingVersion)
+    {
+        verifier.deserialize(id, messagingVersion);
+    }
+
     public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
     {
         controller.process(messageSize, callbacks);
-        Message<?> canon;
-        synchronized (receiveGenerator)
-        {
-            canon = receiveGenerator.generate(message.id);
-        }
-        if (!Arrays.equals((byte[])canon.payload, (byte[]) message.payload)) // assertArrayEquals is EXTREMELY inefficient
-            Assert.assertArrayEquals((byte[])canon.payload, (byte[]) message.payload);
-        checkReceived(messageSize, message.id, true);
+        verifier.process(message, messageSize);
+    }
+
+    public void onArrived(long id)
+    {
+        verifier.arrive(id);
     }
 
     public void onProcessed(int messageSize)
@@ -130,13 +156,6 @@ class Connection implements MessageCallbacks, MessageProcessor
     private void onFailed(int messageSize, long id)
     {
         controller.fail(messageSize);
-        Message<?> canon;
-        synchronized (receiveGenerator)
-        {
-            canon = receiveGenerator.generate(id);
-        }
-        Assert.assertEquals(canon.serializedSize(current_version), messageSize);
-        checkReceived(messageSize, id, false);
     }
 
     InboundCounters inboundCounters()
@@ -144,56 +163,5 @@ class Connection implements MessageCallbacks, MessageProcessor
         return inboundHandlers.countersFor(outbound.type());
     }
 
-    private long difference(long newest, long oldest)
-    {
-        return newest > oldest ? newest - oldest : (newest - minId) + (maxId - oldest);
-    }
-
-    private void checkReceived(int messageSize, long id, boolean success)
-    {
-//        System.out.println("C " + id);
-        Map.Entry<Long, Long> oldest;
-        oldest = inFlight.ceilingEntry(minReceiveId);
-        if (oldest == null)
-            oldest = inFlight.ceilingEntry(minId);
-        this.minReceiveId = oldest.getKey();
-
-        Assert.assertEquals((long)inFlight.remove(id), (long)messageSize);
-        waitQueue.signalAll();
-
-        if (oldest.getValue() <= onEventLoopThreshold)
-        {
-            // if the oldest value we are waiting for was processed on the event loop, then we must be that message
-            // as we process messages in order on the event loop
-            if (oldest.getKey() != id)
-            {
-                synchronized (this)
-                {
-                    Assert.fail(minId + " " + minReceiveId + " " + oldest.getKey() + " " + maxId + " " +  inFlight.toString());
-                }
-            }
-        }
-        // TODO: special case <= onEventLoopThreshold?
-        // TODO: must discount those that have failed before sending
-        else if (difference(id, oldest.getKey()) > 16)
-        {
-            long waitUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L);
-            while (true)
-            {
-                WaitQueue.Signal signal = waitQueue.register();
-                if (!inFlight.containsKey(oldest.getKey()))
-                {
-                    signal.cancel();
-                    return;
-                }
-                if (!signal.awaitUntilUninterruptibly(waitUntil) && inFlight.containsKey(oldest.getKey()))
-                {
-                    synchronized (this)
-                    {
-                        Assert.fail(minId + " " + minReceiveId + " " + oldest.getKey() + " " + maxId + " " +  inFlight.toString());
-                    }
-                }
-            }
-        }
-    }
 }
+
