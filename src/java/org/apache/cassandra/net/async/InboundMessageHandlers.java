@@ -203,6 +203,11 @@ public final class InboundMessageHandlers
         return new MessageCallbacks()
         {
             @Override
+            public void onArrived(long id)
+            {
+            }
+
+            @Override
             public void onProcessed(int messageSize)
             {
                 counters.removePending(messageSize);

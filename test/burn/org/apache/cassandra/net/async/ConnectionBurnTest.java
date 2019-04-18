@@ -59,28 +59,6 @@ import static org.apache.cassandra.net.MessagingService.current_version;
 
 public class ConnectionBurnTest extends ConnectionTest
 {
-    private static final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
-    {
-        public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
-        {
-            out.writeUnsignedVInt(t.length);
-            out.write(t);
-        }
-
-        public byte[] deserialize(DataInputPlus in, int version) throws IOException
-        {
-            int length = Ints.checkedCast(in.readUnsignedVInt());
-            byte[] result = new byte[length];
-            in.readFully(result);
-            return result;
-        }
-
-        public long serializedSize(byte[] t, int version)
-        {
-            return t.length + VIntCoding.computeUnsignedVIntSize(t.length);
-        }
-    };
-
     static class Inbound
     {
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;
@@ -109,6 +87,32 @@ public class ConnectionBurnTest extends ConnectionTest
 
     private static class Test implements MessageProcessor
     {
+        private final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
+        {
+            public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
+            {
+                long id = MessageGenerator.getId(t);
+                forId(id).onSerialize(id, version);
+                out.writeUnsignedVInt(t.length);
+                out.write(t);
+            }
+
+            public byte[] deserialize(DataInputPlus in, int version) throws IOException
+            {
+                int length = Ints.checkedCast(in.readUnsignedVInt());
+                byte[] result = new byte[length];
+                in.readFully(result);
+                long id = MessageGenerator.getId(result);
+                forId(id).onDeserialize(id, version);
+                return result;
+            }
+
+            public long serializedSize(byte[] t, int version)
+            {
+                return t.length + VIntCoding.computeUnsignedVIntSize(t.length);
+            }
+        };
+
         static class Builder
         {
             long time;
@@ -156,7 +160,7 @@ public class ConnectionBurnTest extends ConnectionTest
                     OutboundConnections connections = OutboundConnections.unsafeCreate(outboundTemplate.toEndpoint(recipient).withFrom(sender), null);
                     for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
-                        this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId, version);
+                        this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId);
                         this.connectionMessageIds[i] = minId;
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
@@ -185,27 +189,9 @@ public class ConnectionBurnTest extends ConnectionTest
                 inbound.sockets.open().get();
 
                 CountDownLatch failed = new CountDownLatch(1);
-                CopyOnWriteArrayList<Throwable> failures = new CopyOnWriteArrayList<>();
                 for (Connection connection : connections)
-                {
-                    executor.execute(() -> {
-                        Thread.currentThread().setName("Test-" + connection.sender.address + "->" + connection.recipient.address + '_' + connection.outbound.type());
-                        try
-                        {
-                            while (!Thread.currentThread().isInterrupted())
-                            {
-                                for (int i = 0 ; i < 100 ; ++i)
-                                    connection.sendOne();
-                            }
-                        }
-                        catch (Throwable t)
-                        {
-                            if (!(t instanceof InterruptedException))
-                                failures.add(t);
-                            failed.countDown();
-                        }
-                    });
-                }
+                    connection.start(failed::countDown, executor, deadline);
+
                 executor.execute(() -> {
                     Thread.currentThread().setName("Test-SetInFlight");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -227,7 +213,7 @@ public class ConnectionBurnTest extends ConnectionTest
                     }
                 });
 
-                while (deadline > System.nanoTime() && failures.isEmpty())
+                while (deadline > System.nanoTime() && failed.getCount() > 0)
                 {
                     reporters.update();
                     reporters.print();
@@ -235,15 +221,6 @@ public class ConnectionBurnTest extends ConnectionTest
                 }
 
                 executor.shutdownNow();
-
-                if (!failures.isEmpty())
-                {
-                    AssertionError failure = new AssertionError("One or more tasks threw exceptions");
-                    for (Throwable t : failures)
-                        failure.addSuppressed(t);
-                    throw failure;
-                }
-
                 ExecutorUtils.awaitTermination(1L, TimeUnit.MINUTES, executor);
             }
             finally
@@ -265,6 +242,11 @@ public class ConnectionBurnTest extends ConnectionTest
             WrappedCallbacks(MessageCallbacks wrapped)
             {
                 this.wrapped = wrapped;
+            }
+
+            public void onArrived(long id)
+            {
+                forId(id).onArrived(id);
             }
 
             public void onProcessed(int messageSize)
