@@ -103,8 +103,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
     private final WaitQueue globalWaitQueue;
 
     private final OnHandlerClosed onClosed;
-    private final MessageCallbacks wrappedCallbacks;
-    private final MessageCallbacks callbacks;
+    private final MessageCallbacks propagateCallbacksTo;
+    private final MessageCallbacks invokeCallbacks;
     private final MessageProcessor processor;
 
     private int largeBytesRemaining; // remainig bytes we need to supply to the coprocessor to deserialize the in-flight large message
@@ -160,7 +160,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
                           WaitQueue globalWaitQueue,
 
                           OnHandlerClosed onClosed,
-                          MessageCallbacks callbacks,
+                          MessageCallbacks invokeCallbacks,
                           Function<MessageCallbacks, MessageCallbacks> callbackAdapter,
                           MessageProcessor processor)
     {
@@ -180,8 +180,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         this.globalWaitQueue = globalWaitQueue;
 
         this.onClosed = onClosed;
-        this.wrappedCallbacks = callbacks;
-        this.callbacks = callbackAdapter.apply(this);
+        this.propagateCallbacksTo = invokeCallbacks;
+        this.invokeCallbacks = callbackAdapter.apply(this);
         this.processor = processor;
 
         // set up next read context
@@ -326,7 +326,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            invokeCallbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
 
             int skipped = contained ? size : buf.remaining();
             receivedBytes += skipped;
@@ -383,16 +383,16 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         catch (UnknownTableException | UnknownColumnException e)
         {
             noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
-            onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
+            invokeCallbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
         }
         catch (IOException e)
         {
             logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
-            onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
+            invokeCallbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
         }
         catch (Throwable t)
         {
-            onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, t);
+            invokeCallbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, t);
             throw t;
         }
         finally
@@ -405,7 +405,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
         }
 
         if (null != message)
-            processor.process(message, size, callbacks);
+            processor.process(message, size, invokeCallbacks);
 
         return true;
     }
@@ -440,26 +440,26 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
     public void onProcessed(int messageSize)
     {
         releaseCapacity(messageSize);
-        wrappedCallbacks.onProcessed(messageSize);
+        propagateCallbacksTo.onProcessed(messageSize);
     }
 
     @Override
     public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
     {
         releaseCapacity(messageSize);
-        wrappedCallbacks.onExpired(messageSize, id, verb, timeElapsed, unit);
+        propagateCallbacksTo.onExpired(messageSize, id, verb, timeElapsed, unit);
     }
 
     @Override
     public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
     {
-        wrappedCallbacks.onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
+        propagateCallbacksTo.onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
     }
 
     @Override
     public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
     {
-        wrappedCallbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
+        propagateCallbacksTo.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
     }
 
     private void onCoprocessorCaughtUp()
@@ -664,18 +664,18 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
             catch (UnknownTableException | UnknownColumnException e)
             {
                 noSpamLogger.info("{} caught while reading a large message from {}", e.getClass().getSimpleName(), peer, e);
-                callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
+                invokeCallbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
             }
             catch (IOException e)
             {
                 logger.error("Unexpected IOException caught while reading a large message from {}", peer, e);
-                callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
+                invokeCallbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
                 logger.error("Unexpected exception caught while reading a large message from {}", peer, t);
-                callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
+                invokeCallbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
             }
             finally
@@ -687,7 +687,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter im
             }
 
             if (null != message)
-                processor.process(message, messageSize, callbacks);
+                processor.process(message, messageSize, invokeCallbacks);
         }
 
         void stop()
