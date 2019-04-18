@@ -185,15 +185,15 @@ public class ConnectionBurnTest extends ConnectionTest
                 Verb._TEST_2.unsafeSetSerializer(() -> serializer);
                 inbound.sockets.open().get();
 
-                CountDownLatch done = new CountDownLatch(connections.length);
-                CopyOnWriteArrayList<Throwable> fail = new CopyOnWriteArrayList<>();
+                CountDownLatch failed = new CountDownLatch(1);
+                CopyOnWriteArrayList<Throwable> failures = new CopyOnWriteArrayList<>();
                 for (Connection connection : connections)
                 {
                     executor.execute(() -> {
                         Thread.currentThread().setName("Test-" + connection.sender.address + "->" + connection.recipient.address + '_' + connection.outbound.type());
                         try
                         {
-                            while (deadline > System.nanoTime() && !Thread.currentThread().isInterrupted())
+                            while (!Thread.currentThread().isInterrupted())
                             {
                                 for (int i = 0 ; i < 100 ; ++i)
                                     connection.sendOne();
@@ -202,11 +202,8 @@ public class ConnectionBurnTest extends ConnectionTest
                         catch (Throwable t)
                         {
                             if (!(t instanceof InterruptedException))
-                                fail.add(t);
-                        }
-                        finally
-                        {
-                            done.countDown();
+                                failures.add(t);
+                            failed.countDown();
                         }
                     });
                 }
@@ -214,7 +211,7 @@ public class ConnectionBurnTest extends ConnectionTest
                     Thread.currentThread().setName("Test-SetInFlight");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
                     List<Connection> connections = new ArrayList<>(Arrays.asList(this.connections));
-                    while (deadline > System.nanoTime())
+                    while (!Thread.currentThread().isInterrupted())
                     {
                         Collections.shuffle(connections);
                         int total = random.nextInt(1 << 20, 128 << 20);
@@ -231,19 +228,19 @@ public class ConnectionBurnTest extends ConnectionTest
                     }
                 });
 
-                while (deadline > System.nanoTime() && fail.isEmpty())
+                while (deadline > System.nanoTime() && failures.isEmpty())
                 {
                     reporters.update();
                     reporters.print();
-                    Uninterruptibles.awaitUninterruptibly(done, 30L, TimeUnit.SECONDS);
+                    Uninterruptibles.awaitUninterruptibly(failed, 30L, TimeUnit.SECONDS);
                 }
 
                 executor.shutdownNow();
 
-                if (!fail.isEmpty())
+                if (!failures.isEmpty())
                 {
                     AssertionError failure = new AssertionError("One or more tasks threw exceptions");
-                    for (Throwable t : fail)
+                    for (Throwable t : failures)
                         failure.addSuppressed(t);
                     throw failure;
                 }
