@@ -36,7 +36,6 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.EventExecutorGroup;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.util.DataInputBuffer;
@@ -110,7 +109,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
-    private WaitQueue.Ticket ticket = null;
+    private WaitQueue.Handle handle = null;
 
     long receivedCount, receivedBytes;
     int corruptFramesRecovered, corruptFramesUnrecovered;
@@ -341,10 +340,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         switch (acquireCapacity(endpointReserve, globalReserve, size))
         {
             case INSUFFICIENT_ENDPOINT:
-                ticket = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                handle = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
             case INSUFFICIENT_GLOBAL:
-                ticket = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                handle = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
         }
 
@@ -473,13 +472,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void onEndpointReserveCapacityRegained(Limit endpointReserve)
     {
-        ticket = null;
+        handle = null;
         onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
     }
 
     private void onGlobalReserveCapacityRegained(Limit globalReserve)
     {
-        ticket = null;
+        handle = null;
         onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
     }
 
@@ -589,10 +588,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (null != largeCoprocessor)
             stopCoprocessor();
 
-        if (null != ticket)
+        if (null != handle)
         {
-            ticket.invalidate();
-            ticket = null;
+            handle.invalidate();
+            handle = null;
         }
 
         onClosed.call(this);
@@ -737,6 +736,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         @SuppressWarnings("unused")
         private static final int RUNNING     = 1;
         private static final int RUN_AGAIN   = 2;
+
         private volatile int scheduled;
         private static final AtomicIntegerFieldUpdater<WaitQueue> scheduledUpdater =
             AtomicIntegerFieldUpdater.newUpdater(WaitQueue.class, "scheduled");
@@ -744,8 +744,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private final Kind kind;
         private final Limit reserveCapacity;
 
-        // TODO: do I trust this queue to behave?
-        private final MpscLinkedQueue<Ticket> queue = MpscLinkedQueue.newMpscLinkedQueue();
+        private final MpscLinkedQueue<Handle> queue = MpscLinkedQueue.newMpscLinkedQueue();
 
         private WaitQueue(Limit reserveCapacity, Kind kind)
         {
@@ -763,12 +762,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return new WaitQueue(globalReserveCapacity, Kind.GLOBAL_CAPACITY);
         }
 
-        private Ticket registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+        private Handle registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
         {
-            Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
-            queue.add(ticket);
+            Handle handle = new Handle(this, handler, bytesRequested, expiresAtNanos);
+            queue.add(handle);
             signal();
-            return ticket;
+            return handle;
         }
 
         void signal()
@@ -792,13 +791,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             long nanoTime = ApproximateTime.nanoTime();
 
-            Ticket t;
+            Handle t;
             while ((t = queue.peek()) != null)
             {
                 if (!t.call()) // invalidated
                 {
                     if (t != queue.poll())
-                        throw new RuntimeException("Queue peek() != poll()");
+                        throw new IllegalStateException("Queue peek() != poll()");
 
                     continue;
                 }
@@ -813,114 +812,110 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     tasks = new IdentityHashMap<>();
 
                 if (t != queue.poll())
-                    throw new RuntimeException("Queue peek() != poll()");
+                    throw new IllegalStateException("Queue peek() != poll()");
 
                 tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ResumeProcessing()).add(t);
             }
 
             if (null != tasks)
-                tasks.forEach(EventExecutorGroup::submit);
+                tasks.forEach(EventLoop::execute);
         }
 
         class ResumeProcessing implements Runnable
         {
-            List<Ticket> tickets = new ArrayList<>();
+            List<Handle> handles = new ArrayList<>();
 
-            private void add(Ticket ticket)
+            private void add(Handle handle)
             {
-                tickets.add(ticket);
+                handles.add(handle);
             }
 
             public void run()
             {
                 long capacity = 0L;
-
-                for (Ticket t : tickets)
-                    capacity += t.bytesRequested;
+                for (Handle handle : handles)
+                    capacity += handle.bytesRequested;
 
                 Limit limit = new ResourceLimits.Basic(capacity);
-
-                /*
-                 * For each handler, process one message off the current frame.
-                 */
                 try
                 {
-                    for (Ticket ticket : tickets)
-                    {
-                        try
-                        {
-                            if (kind == Kind.ENDPOINT_CAPACITY)
-                                ticket.handler.onEndpointReserveCapacityRegained(limit);
-                            else
-                                ticket.handler.onGlobalReserveCapacityRegained(limit);
-                        }
-                        catch (Throwable t)
-                        {
-                            try
-                            {
-                                ticket.handler.exceptionCaught(t);
-                            }
-                            catch (Throwable e)
-                            {
-                                // no-op
-                            }
-                        }
-                    }
+                    for (Handle handle : handles)
+                        handle.processOneMessage(limit);
                 }
                 finally
                 {
                     /*
                      * Free up any unused global capacity, if any. Will be non-zero if one or more handlers were closed
-                     * when we attempted to run their callback or used more of their personal allowance.
+                     * when we attempted to run their callback or used more of their personal allowance; or if the first
+                     * message in the unprocessed stream has expired in the narrow time window.
                      */
                     reserveCapacity.release(limit.remaining());
                 }
 
-                /*
-                 * For each handler, resume normal processing.
-                 */
-                for (Ticket ticket : tickets)
-                {
-                    try
-                    {
-                        ticket.handler.resumeIfNotBlocked();
-                    }
-                    catch (Throwable t)
-                    {
-                        try
-                        {
-                            ticket.handler.exceptionCaught(t);
-                        }
-                        catch (Throwable e)
-                        {
-                            // no-op
-                        }
-                    }
-                }
+                handles.forEach(Handle::resumeNormalProcessing);
             }
         }
 
-        static final class Ticket
+        static final class Handle
         {
             private static final int WAITING     = 0;
             private static final int CALLED      = 1;
             private static final int INVALIDATED = 2;
 
             private volatile int state;
-            private static final AtomicIntegerFieldUpdater<Ticket> stateUpdater =
-                AtomicIntegerFieldUpdater.newUpdater(Ticket.class, "state");
+            private static final AtomicIntegerFieldUpdater<Handle> stateUpdater =
+                AtomicIntegerFieldUpdater.newUpdater(Handle.class, "state");
 
             private final WaitQueue waitQueue;
             private final InboundMessageHandler handler;
             private final int bytesRequested;
             private final long expiresAtNanos;
 
-            private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+            private Handle(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
             {
                 this.waitQueue = waitQueue;
                 this.handler = handler;
                 this.bytesRequested = bytesRequested;
                 this.expiresAtNanos = expiresAtNanos;
+            }
+
+            private void processOneMessage(Limit capacity)
+            {
+                try
+                {
+                    if (waitQueue.kind == Kind.ENDPOINT_CAPACITY)
+                        handler.onEndpointReserveCapacityRegained(capacity);
+                    else
+                        handler.onGlobalReserveCapacityRegained(capacity);
+                }
+                catch (Throwable t)
+                {
+                    handleException(t);
+                }
+            }
+
+            private void resumeNormalProcessing()
+            {
+                try
+                {
+                    handler.resumeIfNotBlocked();
+                }
+                catch (Throwable t)
+                {
+                    handleException(t);
+                }
+            }
+
+            private void handleException(Throwable t)
+            {
+                try
+                {
+                    handler.exceptionCaught(t);
+                }
+                catch (Throwable e)
+                {
+                    // no-op
+                }
             }
 
             boolean isInvalidated()
