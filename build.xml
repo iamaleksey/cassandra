@@ -1945,6 +1945,20 @@
     <delete file="${test.distributed.listfile}"/>
   </target>
 
+  <!-- Build a self-contained jar for e.g. remote execution; not currently used for running burn tests with this build script -->
+  <target name="burn-test-jar" depends="build-test, build" description="Create dtest-compatible jar, including all dependencies">
+      <jar jarfile="${build.dir}/burntest.jar">
+          <zipgroupfileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>
+          <fileset dir="${build.classes.main}"/>
+          <fileset dir="${test.classes}"/>
+          <fileset dir="${test.conf}" excludes="logback*.xml"/>
+          <fileset dir="${basedir}/conf" includes="logback*.xml"/>
+          <zipgroupfileset dir="${build.dir.lib}/jars">
+              <include name="junit*.jar"/>
+          </zipgroupfileset>
+      </jar>
+  </target>
+
   <target name="dtest-jar" depends="build-test, build" description="Create dtest-compatible jar, including all dependencies">
       <jar jarfile="${build.dir}/dtest-${base.version}.jar">
           <zipgroupfileset dir="${build.lib}" includes="*.jar" excludes="META-INF/*.SF"/>

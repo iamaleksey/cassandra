@@ -343,7 +343,7 @@ public class ConnectionBurnTest extends ConnectionTest
             .endpoints(4)
             .inbound(inbound)
             .outbound(outbound)
-            .time(1L, TimeUnit.HOURS)
+            .time(1L, TimeUnit.DAYS)
             .build().run();
     }
 
@@ -355,7 +355,8 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withEndpointReserveLimit(1 << 20)
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
-        test(inboundSettings, new OutboundConnectionSettings(null));
+        test(inboundSettings, new OutboundConnectionSettings(null)
+                              .withTcpUserTimeoutInMS(0));
         MessagingService.instance().socketFactory.shutdownNow();
     }
 
