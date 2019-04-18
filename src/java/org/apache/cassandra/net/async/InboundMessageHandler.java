@@ -49,6 +49,7 @@ import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.jctools.queues.MpscLinkedQueue;
@@ -641,11 +642,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         public void run()
         {
-            String priorThreadName = null;
+            String threadName, priorThreadName = null;
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                Thread.currentThread().setName("MessagingService-Inbound-" + peer + "-LargeMessage-" + messageSize);
+                threadName = "MessagingService-Inbound-" + peer + '-' + FBUtilities.getBroadcastAddressAndPort() + "-LargeMessage-" + id;
+                Thread.currentThread().setName(threadName);
 
                 processLargeMessage();
             }

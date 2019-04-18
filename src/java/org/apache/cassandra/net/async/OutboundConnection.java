@@ -884,7 +884,7 @@ public class OutboundConnection
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "MessagingService-Outbound-" + settings.endpoint + "-LargeMessages";
+                threadName = "MessagingService-Outbound-" + FBUtilities.getBroadcastAddressAndPort() + '-' + settings.endpoint + "-LargeMessages";
                 Thread.currentThread().setName(threadName);
 
                 super.run();
