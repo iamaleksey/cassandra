@@ -179,7 +179,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.globalWaitQueue = globalWaitQueue;
 
         this.onClosed = onClosed;
-        this.callbacks = callbacksTransformer.apply(wrapCallbacks(callbacks));
+        this.callbacks = callbacksTransformer.apply(wrapToReleaseCapacity(callbacks));
         this.processor = processor;
 
         // set up next read context
@@ -431,9 +431,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
 
     /*
-     * Wrapp parent message callbacks to ensure capacity is released onProcessed() and onExpired()
+     * Wrap parent message callbacks to ensure capacity is released onProcessed() and onExpired()
      */
-    private MessageCallbacks wrapCallbacks(MessageCallbacks callbacks)
+    private MessageCallbacks wrapToReleaseCapacity(MessageCallbacks callbacks)
     {
         return new MessageCallbacks()
         {
