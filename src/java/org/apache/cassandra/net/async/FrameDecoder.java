@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.Collection;
@@ -34,13 +35,26 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
-abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements InboundMessageHandler.ReadSwitch
+abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
     abstract static class Frame
     {
         abstract void release();
         abstract boolean isConsumed();
     }
+
+    interface FrameProcessor
+    {
+        /**
+         * Frame processor that the frames should be handed off to.
+         *
+         * @return true if more frames can be taken by the processor, false if the decoder should pause until
+         * it's explicitly resumed.
+         */
+        boolean process(Frame frame) throws IOException;
+    }
+
+    private FrameProcessor processor;
 
     /**
      * The payload bytes of a complete frame, i.e. a frame stripped of its headers and trailers,
@@ -115,7 +129,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
 
     ByteBuffer stash;
     private final Deque<Frame> frames = new ArrayDeque<>(4);
-    private boolean active = true;
+    private boolean active = false;
     private ChannelHandlerContext ctx;
     private ChannelConfig config;
 
@@ -123,32 +137,26 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     abstract void addLastTo(ChannelPipeline pipeline);
 
     /**
-     * For use by InboundMessageHandler (or other upstream handlers) that want to temporarily
-     * stop receiving frames, e.g. because they are behind on processing those they already have.
-     * Once they catch up, {@link #resume} resumes passingn frames up (and reading from the network)
+     * For use by InboundMessageHandler (or other upstream handlers) that want to permanently
+     * stop receiving frames, e.g. because of an exception caught.
      */
-    public void pause()
+    void stop()
     {
-        if (active)
-        {
-            active = false;
-            config.setAutoRead(false);
-        }
+        active = false;
+        config.setAutoRead(false);
     }
 
     /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
-     * receiving frames after previously invoking {@link #pause}
+     * receiving frames after previously indicating that processing should be paused.
      */
-    public void resume()
+    void resume(FrameProcessor processor)
     {
-        if (!active)
-        {
-            active = true;
-            deliver(ctx);
-            if (active) // we could have called pause again before delivery completed
-                config.setAutoRead(true);
-        }
+        this.processor = processor;
+        active = true;
+        deliver(ctx);
+        if (active) // we could have paused again before delivery completed
+            config.setAutoRead(true);
     }
 
     /**
@@ -177,7 +185,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
         }
 
         decode(frames, SharedBytes.wrap(buf));
+
         deliver(ctx);
+        if (!active)
+            config.setAutoRead(false);
     }
 
     /**
@@ -185,20 +196,24 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
      */
     private void deliver(ChannelHandlerContext ctx)
     {
-        while (!frames.isEmpty())
+        try
         {
-            Frame frame = frames.peek();
-            ctx.fireChannelRead(frame);
-
-            assert !active || frame.isConsumed();
-            if (active || frame.isConsumed())
+            while (active && !frames.isEmpty())
             {
-                frames.poll();
-                frame.release();
-            }
+                Frame frame = frames.peek();
+                active = processor.process(frame);
 
-            if (!active)
-                return;
+                assert !active || frame.isConsumed();
+                if (active || frame.isConsumed())
+                {
+                    frames.poll();
+                    frame.release();
+                }
+            }
+        }
+        catch (IOException e)
+        {
+            ctx.fireExceptionCaught(e);
         }
     }
 
@@ -229,6 +244,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter implements Inbo
     {
         this.ctx = ctx;
         this.config = ctx.channel().config();
+
+        config.setAutoRead(false);
     }
 
     public void channelInactive(ChannelHandlerContext ctx)

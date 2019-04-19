@@ -26,7 +26,6 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 
 import io.netty.channel.Channel;
@@ -37,7 +36,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
-import org.apache.cassandra.net.async.InboundMessageHandler.ReadSwitch;
 
 public final class InboundMessageHandlers
 {
@@ -53,7 +51,6 @@ public final class InboundMessageHandlers
     private final Collection<InboundMessageHandler> handlers;
     private final InternodeInboundMetrics metrics;
 
-    private final MessageProcessor messageProcessor;
     private final Function<MessageCallbacks, MessageCallbacks> callbackAdapter;
 
     private final InboundCounters urgentCounters = new InboundCounters();
@@ -90,7 +87,6 @@ public final class InboundMessageHandlers
                                   Function<MessageCallbacks, MessageCallbacks> callbackAdapter)
     {
         this.peer = peer;
-        this.messageProcessor = messageProcessor;
 
         this.queueCapacity = queueCapacity;
         this.endpointReserveCapacity = new ResourceLimits.Concurrent(endpointReserveCapacity);
@@ -114,10 +110,10 @@ public final class InboundMessageHandlers
         legacyProcessor = wrapProcessorForMetrics(messageProcessor, legacyCounters);
     }
 
-    InboundMessageHandler createHandler(ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
+    InboundMessageHandler createHandler(FrameDecoder frameDecoder, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
     {
         InboundMessageHandler handler =
-            new InboundMessageHandler(readSwitch,
+            new InboundMessageHandler(frameDecoder,
 
                                       type,
                                       channel,

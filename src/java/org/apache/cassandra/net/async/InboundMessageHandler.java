@@ -44,6 +44,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
@@ -81,7 +82,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private boolean isClosed;
     private boolean isBlocked;
 
-    private final ReadSwitch readSwitch;
+    private final FrameDecoder decoder;
 
     private final ConnectionType type;
     private final Channel channel;
@@ -122,29 +123,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandler.class, "largeUnconsumedBytes");
 
-    /**
-     * Signal to the underlying frame decoder to pause or resume read activity.
-     */
-    public interface ReadSwitch
-    {
-        void resume();
-        void pause();
-    }
-
-    /*
-     * Context for next invocation of channelRead(). On occasion, it's necessary to override endpoint and global reserves,
-     * and bound processing to just one message. This is the case when we go beyond either per-endpoing reserve capacity
-     * or global reserve capacity.
-     */
-    private static class NextReadContext
-    {
-        private boolean pauseAfterOneMessage;
-        private Limit endpointReserve;
-        private Limit globalReserve;
-    }
-    private final NextReadContext context = new NextReadContext();
-
-    InboundMessageHandler(ReadSwitch readSwitch,
+    InboundMessageHandler(FrameDecoder decoder,
 
                           ConnectionType type,
                           Channel channel,
@@ -165,7 +144,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           Function<MessageCallbacks, MessageCallbacks> callbacksTransformer, // for testing purposes only
                           MessageProcessor processor)
     {
-        this.readSwitch = readSwitch;
+        this.decoder = decoder;
 
         this.type = type;
         this.channel = channel;
@@ -184,29 +163,33 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.onClosed = onClosed;
         this.callbacks = callbacksTransformer.apply(wrapToReleaseCapacity(callbacks));
         this.processor = processor;
-
-        // set up next read context
-        context.pauseAfterOneMessage = false;
-        context.endpointReserve = endpointReserveCapacity;
-        context.globalReserve = globalReserveCapacity;
-    }
-
-    @VisibleForTesting
-    public ConnectionType type()
-    {
-        return type;
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws InvalidLegacyProtocolMagic, InvalidCrc
+    public void handlerAdded(ChannelHandlerContext ctx)
     {
-        if (msg instanceof IntactFrame)
-            readIntactFrame((IntactFrame) msg);
-        else
-            readCorruptFrame((CorruptFrame) msg);
+        decoder.resume(this::readFrame);
     }
 
-    private void readIntactFrame(IntactFrame frame) throws InvalidLegacyProtocolMagic
+    @Override
+    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    {
+        throw new IllegalStateException("InboundMessageHandler doesn't expect channelRead() to be invoked");
+    }
+
+    private boolean readFrame(Frame frame) throws IOException
+    {
+        return readFrame(frame, endpointReserveCapacity, globalReserveCapacity, Integer.MAX_VALUE);
+    }
+
+    private boolean readFrame(Frame frame, Limit endpointReserve, Limit globalReserve, int count) throws IOException
+    {
+        return frame instanceof IntactFrame
+             ? readIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, count)
+             : readCorruptFrame((CorruptFrame) frame);
+    }
+
+    private boolean readIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, int count) throws InvalidLegacyProtocolMagic
     {
         SharedBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
@@ -214,11 +197,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (frame.isSelfContained)
         {
-            isBlocked = processMessages(true, frame.contents);
+            return processMessages(true, frame.contents, endpointReserve, globalReserve, count);
         }
         else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
-            isBlocked = processMessages(false, frame.contents);
+            return processMessages(false, frame.contents, endpointReserve, globalReserve, count);
         }
         else if (largeBytesRemaining > 0)
         {
@@ -232,11 +215,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 stopCoprocessor();
             }
 
-            if (!isKeepingUp)
-            {
-                isBlocked = true;
-                readSwitch.pause();
-            }
+            return isKeepingUp;
         }
         else if (skipBytesRemaining > 0)
         {
@@ -246,6 +225,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             bytes.skipBytes(readableBytes);
             if (skipBytesRemaining == 0)
                 receivedCount++;
+
+            return true;
         }
         else
         {
@@ -253,7 +234,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void readCorruptFrame(CorruptFrame frame) throws InvalidCrc
+    private boolean readCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
         {
@@ -294,34 +275,21 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
 
         corruptFramesRecovered++;
+
+        return true;
     }
 
-    private boolean processMessages(boolean contained, SharedBytes bytes) throws InvalidLegacyProtocolMagic
+    private boolean processMessages(boolean contained, SharedBytes bytes, Limit endpointReserve, Limit globalReserve, int count)
+    throws InvalidLegacyProtocolMagic
     {
-        boolean isBlocked = false;
-        boolean shouldPause = false;
+        while (!isBlocked && bytes.isReadable() && count-- > 0)
+            isBlocked = !processMessage(bytes, contained, endpointReserve, globalReserve);
 
-        while (bytes.isReadable())
-        {
-            isBlocked = !processMessage(bytes, contained, context.endpointReserve, context.globalReserve);
-            if (shouldPause = (isBlocked || context.pauseAfterOneMessage))
-                break;
-        }
-
-        if (shouldPause)
-            readSwitch.pause();
-
-        /*
-         * Reset processing context to normal
-         */
-        context.pauseAfterOneMessage = false;
-        context.endpointReserve = endpointReserveCapacity;
-        context.globalReserve = globalReserveCapacity;
-
-        return isBlocked;
+        return !isBlocked && count > 0;
     }
 
-    private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
         int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
@@ -476,7 +444,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            readSwitch.resume();
+            decoder.resume(this::readFrame);
         }
     }
 
@@ -499,12 +467,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-
-            context.pauseAfterOneMessage = true;
-            context.endpointReserve = endpointReserve;
-            context.globalReserve = globalReserve;
-
-            readSwitch.resume();
+            decoder.resume(frame -> readFrame(frame, endpointReserve, globalReserve, 1));
         }
     }
 
@@ -513,7 +476,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed && !isBlocked)
-            readSwitch.resume();
+            decoder.resume(this::readFrame);
     }
 
     private EventLoop eventLoop()
@@ -570,7 +533,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void exceptionCaught(Throwable cause)
     {
-        readSwitch.pause();
+        decoder.stop();
 
         JVMStabilityInspector.inspectThrowable(cause);
 
@@ -617,6 +580,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         largeCoprocessor.stop();
         largeCoprocessor = null;
+    }
+
+    @VisibleForTesting
+    public ConnectionType type()
+    {
+        return type;
     }
 
     /**
