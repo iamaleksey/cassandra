@@ -139,6 +139,11 @@ class Connection implements MessageCallbacks, MessageProcessor
         checkReceived(messageSize, id, false);
     }
 
+    InboundCounters inboundCounters()
+    {
+        return inboundHandlers.countersFor(outbound.type());
+    }
+
     private long difference(long newest, long oldest)
     {
         return newest > oldest ? newest - oldest : (newest - minId) + (maxId - oldest);

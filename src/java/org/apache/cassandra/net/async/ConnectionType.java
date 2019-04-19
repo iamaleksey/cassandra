@@ -29,7 +29,7 @@ public enum ConnectionType
     LARGE_MESSAGES  (3),
     STREAMING       (4);
 
-    public static final List<ConnectionType> MESSAGING = ImmutableList.of(URGENT_MESSAGES, SMALL_MESSAGES, LARGE_MESSAGES);
+    public static final List<ConnectionType> MESSAGING_TYPES = ImmutableList.of(URGENT_MESSAGES, SMALL_MESSAGES, LARGE_MESSAGES);
 
     public final int id;
 

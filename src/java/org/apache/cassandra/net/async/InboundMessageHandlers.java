@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Functions;
 
 import io.netty.channel.Channel;
@@ -38,7 +39,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.net.async.InboundMessageHandler.ReadSwitch;
 
-public final class InboundMessageHandlers implements MessageCallbacks
+public final class InboundMessageHandlers
 {
     private final InetAddressAndPort peer;
 
@@ -54,6 +55,21 @@ public final class InboundMessageHandlers implements MessageCallbacks
 
     private final MessageProcessor messageProcessor;
     private final Function<MessageCallbacks, MessageCallbacks> callbackAdapter;
+
+    private final InboundCounters urgentCounters = new InboundCounters();
+    private final InboundCounters smallCounters  = new InboundCounters();
+    private final InboundCounters largeCounters  = new InboundCounters();
+    private final InboundCounters legacyCounters = new InboundCounters();
+
+    private final MessageCallbacks urgentCallbacks;
+    private final MessageCallbacks smallCallbacks;
+    private final MessageCallbacks largeCallbacks;
+    private final MessageCallbacks legacyCallbacks;
+
+    private final MessageProcessor urgentProcessor;
+    private final MessageProcessor smallProcessor;
+    private final MessageProcessor largeProcessor;
+    private final MessageProcessor legacyProcessor;
 
     public InboundMessageHandlers(InetAddressAndPort peer,
                                   int queueCapacity,
@@ -86,6 +102,16 @@ public final class InboundMessageHandlers implements MessageCallbacks
 
         this.handlers = new CopyOnWriteArrayList<>();
         this.metrics = new InternodeInboundMetrics(peer, this);
+
+        urgentCallbacks = makeMessageCallbacks(peer, urgentCounters);
+        smallCallbacks  = makeMessageCallbacks(peer, smallCounters);
+        largeCallbacks  = makeMessageCallbacks(peer, largeCounters);
+        legacyCallbacks = makeMessageCallbacks(peer, legacyCounters);
+
+        urgentProcessor = wrapProcessorForMetrics(messageProcessor, urgentCounters);
+        smallProcessor  = wrapProcessorForMetrics(messageProcessor, smallCounters);
+        largeProcessor  = wrapProcessorForMetrics(messageProcessor, largeCounters);
+        legacyProcessor = wrapProcessorForMetrics(messageProcessor, legacyCounters);
     }
 
     InboundMessageHandler createHandler(ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
@@ -108,9 +134,9 @@ public final class InboundMessageHandlers implements MessageCallbacks
                                       globalWaitQueue,
 
                                       this::onHandlerClosed,
-                                      this,
+                                      callbacksFor(type),
                                       callbackAdapter,
-                                      this::process);
+                                      processorFor(type));
         handlers.add(handler);
         return handler;
     }
@@ -120,17 +146,6 @@ public final class InboundMessageHandlers implements MessageCallbacks
         metrics.release();
     }
 
-    /*
-     * Wrap provided MessageProcessor to allow pending message metrics to be maintained.
-     */
-    private void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
-    {
-        pendingCountUpdater.incrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, messageSize);
-
-        messageProcessor.process(message, messageSize, callbacks);
-    }
-
     private void onHandlerClosed(InboundMessageHandler handler)
     {
         handlers.remove(handler);
@@ -138,152 +153,170 @@ public final class InboundMessageHandlers implements MessageCallbacks
     }
 
     /*
+     * Wrap provided MessageProcessor to allow pending message metrics to be maintained.
+     */
+
+    private MessageProcessor processorFor(ConnectionType type)
+    {
+        switch (type)
+        {
+            case URGENT_MESSAGES: return urgentProcessor;
+            case  SMALL_MESSAGES: return smallProcessor;
+            case  LARGE_MESSAGES: return largeProcessor;
+            case LEGACY_MESSAGES: return legacyProcessor;
+        }
+
+        throw new IllegalArgumentException();
+    }
+
+    private static MessageProcessor wrapProcessorForMetrics(MessageProcessor processor, InboundCounters counters)
+    {
+        return (message, messageSize, callbacks) ->
+        {
+            counters.addPending(messageSize);
+            processor.process(message, messageSize, callbacks);
+        };
+    }
+
+    /*
      * Message callbacks
      */
 
-    @Override
-    public void onProcessed(int messageSize)
+    private MessageCallbacks callbacksFor(ConnectionType type)
     {
-        pendingCountUpdater.decrementAndGet(this);
-        long pending = pendingBytesUpdater.addAndGet(this, -messageSize);
-
-        processedCountUpdater.incrementAndGet(this);
-        processedBytesUpdater.addAndGet(this, messageSize);
-    }
-
-    @Override
-    public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
-    {
-        pendingCountUpdater.decrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, -messageSize);
-
-        expiredCountUpdater.incrementAndGet(this);
-        expiredBytesUpdater.addAndGet(this, messageSize);
-
-        MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
-    }
-
-    @Override
-    public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
-    {
-        expiredCountUpdater.incrementAndGet(this);
-        expiredBytesUpdater.addAndGet(this, messageSize);
-
-        MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
-    }
-
-    @Override
-    public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
-    {
-        errorCountUpdater.incrementAndGet(this);
-        errorBytesUpdater.addAndGet(this, messageSize);
-
-        /*
-         * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
-         * on the other end to expire.
-         */
-        if (callBackOnFailure)
+        switch (type)
         {
-            Message response = Message.failureResponse(id, expiresAtNanos, RequestFailureReason.forException(t));
-            MessagingService.instance().sendOneWay(response, peer);
+            case URGENT_MESSAGES: return urgentCallbacks;
+            case  SMALL_MESSAGES: return smallCallbacks;
+            case  LARGE_MESSAGES: return largeCallbacks;
+            case LEGACY_MESSAGES: return legacyCallbacks;
         }
+
+        throw new IllegalArgumentException();
+    }
+
+    private static MessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
+    {
+        return new MessageCallbacks()
+        {
+            @Override
+            public void onProcessed(int messageSize)
+            {
+                counters.removePending(messageSize);
+                counters.addProcessed(messageSize);
+            }
+
+            @Override
+            public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            {
+                counters.removePending(messageSize);
+                counters.addExpired(messageSize);
+
+                MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            {
+                counters.addExpired(messageSize);
+
+                MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+            {
+                counters.addError(messageSize);
+
+                /*
+                 * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
+                 * on the other end to expire.
+                 */
+                if (callBackOnFailure)
+                {
+                    Message response = Message.failureResponse(id, expiresAtNanos, RequestFailureReason.forException(t));
+                    MessagingService.instance().sendOneWay(response, peer);
+                }
+            }
+        };
     }
 
     /*
      * Aggregated counters
      */
 
+    InboundCounters countersFor(ConnectionType type)
+    {
+        switch (type)
+        {
+            case URGENT_MESSAGES: return urgentCounters;
+            case  SMALL_MESSAGES: return smallCounters;
+            case  LARGE_MESSAGES: return largeCounters;
+            case LEGACY_MESSAGES: return legacyCounters;
+        }
+
+        throw new IllegalArgumentException();
+    }
+
     public long receivedCount()
     {
-        return sum(h -> h.receivedCount) + closedReceivedCount;
+        return sumHandlers(h -> h.receivedCount) + closedReceivedCount;
     }
 
     public long receivedBytes()
     {
-        return sum(h -> h.receivedBytes) + closedReceivedBytes;
+        return sumHandlers(h -> h.receivedBytes) + closedReceivedBytes;
     }
 
     public int corruptFramesRecovered()
     {
-        return (int) sum(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
+        return (int) sumHandlers(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
     }
 
     public int corruptFramesUnrecovered()
     {
-        return (int) sum(h -> h.corruptFramesUnrecovered) + closedCorruptFramesUnrecovered;
+        return (int) sumHandlers(h -> h.corruptFramesUnrecovered) + closedCorruptFramesUnrecovered;
     }
 
     public long errorCount()
     {
-        return errorCount;
+        return sumCounters(InboundCounters::errorCount);
     }
 
     public long errorBytes()
     {
-        return errorBytes;
+        return sumCounters(InboundCounters::errorBytes);
     }
 
     public long expiredCount()
     {
-        return expiredCount;
+        return sumCounters(InboundCounters::expiredCount);
     }
 
     public long expiredBytes()
     {
-        return expiredBytes;
+        return sumCounters(InboundCounters::expiredBytes);
     }
 
     public long processedCount()
     {
-        return processedCount;
+        return sumCounters(InboundCounters::processedCount);
     }
 
     public long processedBytes()
     {
-        return processedBytes;
+        return sumCounters(InboundCounters::processedBytes);
     }
 
     public long pendingCount()
     {
-        return pendingCount;
+        return sumCounters(InboundCounters::pendingCount);
     }
 
     public long pendingBytes()
     {
-        return pendingBytes;
+        return sumCounters(InboundCounters::pendingBytes);
     }
-
-    private volatile long errorCount;
-    private volatile long errorBytes;
-
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> errorCountUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "errorCount");
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> errorBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "errorBytes");
-
-    private volatile long expiredCount;
-    private volatile long expiredBytes;
-
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> expiredCountUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "expiredCount");
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> expiredBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "expiredBytes");
-
-    private volatile long processedCount;
-    private volatile long processedBytes;
-
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> processedCountUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "processedCount");
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> processedBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "processedBytes");
-
-    private volatile long pendingCount;
-    private volatile long pendingBytes;
-
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> pendingCountUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "pendingCount");
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> pendingBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "pendingBytes");
 
     private volatile long closedReceivedCount;
     private volatile long closedReceivedBytes;
@@ -310,11 +343,19 @@ public final class InboundMessageHandlers implements MessageCallbacks
         closedCorruptFramesUnrecoveredUpdater.addAndGet(this, handler.corruptFramesUnrecovered);
     }
 
-    private long sum(ToLongFunction<InboundMessageHandler> counter)
+    private long sumHandlers(ToLongFunction<InboundMessageHandler> counter)
     {
         long sum = 0L;
         for (InboundMessageHandler h : handlers)
             sum += counter.applyAsLong(h);
         return sum;
+    }
+
+    private long sumCounters(ToLongFunction<InboundCounters> mapping)
+    {
+        return mapping.applyAsLong(urgentCounters)
+             + mapping.applyAsLong(smallCounters)
+             + mapping.applyAsLong(largeCounters)
+             + mapping.applyAsLong(legacyCounters);
     }
 }

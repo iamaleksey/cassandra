@@ -42,16 +42,16 @@ class Reporters
         this.endpoints = endpoints;
         this.connections = connections;
         this.reporters = ImmutableList.of(
-            new OutboundReporter(true,  "Outbound Throughput",          OutboundConnection::sentBytes,          ConnectionBurnTest::prettyPrintMemory),
-            new OutboundReporter(true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
-            new OutboundReporter(true,  "Outbound Errors",              OutboundConnection::errorCount,         Long::toString),
-            new OutboundReporter(false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
-            new OutboundReporter(true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, Long::toString),
+            outboundReporter (true,  "Outbound Throughput",          OutboundConnection::sentBytes,          ConnectionBurnTest::prettyPrintMemory),
+            outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
+            outboundReporter (true,  "Outbound Errors",              OutboundConnection::errorCount,         Long::toString),
+            outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
+            outboundReporter (true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, Long::toString),
 
-            new InboundReporter (true,  "Inbound Throughput",           InboundMessageHandlers::processedBytes, ConnectionBurnTest::prettyPrintMemory),
-            new InboundReporter (true,  "Inbound Expirations",          InboundMessageHandlers::expiredCount,   Long::toString),
-            new InboundReporter (true,  "Inbound Errors",               InboundMessageHandlers::errorCount,     Long::toString),
-            new InboundReporter (false, "Inbound Pending Bytes",        InboundMessageHandlers::pendingBytes,   ConnectionBurnTest::prettyPrintMemory)
+            inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        ConnectionBurnTest::prettyPrintMemory),
+            inboundReporter  (true,  "Inbound Expirations",          InboundCounters::expiredCount,          Long::toString),
+            inboundReporter  (true,  "Inbound Errors",               InboundCounters::errorCount,            Long::toString),
+            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          ConnectionBurnTest::prettyPrintMemory)
         );
     }
 
@@ -70,23 +70,27 @@ class Reporters
         }
     }
 
-    interface Reporter
+    private Reporter outboundReporter(boolean accumulates, String name, ToLongFunction<OutboundConnection> get, LongFunction<String> printer)
     {
-        void update();
-        void print();
+        return new Reporter(accumulates, name, (conn) -> get.applyAsLong(conn.outbound), printer);
     }
 
-    class OutboundReporter implements Reporter
+    private Reporter inboundReporter(boolean accumulates, String name, ToLongFunction<InboundCounters> get, LongFunction<String> printer)
+    {
+        return new Reporter(accumulates, name, (conn) -> get.applyAsLong(conn.inboundCounters()), printer);
+    }
+
+    class Reporter
     {
         boolean accumulates;
         final String name;
-        final ToLongFunction<OutboundConnection> get;
+        final ToLongFunction<Connection> get;
         final LongFunction<String> print;
         final long[][] previousValue;
         final long[] columnTotals = new long[1 + endpoints.size() * 3];
         final Table table;
 
-        OutboundReporter(boolean accumulates, String name, ToLongFunction<OutboundConnection> get, LongFunction<String> print)
+        Reporter(boolean accumulates, String name, ToLongFunction<Connection> get, LongFunction<String> print)
         {
             this.accumulates = accumulates;
             this.name = name;
@@ -125,13 +129,13 @@ class Reporters
                 long rowTotal = 0;
                 for (InetAddressAndPort sender : endpoints)
                 {
-                    for (ConnectionType type : ConnectionType.MESSAGING)
+                    for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
                         assert recipient.equals(connections[connection].recipient);
                         assert sender.equals(connections[connection].sender);
                         assert type == connections[connection].outbound.type();
 
-                        long cur = get.applyAsLong(connections[connection].outbound);
+                        long cur = get.applyAsLong(connections[connection]);
                         long value;
                         if (accumulates)
                         {
@@ -156,96 +160,6 @@ class Reporters
                 ++row;
             }
 
-            boolean displayTotalRow = false;
-            for (int column = 0 ; column < columnTotals.length ; ++column)
-            {
-                table.set(endpoints.size(), column, print.apply(columnTotals[column]));
-                table.displayColumn(column, columnTotals[column] > 0);
-                displayTotalRow |= columnTotals[column] > 0;
-            }
-            table.displayRow(endpoints.size(), displayTotalRow);
-        }
-
-        public void print()
-        {
-            table.print("===" + name + "===");
-        }
-    }
-
-    class InboundReporter implements Reporter
-    {
-        final boolean accumulates;
-        final String name;
-        final ToLongFunction<InboundMessageHandlers> get;
-        final LongFunction<String> print;
-        final long[][] previousValue;
-        final long[] columnTotals = new long[1 + endpoints.size()];
-
-        final Table table;
-
-        InboundReporter(boolean accumulates, String name, ToLongFunction<InboundMessageHandlers> get, LongFunction<String> print)
-        {
-            this.accumulates = accumulates;
-            this.name = name;
-            this.get = get;
-            this.print = print;
-
-            previousValue = accumulates ? new long[endpoints.size()][endpoints.size()] : null;
-
-            String[] rowNames = new String[endpoints.size() + 1];
-            for (int row = 0 ; row < endpoints.size() ; ++row)
-            {
-                rowNames[row] = Integer.toString(1 + row);
-            }
-            rowNames[rowNames.length - 1] = "Total";
-
-            String[] columnNames = new String[endpoints.size() + 1];
-            for (int column = 0 ; column < endpoints.size() ; ++column)
-            {
-                String endpoint = Integer.toString(1 + column);
-                columnNames[column] = "       " + endpoint;
-            }
-            columnNames[columnNames.length - 1] = "Total";
-
-            table = new Table(rowNames, columnNames, "Recipient");
-        }
-
-        public void update()
-        {
-            Arrays.fill(columnTotals, 0);
-            int row = 0, connection = 0;
-            for (InetAddressAndPort recipient : endpoints)
-            {
-                int column = 0;
-                long rowTotal = 0;
-                for (InetAddressAndPort sender : endpoints)
-                {
-                    assert recipient.equals(connections[connection].recipient);
-                    assert sender.equals(connections[connection].sender);
-
-                    long cur = get.applyAsLong(connections[connection].inboundHandlers);
-                    long value;
-                    if (accumulates)
-                    {
-                        long prev = previousValue[row][column];
-                        previousValue[row][column] = cur;
-                        value = cur - prev;
-                    }
-                    else
-                    {
-                        value = cur;
-                    }
-                    table.set(row, column, print.apply(value));
-                    columnTotals[column] += value;
-                    rowTotal += value;
-                    ++column;
-                    connection += 3;
-                }
-                columnTotals[column] += rowTotal;
-                table.set(row, column, print.apply(rowTotal));
-                table.displayRow(row, rowTotal > 0);
-                ++row;
-            }
             boolean displayTotalRow = false;
             for (int column = 0 ; column < columnTotals.length ; ++column)
             {
@@ -385,6 +299,5 @@ class Reporters
 
         return builder.toString();
     }
-
 }
 

@@ -154,7 +154,7 @@ public class ConnectionBurnTest extends ConnectionTest
                 {
                     InboundMessageHandlers inboundHandlers = inbound.handlersByRecipientThenSender.get(recipient).get(sender);
                     OutboundConnections connections = OutboundConnections.unsafeCreate(outboundTemplate.toEndpoint(recipient).withFrom(sender), null);
-                    for (ConnectionType type : ConnectionType.MESSAGING)
+                    for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
                         this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId, version);
                         this.connectionMessageIds[i] = minId;
