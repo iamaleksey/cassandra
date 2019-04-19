@@ -655,7 +655,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "MessagingService-Inbound-" + peer + '-' + FBUtilities.getBroadcastAddressAndPort() + "-LargeMessage-" + id;
+                threadName = "Messaging-IN-" + peer + "->" + FBUtilities.getBroadcastAddressAndPort() + '-' + type + '-' + id;
                 Thread.currentThread().setName(threadName);
 
                 processLargeMessage();

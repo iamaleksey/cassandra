@@ -90,7 +90,7 @@ public final class SocketFactory
     private final EventLoopGroup defaultGroup;
     // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
     private final EventLoopGroup outboundStreamingGroup;
-    public final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("MessagingService-SynchronousWork"));
+    public final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("Messaging-SynchronousWork"));
 
     public SocketFactory() { this(DEFAULT_PROVIDER); }
     public SocketFactory(Provider provider)
