@@ -333,8 +333,9 @@ public class ConnectionBurnTest extends ConnectionTest
 
     public static void test(GlobalInboundSettings inbound, OutboundConnectionSettings outbound) throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException, TimeoutException
     {
-        MessageGenerator generator = new UniformPayloadGenerator(0, 1, (1 << 16) + (1 << 15));
-        MessageGenerators generators = new MessageGenerators(generator, generator);
+        MessageGenerator small = new UniformPayloadGenerator(0, 1, (1 << 15));
+        MessageGenerator large = new UniformPayloadGenerator(0, 1, (1 << 16) + (1 << 15));
+        MessageGenerators generators = new MessageGenerators(small, large);
         outbound = outbound.withApplicationSendQueueCapacityInBytes(1 << 18)
                            .withApplicationReserveSendQueueCapacityInBytes(1 << 30, new ResourceLimits.Concurrent(Integer.MAX_VALUE));
 
