@@ -29,14 +29,14 @@ final class MessageGenerators
         this.large = large;
     }
 
-    MessageGenerator get(OutboundConnection.Type type)
+    MessageGenerator get(ConnectionType type)
     {
         switch (type)
         {
-            case SMALL_MESSAGE:
-            case URGENT:
+            case SMALL_MESSAGES:
+            case URGENT_MESSAGES:
                 return small;
-            case LARGE_MESSAGE:
+            case LARGE_MESSAGES:
                 return large;
             default:
                 throw new IllegalStateException();

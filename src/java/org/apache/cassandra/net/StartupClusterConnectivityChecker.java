@@ -45,8 +45,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.Verb.PING_REQ;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
 
 public class StartupClusterConnectivityChecker
 {
@@ -205,8 +205,8 @@ public class StartupClusterConnectivityChecker
         Message<PingRequest> large = Message.out(PING_REQ, PingRequest.forLarge);
         for (InetAddressAndPort peer : peers)
         {
-            MessagingService.instance().sendRR(small, peer, responseHandler, SMALL_MESSAGE);
-            MessagingService.instance().sendRR(large, peer, responseHandler, LARGE_MESSAGE);
+            MessagingService.instance().sendRR(small, peer, responseHandler, SMALL_MESSAGES);
+            MessagingService.instance().sendRR(large, peer, responseHandler, LARGE_MESSAGES);
         }
     }
 

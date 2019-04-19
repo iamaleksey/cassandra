@@ -42,14 +42,13 @@ import org.apache.cassandra.net.BackPressureState;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.PingRequest;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.OutboundConnection.Type;
 
 public class OutboundConnectionsTest
 {
     static final InetAddressAndPort LOCAL_ADDR = InetAddressAndPort.getByAddressOverrideDefaults(InetAddresses.forString("127.0.0.1"), 9476);
     static final InetAddressAndPort REMOTE_ADDR = InetAddressAndPort.getByAddressOverrideDefaults(InetAddresses.forString("127.0.0.2"), 9476);
     private static final InetAddressAndPort RECONNECT_ADDR = InetAddressAndPort.getByAddressOverrideDefaults(InetAddresses.forString("127.0.0.3"), 9476);
-    private static final List<Type> INTERNODE_MESSAGING_CONN_TYPES = ImmutableList.of(Type.URGENT, Type.LARGE_MESSAGE, Type.SMALL_MESSAGE);
+    private static final List<ConnectionType> INTERNODE_MESSAGING_CONN_TYPES = ImmutableList.of(ConnectionType.URGENT_MESSAGES, ConnectionType.LARGE_MESSAGES, ConnectionType.SMALL_MESSAGES);
 
     private OutboundConnections connections;
 
@@ -78,14 +77,14 @@ public class OutboundConnectionsTest
     {
         GossipDigestSyn syn = new GossipDigestSyn("cluster", "partitioner", new ArrayList<>(0));
         Message<GossipDigestSyn> message = Message.out(Verb.GOSSIP_DIGEST_SYN, syn);
-        Assert.assertEquals(Type.URGENT, connections.connectionFor(message).type());
+        Assert.assertEquals(ConnectionType.URGENT_MESSAGES, connections.connectionFor(message).type());
     }
 
     @Test
     public void getConnection_SmallMessage()
     {
         Message message = Message.out(Verb.PING_REQ, PingRequest.forSmall);
-        Assert.assertEquals(Type.SMALL_MESSAGE, connections.connectionFor(message).type());
+        Assert.assertEquals(ConnectionType.SMALL_MESSAGES, connections.connectionFor(message).type());
     }
 
     @Test
@@ -111,40 +110,40 @@ public class OutboundConnectionsTest
         };
         Verb._TEST_2.unsafeSetSerializer(() -> serializer);
         Message message = Message.out(Verb._TEST_2, "payload");
-        Assert.assertEquals(Type.LARGE_MESSAGE, connections.connectionFor(message).type());
+        Assert.assertEquals(ConnectionType.LARGE_MESSAGES, connections.connectionFor(message).type());
     }
 
     @Test
     public void close_SoftClose() throws ExecutionException, InterruptedException, TimeoutException
     {
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
             Assert.assertFalse(connections.connectionFor(type).isClosed());
         connections.close(true).get(10L, TimeUnit.SECONDS);
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
             Assert.assertTrue(connections.connectionFor(type).isClosed());
     }
 
     @Test
     public void close_NotSoftClose() throws ExecutionException, InterruptedException, TimeoutException
     {
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
             Assert.assertFalse(connections.connectionFor(type).isClosed());
         connections.close(false).get(10L, TimeUnit.SECONDS);
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
             Assert.assertTrue(connections.connectionFor(type).isClosed());
     }
 
     @Test
     public void reconnectWithNewIp() throws InterruptedException
     {
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
         {
             Assert.assertEquals(REMOTE_ADDR, connections.connectionFor(type).settings().connectTo);
         }
 
         connections.reconnectWithNewIp(RECONNECT_ADDR).await();
 
-        for (Type type : INTERNODE_MESSAGING_CONN_TYPES)
+        for (ConnectionType type : INTERNODE_MESSAGING_CONN_TYPES)
         {
             Assert.assertEquals(RECONNECT_ADDR, connections.connectionFor(type).settings().connectTo);
         }

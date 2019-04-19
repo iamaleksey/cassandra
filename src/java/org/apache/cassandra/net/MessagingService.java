@@ -43,13 +43,13 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.MessagingMetrics;
+import org.apache.cassandra.net.async.ConnectionType;
 import org.apache.cassandra.net.async.FutureCombiner;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
 import org.apache.cassandra.net.async.MessageCallbacks;
-import org.apache.cassandra.net.async.OutboundConnection;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.net.async.SocketFactory;
@@ -298,7 +298,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         return sendRR(message, to, cb, null);
     }
 
-    public long sendRR(Message message, InetAddressAndPort to, IAsyncCallback cb, OutboundConnection.Type specifyConnection)
+    public long sendRR(Message message, InetAddressAndPort to, IAsyncCallback cb, ConnectionType specifyConnection)
     {
         long id = callbacks.addWithExpiration(cb, message, to, message.expiresAtNanos);
         updateBackPressureOnSend(to, cb, message);
@@ -331,7 +331,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                            Replica to,
                            AbstractWriteResponseHandler<?> handler,
                            boolean allowHints,
-                           OutboundConnection.Type specifyConnection)
+                           ConnectionType specifyConnection)
     {
         long id = callbacks.addWithExpiration(handler, message, to, message.expiresAtNanos, handler.consistencyLevel(), allowHints);
         updateBackPressureOnSend(to.endpoint(), handler, message);
@@ -344,7 +344,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         sendResponse(message, to, null);
     }
 
-    public void sendResponse(Message message, InetAddressAndPort to, OutboundConnection.Type specifyConnection)
+    public void sendResponse(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
         sendOneWay(message, to, specifyConnection);
     }
@@ -360,7 +360,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         sendOneWay(message, to, null);
     }
-    public void sendOneWay(Message message, InetAddressAndPort to, OutboundConnection.Type specifyConnection)
+    public void sendOneWay(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
         if (logger.isTraceEnabled())
             logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb, message.id, to);

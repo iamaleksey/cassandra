@@ -41,15 +41,14 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.OutboundConnection.*;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.URGENT;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.ConnectionType.URGENT_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
 
 /**
  * Groups a set of outbound connections to a given peer, and routes outgoing messages to the appropriate connection
  * (based upon message's type or size). Contains a {@link OutboundConnection} for each of the
- * {@link Type} type.
+ * {@link ConnectionType} type.
  */
 public class OutboundConnections
 {
@@ -71,9 +70,9 @@ public class OutboundConnections
         this.template = template = template.withDefaultReserveLimits();
         ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
         ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
-        this.small = new OutboundConnection(SMALL_MESSAGE, template, reserveCapacityInBytes);
-        this.large = new OutboundConnection(LARGE_MESSAGE, template, reserveCapacityInBytes);
-        this.urgent = new OutboundConnection(URGENT, template, reserveCapacityInBytes);
+        this.small = new OutboundConnection(SMALL_MESSAGES, template, reserveCapacityInBytes);
+        this.large = new OutboundConnection(LARGE_MESSAGES, template, reserveCapacityInBytes);
+        this.urgent = new OutboundConnection(URGENT_MESSAGES, template, reserveCapacityInBytes);
     }
 
     public static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
@@ -104,7 +103,7 @@ public class OutboundConnections
         return backPressureState;
     }
 
-    public void enqueue(Message msg, Type type) throws ClosedChannelException
+    public void enqueue(Message msg, ConnectionType type) throws ClosedChannelException
     {
         connectionFor(msg, type).enqueue(msg);
     }
@@ -193,35 +192,35 @@ public class OutboundConnections
     }
 
     @VisibleForTesting
-    OutboundConnection connectionFor(Message msg, Type forceConnection)
+    OutboundConnection connectionFor(Message msg, ConnectionType forceConnection)
     {
         return connectionFor(connectionTypeFor(msg, forceConnection));
     }
 
     @VisibleForTesting
-    public static Type connectionTypeFor(Message<?> msg, Type specifyConnection)
+    public static ConnectionType connectionTypeFor(Message<?> msg, ConnectionType specifyConnection)
     {
         if (specifyConnection != null)
             return specifyConnection;
 
         if (msg.verb.priority == Verb.Priority.P0)
-            return URGENT;
+            return URGENT_MESSAGES;
 
         return msg.serializedSize(current_version) <= LARGE_MESSAGE_THRESHOLD
-               ? SMALL_MESSAGE
-               : LARGE_MESSAGE;
+               ? SMALL_MESSAGES
+               : LARGE_MESSAGES;
     }
 
     @VisibleForTesting
-    final OutboundConnection connectionFor(Type type)
+    final OutboundConnection connectionFor(ConnectionType type)
     {
         switch (type)
         {
-            case SMALL_MESSAGE:
+            case SMALL_MESSAGES:
                 return small;
-            case LARGE_MESSAGE:
+            case LARGE_MESSAGES:
                 return large;
-            case URGENT:
+            case URGENT_MESSAGES:
                 return urgent;
             default:
                 throw new IllegalArgumentException("unsupported connection type: " + type);

@@ -29,7 +29,6 @@ import java.util.function.ToLongFunction;
 import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.utils.Pair;
 
 class Reporters
 {
@@ -125,7 +124,7 @@ class Reporters
                 long rowTotal = 0;
                 for (InetAddressAndPort sender : endpoints)
                 {
-                    for (OutboundConnection.Type type : OutboundConnection.Type.MESSAGING)
+                    for (ConnectionType type : ConnectionType.MESSAGING)
                     {
                         assert recipient.equals(connections[connection].recipient);
                         assert sender.equals(connections[connection].sender);

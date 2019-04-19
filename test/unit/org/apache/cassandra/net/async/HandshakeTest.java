@@ -39,7 +39,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.*;
 
 // TODO: test failure due to exception, timeout, etc
@@ -76,10 +76,10 @@ public class HandshakeTest
             InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
             Future<Result<MessagingSuccess>> future =
             initiateMessaging(factory.defaultGroup().next(),
-                              SMALL_MESSAGE,
+                              SMALL_MESSAGES,
                               new OutboundConnectionSettings(endpoint)
                                                     .withAcceptVersions(acceptOutbound)
-                                                    .withDefaults(SMALL_MESSAGE, req),
+                                                    .withDefaults(SMALL_MESSAGES, req),
                               req);
             return future.get();
         }

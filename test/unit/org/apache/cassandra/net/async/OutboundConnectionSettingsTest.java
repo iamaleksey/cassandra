@@ -34,7 +34,7 @@ import org.apache.cassandra.locator.Replica;
 
 import static org.apache.cassandra.config.DatabaseDescriptor.getEndpointSnitch;
 import static org.apache.cassandra.net.MessagingService.current_version;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.*;
+import static org.apache.cassandra.net.async.ConnectionType.*;
 import static org.apache.cassandra.net.async.OutboundConnectionsTest.LOCAL_ADDR;
 import static org.apache.cassandra.net.async.OutboundConnectionsTest.REMOTE_ADDR;
 
@@ -78,7 +78,7 @@ public class OutboundConnectionSettingsTest
 
     private static void test(Function<OutboundConnectionSettings, OutboundConnectionSettings> f)
     {
-        f.apply(new OutboundConnectionSettings(LOCAL_ADDR)).withDefaults(SMALL_MESSAGE, current_version);
+        f.apply(new OutboundConnectionSettings(LOCAL_ADDR)).withDefaults(SMALL_MESSAGES, current_version);
     }
 
     private static class TestSnitch extends AbstractEndpointSnitch

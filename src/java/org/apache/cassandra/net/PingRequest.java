@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.io.IOException;
@@ -23,26 +22,26 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.async.OutboundConnection;
+import org.apache.cassandra.net.async.ConnectionType;
 
-import static org.apache.cassandra.net.async.OutboundConnection.Type.URGENT;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.ConnectionType.URGENT_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
 
 /**
- * Indicates to the recipient which {@link OutboundConnection.Type} should be used for the response.
+ * Indicates to the recipient which {@link ConnectionType} should be used for the response.
  */
 public class PingRequest
 {
     public static IVersionedSerializer<PingRequest> serializer = new Serializer();
 
-    public static final PingRequest forSmall = new PingRequest(SMALL_MESSAGE);
-    public static final PingRequest forLarge = new PingRequest(LARGE_MESSAGE);
-    public static final PingRequest forUrgent = new PingRequest(URGENT);
+    public static final PingRequest forUrgent = new PingRequest(URGENT_MESSAGES);
+    public static final PingRequest forSmall  = new PingRequest(SMALL_MESSAGES);
+    public static final PingRequest forLarge  = new PingRequest(LARGE_MESSAGES);
 
-    public final OutboundConnection.Type connectionType;
+    public final ConnectionType connectionType;
 
-    public PingRequest(OutboundConnection.Type connectionType)
+    public PingRequest(ConnectionType connectionType)
     {
         this.connectionType = connectionType;
     }
@@ -56,18 +55,16 @@ public class PingRequest
 
         public PingRequest deserialize(DataInputPlus in, int version) throws IOException
         {
-            OutboundConnection.Type connectionType = OutboundConnection.Type.fromId(in.readByte());
-            switch (connectionType)
+            ConnectionType type = ConnectionType.fromId(in.readByte());
+
+            switch (type)
             {
-                case LARGE_MESSAGE:
-                    return forLarge;
-                case URGENT:
-                    return forUrgent;
-                case SMALL_MESSAGE:
-                    return forSmall;
-                default:
-                    throw new IllegalStateException();
+                case URGENT_MESSAGES: return forUrgent;
+                case  SMALL_MESSAGES: return forSmall;
+                case  LARGE_MESSAGES: return forLarge;
             }
+
+            throw new IllegalStateException();
         }
 
         public long serializedSize(PingRequest t, int version)

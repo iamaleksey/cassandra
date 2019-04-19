@@ -29,6 +29,7 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.Function;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,6 +83,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final ReadSwitch readSwitch;
 
+    private final ConnectionType type;
     private final Channel channel;
     private final InetAddressAndPort peer;
     private final int version;
@@ -144,6 +146,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     InboundMessageHandler(ReadSwitch readSwitch,
 
+                          ConnectionType type,
                           Channel channel,
                           InetAddressAndPort peer,
                           int version,
@@ -164,6 +167,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         this.readSwitch = readSwitch;
 
+        this.type = type;
         this.channel = channel;
         this.peer = peer;
         this.version = version;
@@ -185,6 +189,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         context.pauseAfterOneMessage = false;
         context.endpointReserve = endpointReserveCapacity;
         context.globalReserve = globalReserveCapacity;
+    }
+
+    @VisibleForTesting
+    public ConnectionType type()
+    {
+        return type;
     }
 
     @Override

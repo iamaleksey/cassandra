@@ -51,7 +51,6 @@ import io.netty.util.concurrent.ScheduledFuture;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.HandshakeProtocol.Initiate;
-import org.apache.cassandra.net.async.OutboundConnection.Type;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.security.SSLFactory;
@@ -60,7 +59,7 @@ import org.apache.cassandra.utils.JVMStabilityInspector;
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.async.HandshakeProtocol.*;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
+import static org.apache.cassandra.net.async.ConnectionType.STREAMING;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.incompatible;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.messagingSuccess;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.retry;
@@ -83,12 +82,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundConnectionInitiator.class);
 
-    private final Type type;
+    private final ConnectionType type;
     private final OutboundConnectionSettings settings;
     private final int requestMessagingVersion; // for pre40 nodes only
     private final Promise<Result<SuccessType>> resultPromise;
 
-    private OutboundConnectionInitiator(Type type, OutboundConnectionSettings settings,
+    private OutboundConnectionInitiator(ConnectionType type, OutboundConnectionSettings settings,
                                         int requestMessagingVersion, Promise<Result<SuccessType>> resultPromise)
     {
         this.type = type;
@@ -104,7 +103,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      */
     public static Future<Result<StreamingSuccess>> initiateStreaming(EventLoop eventLoop, OutboundConnectionSettings settings, int requestMessagingVersion)
     {
-        return new OutboundConnectionInitiator<StreamingSuccess>(STREAM, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
+        return new OutboundConnectionInitiator<StreamingSuccess>(STREAMING, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
                .initiate(eventLoop);
     }
 
@@ -113,7 +112,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      * if the other node supports a newer version, or doesn't support this version, we will fail to connect
      * and try again with the version they reported
      */
-    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, Type type, OutboundConnectionSettings settings, int requestMessagingVersion)
+    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, OutboundConnectionSettings settings, int requestMessagingVersion)
     {
         return new OutboundConnectionInitiator<MessagingSuccess>(type, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
                .initiate(eventLoop);
@@ -221,13 +220,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         public void channelActive(final ChannelHandlerContext ctx)
         {
-            Mode mode = type == STREAM ? Mode.STREAM : Mode.REGULAR;
-            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, mode, settings.withCompression(), settings.withCrc(), settings.from);
+            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, type, settings.withCompression(), settings.withCrc(), settings.from);
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectTo, msg);
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
                   future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
 
-            if (type == STREAM && requestMessagingVersion < VERSION_40)
+            if (type.isStreaming() && requestMessagingVersion < VERSION_40)
                 ctx.pipeline().remove(this);
 
             ctx.fireChannelActive();
@@ -273,7 +271,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     else
                     {
                         // This is a bit ugly
-                        if (type != STREAM)
+                        if (type.isMessaging())
                         {
                             if (settings.withCompression)
                                 frameEncoder = FrameEncoderLZ4.fastInstance;
@@ -292,7 +290,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 }
                 else
                 {
-                    assert type != STREAM;
+                    assert type.isMessaging();
+
                     // pre40 handshake responses only (can be a post40 node)
                     if (peerMessagingVersion == requestMessagingVersion
                         || peerMessagingVersion > settings.acceptVersions.max) // this clause is for impersonating 3.0 node in testing only
@@ -319,7 +318,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
                 {
-                    if (type != STREAM)
+                    if (type.isMessaging())
                     {
                         assert frameEncoder != null;
                         frameEncoder.addLastTo(pipeline);

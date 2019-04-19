@@ -88,11 +88,12 @@ public final class InboundMessageHandlers implements MessageCallbacks
         this.metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, Channel channel, int version)
+    InboundMessageHandler createHandler(ReadSwitch readSwitch, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
     {
         InboundMessageHandler handler =
             new InboundMessageHandler(readSwitch,
 
+                                      type,
                                       channel,
                                       peer,
                                       version,

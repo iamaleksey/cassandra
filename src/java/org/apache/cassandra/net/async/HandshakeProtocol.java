@@ -59,12 +59,6 @@ public class HandshakeProtocol
 {
     static final long TIMEOUT_MILLIS = 3 * DatabaseDescriptor.getRpcTimeout(MILLISECONDS);
 
-    public enum Mode
-    {
-        STREAM,
-        REGULAR // GOSSIP, SMALL or LARGE if pre40; GOSSIP or SMALL if post40
-    }
-
     /**
      * The initial message sent when a node creates a new connection to a remote peer. This message contains:
      *   1) the {@link Message#PROTOCOL_MAGIC} number (4 bytes).
@@ -84,13 +78,13 @@ public class HandshakeProtocol
      *                      1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 3 3
      *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-     * |U U C M C      |    REQUEST    |      MIN      |      MAX      |
-     * |N N M O R      |    VERSION    |   SUPPORTED   |   SUPPORTED   |
-     * |U U P D C      |  (DEPRECATED) |    VERSION    |    VERSION    |
+     * |C C C M C      |    REQUEST    |      MIN      |      MAX      |
+     * |A A M O R      |    VERSION    |   SUPPORTED   |   SUPPORTED   |
+     * |T T P D C      |  (DEPRECATED) |    VERSION    |    VERSION    |
      * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
      * }
      * </pre>
-     * UNU - unused bits lowest two bits; from a historical note: used to be "serializer type," which was always Binary
+     * CAT - QOS category, 2 bits: SMALL, LARGE, URGENT, or LEGACY (unset)
      * CMP - compression enabled bit
      * MOD - connection mode; if the bit is on, the connection is for streaming; if the bit is off, it is for inter-node messaging.
      * CRC - crc enabled bit
@@ -107,16 +101,16 @@ public class HandshakeProtocol
         // the messagingVersion bounds the sender will accept to initiate a connection;
         // if the remote peer supports any, the newest supported version will be selected; otherwise the nearest supported version
         final AcceptVersions acceptVersions;
-        final Mode mode;
+        final ConnectionType type;
         final boolean withCrc;
         final boolean withCompression;
         final InetAddressAndPort from;
 
-        Initiate(int requestMessagingVersion, AcceptVersions acceptVersions, Mode mode, boolean withCompression, boolean withCrc, InetAddressAndPort from)
+        Initiate(int requestMessagingVersion, AcceptVersions acceptVersions, ConnectionType type, boolean withCompression, boolean withCrc, InetAddressAndPort from)
         {
             this.requestMessagingVersion = requestMessagingVersion;
             this.acceptVersions = acceptVersions;
-            this.mode = mode;
+            this.type = type;
             this.withCompression = withCompression;
             this.withCrc = withCrc;
             this.from = from;
@@ -126,9 +120,11 @@ public class HandshakeProtocol
         int encodeFlags()
         {
             int flags = 0;
+            if (type.isMessaging())
+                flags |= type.twoBitID();
             if (withCompression)
                 flags |= 1 << 2;
-            if (mode == Mode.STREAM)
+            if (type.isStreaming())
                 flags |= 1 << 3;
             if (withCrc)
                 flags |= 1 << 4;
@@ -177,10 +173,13 @@ public class HandshakeProtocol
                 int requestedMessagingVersion = getBits(flags, 8, 8);
                 int minMessagingVersion = getBits(flags, 16, 8);
                 int maxMessagingVersion = getBits(flags, 24, 8);
-                boolean isStream = getBits(flags, 3, 1) == 1;
                 boolean withCompression = getBits(flags, 2, 1) == 1;
+                boolean isStream = getBits(flags, 3, 1) == 1;
                 boolean withCrc = getBits(flags, 4, 1) == 1;
-                Mode mode = isStream ? Mode.STREAM : Mode.REGULAR;
+
+                ConnectionType type = isStream
+                                    ? ConnectionType.STREAMING
+                                    : ConnectionType.fromId(getBits(flags, 0, 2));
 
                 InetAddressAndPort from = null;
 
@@ -198,7 +197,7 @@ public class HandshakeProtocol
                 return new Initiate(requestedMessagingVersion,
                                     minMessagingVersion == 0 && maxMessagingVersion == 0
                                         ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
-                                    mode, withCompression, withCrc, from);
+                                    type, withCompression, withCrc, from);
 
             }
             catch (EOFException e)
@@ -215,21 +214,23 @@ public class HandshakeProtocol
                 return false;
 
             Initiate that = (Initiate)other;
-            return    this.mode == that.mode
+            return    this.type == that.type
                    && this.withCompression == that.withCompression
                    && this.withCrc == that.withCrc
-                   && Objects.equals(this.requestMessagingVersion, that.requestMessagingVersion)
+                   && this.requestMessagingVersion == that.requestMessagingVersion
                    && Objects.equals(this.acceptVersions, that.acceptVersions);
         }
 
         @Override
         public String toString()
         {
-            return String.format("Initiate(request: %d, min: %d, max: %d, mode: %s, compress: %b, from: %s)",
+            return String.format("Initiate(request: %d, min: %d, max: %d, type: %s, compress: %b, from: %s)",
                                  requestMessagingVersion,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.min,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.max,
-                                 mode, withCompression, from);
+                                 type,
+                                 withCompression,
+                                 from);
         }
     }
 

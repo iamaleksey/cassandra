@@ -254,12 +254,11 @@ public class InboundConnectionInitiator
                 logger.trace("Connection version {} (min {}) from {}", initiate.acceptVersions.max, initiate.acceptVersions.min, initiate.from);
 
                 final AcceptVersions accept;
-                switch (initiate.mode)
-                {
-                    case REGULAR: accept = settings.acceptMessaging; break;
-                    case STREAM: accept = settings.acceptStreaming; break;
-                    default: throw new IllegalStateException();
-                }
+
+                if (initiate.type.isStreaming())
+                    accept = settings.acceptStreaming;
+                else
+                    accept = settings.acceptMessaging;
 
                 int useMessagingVersion = max(accept.min, min(accept.max, initiate.acceptVersions.max));
                 ByteBuf flush = new HandshakeProtocol.Accept(useMessagingVersion, accept.max).encode(ctx.alloc());
@@ -281,14 +280,10 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
-                    switch (initiate.mode)
-                    {
-                        case STREAM:
-                            setupStreamingPipeline(initiate.from, ctx);
-                            break;
-                        case REGULAR:
-                            setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
-                    }
+                    if (initiate.type.isStreaming())
+                        setupStreamingPipeline(initiate.from, ctx);
+                    else
+                        setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
                 }
             }
             else
@@ -297,38 +292,33 @@ public class InboundConnectionInitiator
                 assert version < VERSION_40 && version >= settings.acceptMessaging.min;
                 logger.trace("Connection version {} from {}", version, ctx.channel().remoteAddress());
 
-                switch(initiate.mode)
+                if (initiate.type.isStreaming())
                 {
-                    case STREAM:
+                    // streaming connections are per-session and have a fixed version.  we can't do anything with a wrong-version stream connection, so drop it.
+                    if (version != settings.acceptStreaming.max)
                     {
-                        // streaming connections are per-session and have a fixed version.  we can't do anything with a wrong-version stream connection, so drop it.
-                        if (version != settings.acceptStreaming.max)
-                        {
-                            logger.warn("Received stream using protocol version {} (my version {}). Terminating connection", version, settings.acceptStreaming.max);
-                            failHandshake(ctx);
-                        }
-                        setupStreamingPipeline(initiate.from, ctx);
-                        break;
+                        logger.warn("Received stream using protocol version {} (my version {}). Terminating connection", version, settings.acceptStreaming.max);
+                        failHandshake(ctx);
                     }
-                    case REGULAR:
-                    {
-                        // if this version is < the MS version the other node is trying
-                        // to connect with, the other node will disconnect
-                        ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.max, ctx.alloc());
-                        AsyncChannelPromise.writeAndFlush(ctx, response,
-                              (ChannelFutureListener) future -> {
-                                   if (!future.isSuccess())
-                                       exceptionCaught(future.channel(), future.cause());
-                        });
+                    setupStreamingPipeline(initiate.from, ctx);
+                }
+                else
+                {
+                    // if this version is < the MS version the other node is trying
+                    // to connect with, the other node will disconnect
+                    ByteBuf response = HandshakeProtocol.Accept.respondPre40(settings.acceptMessaging.max, ctx.alloc());
+                    AsyncChannelPromise.writeAndFlush(ctx, response,
+                          (ChannelFutureListener) future -> {
+                               if (!future.isSuccess())
+                                   exceptionCaught(future.channel(), future.cause());
+                    });
 
-                        if (version < VERSION_30)
-                            throw new IOException(String.format("Unable to read obsolete message version %s from %s; The earliest version supported is 3.0.0", version, ctx.channel().remoteAddress()));
+                    if (version < VERSION_30)
+                        throw new IOException(String.format("Unable to read obsolete message version %s from %s; The earliest version supported is 3.0.0", version, ctx.channel().remoteAddress()));
 
-                        // we don't setup the messaging pipeline here, as the legacy messaging handshake requires one more message to finish
-                    }
+                    // we don't setup the messaging pipeline here, as the legacy messaging handshake requires one more message to finish
                 }
             }
-
         }
 
         /**
@@ -422,6 +412,7 @@ public class InboundConnectionInitiator
             InboundMessageHandler handler =
                 settings.handlers.apply(from).createHandler(frameDecoder,
                                                             settings.socketFactory.synchronousWorkExecutor,
+                                                            initiate.type,
                                                             pipeline.channel(),
                                                             useMessagingVersion);
             pipeline.addLast("deserialize", handler);

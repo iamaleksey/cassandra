@@ -21,7 +21,6 @@ package org.apache.cassandra.net.async;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.nio.channels.ClosedChannelException;
-import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -30,7 +29,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -91,22 +89,6 @@ public class OutboundConnection
 {
     static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 30L, TimeUnit.SECONDS);
-
-    public enum Type
-    {
-        URGENT(0), LARGE_MESSAGE (1), SMALL_MESSAGE (2), STREAM (3);
-
-        public static final List<Type> MESSAGING = ImmutableList.of(URGENT, SMALL_MESSAGE, LARGE_MESSAGE);
-
-        public final int id;
-        Type(int id)
-        {
-            this.id = id;
-        }
-
-        private static final Type[] values = values();
-        public static Type fromId(int id) { return values[id]; }
-    }
 
     private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submittedCount");
     private static final AtomicLongFieldUpdater<OutboundConnection> pendingCountAndBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "pendingCountAndBytes");
@@ -172,7 +154,7 @@ public class OutboundConnection
      * as well as implied defaults based on messagingVersion (e.g. port to connect on with encryption) may change.
      */
 
-    private final Type type;
+    private final ConnectionType type;
     // settings is updated whenever template is, which may occur in advance of a reconnection attempt;
     // in this scenario, they briefly do not represent those currently in use, but those we intend to use imminently
     private volatile OutboundConnectionSettings template;
@@ -216,7 +198,7 @@ public class OutboundConnection
      */
     private Future<?> connecting;
 
-    OutboundConnection(Type type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
+    OutboundConnection(ConnectionType type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
     {
         // use the best guessed messaging version for a node
         // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
@@ -228,7 +210,7 @@ public class OutboundConnection
         this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
         this.queue = new OutboundMessageQueue(this::onTimeout);
-        this.delivery = type == Type.LARGE_MESSAGE
+        this.delivery = type == ConnectionType.LARGE_MESSAGES
                         ? new LargeMessageDelivery()
                         : new EventLoopDelivery();
         scheduleMaintenanceWhileDisconnected();
@@ -1504,7 +1486,7 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
-    public Type type()
+    public ConnectionType type()
     {
         return type;
     }

@@ -76,8 +76,8 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.ConnectionUtils.*;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.LARGE_MESSAGE;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.SMALL_MESSAGE;
+import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 public class ConnectionTest
@@ -131,16 +131,16 @@ public class ConnectionTest
 
     static class Settings
     {
-        static final Settings SMALL = new Settings(SMALL_MESSAGE);
-        static final Settings LARGE = new Settings(LARGE_MESSAGE);
-        final OutboundConnection.Type type;
+        static final Settings SMALL = new Settings(SMALL_MESSAGES);
+        static final Settings LARGE = new Settings(LARGE_MESSAGES);
+        final ConnectionType type;
         final Function<OutboundConnectionSettings, OutboundConnectionSettings> outbound;
         final Function<InboundConnectionSettings, InboundConnectionSettings> inbound;
-        Settings(OutboundConnection.Type type)
+        Settings(ConnectionType type)
         {
             this(type, Function.identity(), Function.identity());
         }
-        Settings(OutboundConnection.Type type, Function<OutboundConnectionSettings, OutboundConnectionSettings> outbound,
+        Settings(ConnectionType type, Function<OutboundConnectionSettings, OutboundConnectionSettings> outbound,
                  Function<InboundConnectionSettings, InboundConnectionSettings> inbound)
         {
             this.type = type;
@@ -514,7 +514,7 @@ public class ConnectionTest
         try
         {
             test(new Settings(null).outbound(outbound -> outbound
-                                                         .withDefaults(SMALL_MESSAGE, MessagingService.VERSION_30)
+                                                         .withDefaults(SMALL_MESSAGES, MessagingService.VERSION_30)
                                                          .withAcceptVersions(new MessagingService.AcceptVersions(MessagingService.VERSION_30, MessagingService.VERSION_30))
                                                          // TODO (alexp): This should be fixed and removed when frame decoding for compression and encryption is fixed
                                                          .withEncryption(null)

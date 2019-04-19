@@ -30,7 +30,7 @@ import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 
-import static org.apache.cassandra.net.async.OutboundConnection.Type.*;
+import static org.apache.cassandra.net.async.ConnectionType.*;
 import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateStreaming;
 
 public class DefaultConnectionFactory implements StreamConnectionFactory
@@ -46,7 +46,7 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
         int attempts = 0;
         while (true)
         {
-            Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, template.withDefaults(STREAM, messagingVersion), messagingVersion);
+            Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, template.withDefaults(STREAMING, messagingVersion), messagingVersion);
             result.awaitUninterruptibly(); // initiate has its own timeout, so this is "guaranteed" to return relatively promptly
             if (result.isSuccess())
                 return result.getNow().success().channel;

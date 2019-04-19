@@ -51,7 +51,6 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
-import org.apache.cassandra.net.async.OutboundConnection.Type;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
@@ -155,7 +154,7 @@ public class ConnectionBurnTest extends ConnectionTest
                 {
                     InboundMessageHandlers inboundHandlers = inbound.handlersByRecipientThenSender.get(recipient).get(sender);
                     OutboundConnections connections = OutboundConnections.unsafeCreate(outboundTemplate.toEndpoint(recipient).withFrom(sender), null);
-                    for (Type type : Type.MESSAGING)
+                    for (ConnectionType type : ConnectionType.MESSAGING)
                     {
                         this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId, version);
                         this.connectionMessageIds[i] = minId;

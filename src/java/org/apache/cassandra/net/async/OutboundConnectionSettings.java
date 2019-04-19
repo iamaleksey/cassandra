@@ -36,7 +36,6 @@ import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.net.async.OutboundConnection.Type.STREAM;
 import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
@@ -320,13 +319,13 @@ public class OutboundConnectionSettings
         return withApplicationReserveSendQueueCapacityInBytes(applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes);
     }
 
-    public OutboundConnectionSettings withDefaults(OutboundConnection.Type type)
+    public OutboundConnectionSettings withDefaults(ConnectionType type)
     {
         return withDefaults(type, MessagingService.instance().versions.get(endpoint));
     }
 
     // note that connectTo is updated even if specified, in the case of pre40 messaging and using encryption (to update port)
-    public OutboundConnectionSettings withDefaults(OutboundConnection.Type type, int messagingVersion)
+    public OutboundConnectionSettings withDefaults(ConnectionType type, int messagingVersion)
     {
         IInternodeAuthenticator authenticator = this.authenticator;
         InetAddressAndPort endpoint = this.endpoint;
@@ -368,10 +367,10 @@ public class OutboundConnectionSettings
         // by default we do not compress streaming at the pipeline level,
         // as the streams will (typically) handle compression themselves
         if (compress == null)
-            compress = type != STREAM && shouldCompressConnection(snitch, self, endpoint);
+            compress = type.isMessaging() && shouldCompressConnection(snitch, self, endpoint);
 
         if (crc == null)
-            crc = type != STREAM && !compress;
+            crc = type.isMessaging() && !compress;
 
         if (crc && messagingVersion < VERSION_40)
             crc = false; // cannot use Crc framing with pre-40
@@ -405,7 +404,7 @@ public class OutboundConnectionSettings
             tcpUserTimeoutInMS = DatabaseDescriptor.getInternodeTcpUserTimeoutInMS();
 
         if (acceptVersions == null)
-            acceptVersions = type == STREAM ? MessagingService.accept_streaming : MessagingService.accept_messaging;
+            acceptVersions = type.isStreaming() ? MessagingService.accept_streaming : MessagingService.accept_messaging;
 
         if (socketFactory == null)
             socketFactory = MessagingService.instance().socketFactory;
@@ -445,13 +444,13 @@ public class OutboundConnectionSettings
                || ((DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc) && !isInLocalDC(snitch, localHost, remoteHost));
     }
 
-    private static CoalescingStrategy defaultCoalescingStrategy(InetAddressAndPort remote, OutboundConnection.Type type)
+    private static CoalescingStrategy defaultCoalescingStrategy(InetAddressAndPort remote, ConnectionType type)
     {
         // potentially harmful to coalesce gossip
-        if (type == OutboundConnection.Type.URGENT)
+        if (type == ConnectionType.URGENT_MESSAGES)
             return null;
         // no point coalescing large messages
-        if (type == OutboundConnection.Type.LARGE_MESSAGE)
+        if (type == ConnectionType.LARGE_MESSAGES)
             return null;
 
         String strategyName = DatabaseDescriptor.getOtcCoalescingStrategy();
