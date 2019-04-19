@@ -46,7 +46,8 @@ class Reporters
             new OutboundReporter(true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
             new OutboundReporter(true,  "Outbound Errors",              OutboundConnection::errorCount,         Long::toString),
             new OutboundReporter(false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
-            new OutboundReporter(true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, ConnectionBurnTest::prettyPrintMemory),
+            new OutboundReporter(true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, Long::toString),
+
             new InboundReporter (true,  "Inbound Throughput",           InboundMessageHandlers::processedBytes, ConnectionBurnTest::prettyPrintMemory),
             new InboundReporter (true,  "Inbound Expirations",          InboundMessageHandlers::expiredCount,   Long::toString),
             new InboundReporter (true,  "Inbound Errors",               InboundMessageHandlers::errorCount,     Long::toString),
