@@ -343,7 +343,7 @@ public class ConnectionBurnTest extends ConnectionTest
             .endpoints(4)
             .inbound(inbound)
             .outbound(outbound)
-            .time(1L, TimeUnit.DAYS)
+            .time(2L, TimeUnit.DAYS)
             .build().run();
     }
 
