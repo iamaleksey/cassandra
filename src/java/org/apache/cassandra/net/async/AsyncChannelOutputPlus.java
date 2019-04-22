@@ -19,7 +19,6 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
-import java.nio.channels.ClosedChannelException;
 import java.nio.channels.WritableByteChannel;
 import java.util.concurrent.locks.LockSupport;
 
@@ -42,6 +41,19 @@ import static java.lang.Math.min;
  */
 public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlus
 {
+    public static class FlushException extends IOException
+    {
+        public FlushException(String message)
+        {
+            super(message);
+        }
+
+        public FlushException(String message, Throwable cause)
+        {
+            super(message, cause);
+        }
+    }
+
     final Channel channel;
 
     /** the number of bytes we have begun flushing, written exclusively by the writer */
@@ -89,7 +101,7 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
                 Throwable cause = future.cause();
                 if (cause == null)
                 {
-                    cause = new IOException("Flush failed for unknown reason");
+                    cause = new FlushException("Flush failed for unknown reason");
                     cause.fillInStackTrace();
                 }
                 flushFailed = cause;
@@ -178,9 +190,9 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
         Throwable t = flushFailed;
         if (t != null)
         {
-            if (SocketFactory.isConnectionResetException(t))
-                throw new IOException("The channel this output stream was writing to has been closed", t);
-            throw new IOException("This output stream is in an unsafe state after an asynchronous flush failed", t);
+            if (SocketFactory.isCausedByConnectionReset(t))
+                throw new FlushException("The channel this output stream was writing to has been closed", t);
+            throw new FlushException("This output stream is in an unsafe state after an asynchronous flush failed", t);
         }
     }
 

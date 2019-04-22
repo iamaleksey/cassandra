@@ -62,6 +62,7 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 import static org.apache.cassandra.net.async.ResourceLimits.*;
 import static org.apache.cassandra.net.async.ResourceLimits.Outcome.*;
 import static org.apache.cassandra.net.async.SocketFactory.*;
+import static org.apache.cassandra.utils.Throwables.isCausedBy;
 
 /**
  * Represents a connection type to a peer, and handles the state transistions on the connection and the netty {@link Channel}.
@@ -552,12 +553,15 @@ public class OutboundConnection
          */
         boolean maybeInvalidateChannel(Channel channel, Throwable cause)
         {
-            if (isConnectionResetException(cause) || cause instanceof Errors.NativeIoException)
+            // TODO: should we just invalidate the channel whatever happens?
+            if (isCausedBy(cause, t ->    isConnectionReset(t)
+                                       || t instanceof Errors.NativeIoException
+                                       || t instanceof AsyncChannelOutputPlus.FlushException))
             {
                 invalidateChannel(channel, cause);
-                return true;
+                return false;
             }
-            return false;
+            return true;
         }
 
         /**
@@ -566,7 +570,7 @@ public class OutboundConnection
         void invalidateChannel(Channel channel, Throwable cause)
         {
             JVMStabilityInspector.inspectThrowable(cause);
-            if (isConnectionResetException(cause))
+            if (isCausedByConnectionReset(cause))
                 logger.debug("{} channel closed by provider", id(), cause);
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
@@ -1003,7 +1007,7 @@ public class OutboundConnection
                         @Override
                         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
                         {
-                            if (isConnectionResetException(cause))
+                            if (isCausedByConnectionReset(cause))
                                 logger.info("{} channel closed by provider", id(), cause);
                             else
                                 logger.error("{} unexpected error; closing", id(), cause);

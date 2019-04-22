@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
@@ -60,10 +61,12 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.Throwables;
 
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
 import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.apache.cassandra.utils.Throwables.isCausedBy;
 
 /**
  * A factory for building Netty {@link Channel}s. Channels here are setup with a pipeline to participate
@@ -231,7 +234,7 @@ public final class SocketFactory
         ExecutorUtils.awaitTerminationUntil(deadlineNanos, groups);
     }
 
-    public static boolean isConnectionResetException(Throwable t)
+    public static boolean isConnectionReset(Throwable t)
     {
         if (t instanceof ClosedChannelException)
             return true;
@@ -241,9 +244,14 @@ public final class SocketFactory
         {
             int errorCode = ((Errors.NativeIoException) t).expectedErr();
             return    errorCode == ERRNO_ECONNRESET_NEGATIVE
-                   || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
+                      || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
         }
         return false;
+    }
+
+    public static boolean isCausedByConnectionReset(Throwable t)
+    {
+        return isCausedBy(t, SocketFactory::isConnectionReset);
     }
 
 }
