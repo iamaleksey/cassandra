@@ -575,7 +575,6 @@ public class OutboundConnection
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
 
-            // the delivery loop will pick up again immediately after closeChannel completes, since it depends on stopAndRunOnEventLoop
             closeChannelNow(channel);
         }
 
@@ -1182,11 +1181,18 @@ public class OutboundConnection
     }
 
     /**
-     * The channel is already known to be invalid, so there's no point waiting for a clean break in delivery
+     * The channel is already known to be invalid, so there's no point waiting for a clean break in delivery.
+     * 
+     * Delivery will be executed again if necessary after this completes.
      */
     private void closeChannelNow(Channel closeIfIs)
     {
-        runOnEventLoop(closeChannelTask(closeIfIs));
+        runOnEventLoop(closeChannelTask(closeIfIs)).addListener(future -> {
+            // ensure we will run delivery again at some point, if we have work
+            // (could have multiple rounds of exceptions, with many waiting messages and no new ones)
+            if (hasPending())
+                delivery.execute();
+        });
     }
 
     private Runnable closeChannelTask(Channel closeIfIs)
