@@ -251,6 +251,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     public void channelInactive(ChannelHandlerContext ctx)
     {
         discard();
+
+        ctx.fireChannelInactive();
     }
 
     public void handlerRemoved(ChannelHandlerContext ctx)
