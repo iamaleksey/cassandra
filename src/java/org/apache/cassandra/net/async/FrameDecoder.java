@@ -43,19 +43,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         abstract boolean isConsumed();
     }
 
-    interface FrameProcessor
-    {
-        /**
-         * Frame processor that the frames should be handed off to.
-         *
-         * @return true if more frames can be taken by the processor, false if the decoder should pause until
-         * it's explicitly resumed.
-         */
-        boolean process(Frame frame) throws IOException;
-    }
-
-    private FrameProcessor processor;
-
     /**
      * The payload bytes of a complete frame, i.e. a frame stripped of its headers and trailers,
      * with any verification supported by the protocol confirmed.
@@ -136,27 +123,70 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
     abstract void addLastTo(ChannelPipeline pipeline);
 
-    /**
-     * For use by InboundMessageHandler (or other upstream handlers) that want to permanently
-     * stop receiving frames, e.g. because of an exception caught.
-     */
-    void stop()
+    private static final FrameProcessor NO_PROCESSOR =
+        frame -> { throw new IllegalStateException("Frame processor invoked in a non-activated FrameDecoder"); };
+
+    interface FrameProcessor
     {
-        active = false;
-        config.setAutoRead(false);
+        /**
+         * Frame processor that the frames should be handed off to.
+         *
+         * @return true if more frames can be taken by the processor, false if the decoder should pause until
+         * it's explicitly resumed.
+         */
+        boolean process(Frame frame) throws IOException;
+    }
+
+    private FrameProcessor processor = NO_PROCESSOR;
+
+    /**
+     * For use by InboundMessageHandler (or other upstream handlers) that want to start receiving frames.
+     */
+    void activate(FrameProcessor processor)
+    {
+        if (active || this.processor != NO_PROCESSOR)
+            throw new IllegalStateException("Attempted to activate an already active FrameDecoder");
+
+        this.processor = processor;
+
+        active = true;
+        config.setAutoRead(true);
     }
 
     /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
      * receiving frames after previously indicating that processing should be paused.
      */
-    void resume(FrameProcessor processor)
+    void reactivate()
     {
-        this.processor = processor;
+        reactivateOnce(processor);
+    }
+
+    /**
+     * For use by InboundMessageHandler (or other upstream handlers) that want to resume
+     * receiving frames after previously indicating that processing should be paused.
+     *
+     * Activates once using the provided processor, then reverts to using the default one.
+     */
+    void reactivateOnce(FrameProcessor processor)
+    {
+        if (active)
+            throw new IllegalStateException("Attempted to reactivate an already active FrameDecoder");
         active = true;
-        deliver(ctx);
+        deliver(ctx, processor);
         if (active) // we could have paused again before delivery completed
             config.setAutoRead(true);
+    }
+
+    /**
+     * For use by InboundMessageHandler (or other upstream handlers) that want to permanently
+     * stop receiving frames, e.g. because of an exception caught.
+     */
+    void deactivate()
+    {
+        active = false;
+        config.setAutoRead(false);
+        processor = NO_PROCESSOR;
     }
 
     /**
@@ -186,7 +216,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         decode(frames, SharedBytes.wrap(buf));
 
-        deliver(ctx);
+        deliver(ctx, processor);
         if (!active)
             config.setAutoRead(false);
     }
@@ -194,7 +224,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     /**
      * Deliver any waiting frames, including those that were incompletely read last time
      */
-    private void deliver(ChannelHandlerContext ctx)
+    private void deliver(ChannelHandlerContext ctx, FrameProcessor processor)
     {
         try
         {

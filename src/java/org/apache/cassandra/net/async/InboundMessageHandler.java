@@ -168,7 +168,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     @Override
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        decoder.resume(this::readFrame);
+        decoder.activate(this::readFrame);
     }
 
     @Override
@@ -179,17 +179,17 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean readFrame(Frame frame) throws IOException
     {
-        return readFrame(frame, endpointReserveCapacity, globalReserveCapacity, Integer.MAX_VALUE);
+        return readFrame(frame, endpointReserveCapacity, globalReserveCapacity, false);
     }
 
-    private boolean readFrame(Frame frame, Limit endpointReserve, Limit globalReserve, int count) throws IOException
+    private boolean readFrame(Frame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws IOException
     {
         return frame instanceof IntactFrame
-             ? readIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, count)
+             ? readIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, processOnce)
              : readCorruptFrame((CorruptFrame) frame);
     }
 
-    private boolean readIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, int count) throws InvalidLegacyProtocolMagic
+    private boolean readIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws InvalidLegacyProtocolMagic
     {
         SharedBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
@@ -197,11 +197,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (frame.isSelfContained)
         {
-            return processMessages(true, frame.contents, endpointReserve, globalReserve, count);
+            return processMessages(true, frame.contents, endpointReserve, globalReserve, processOnce);
         }
         else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
-            return processMessages(false, frame.contents, endpointReserve, globalReserve, count);
+            return processMessages(false, frame.contents, endpointReserve, globalReserve, processOnce);
         }
         else if (largeBytesRemaining > 0)
         {
@@ -279,13 +279,16 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processMessages(boolean contained, SharedBytes bytes, Limit endpointReserve, Limit globalReserve, int count)
+    private boolean processMessages(boolean contained, SharedBytes bytes, Limit endpointReserve, Limit globalReserve, boolean processOnce)
     throws InvalidLegacyProtocolMagic
     {
-        while (!isBlocked && bytes.isReadable() && count-- > 0)
+        do
+        {
             isBlocked = !processMessage(bytes, contained, endpointReserve, globalReserve);
+        }
+        while (bytes.isReadable() && !isBlocked && !processOnce);
 
-        return !isBlocked && count > 0;
+        return !isBlocked && !processOnce;
     }
 
     private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve)
@@ -444,7 +447,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            decoder.resume(this::readFrame);
+            decoder.reactivate();
         }
     }
 
@@ -467,7 +470,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            decoder.resume(frame -> readFrame(frame, endpointReserve, globalReserve, 1));
+            decoder.reactivateOnce(frame -> readFrame(frame, endpointReserve, globalReserve, true));
         }
     }
 
@@ -476,7 +479,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed && !isBlocked)
-            decoder.resume(this::readFrame);
+            decoder.reactivate();
     }
 
     private EventLoop eventLoop()
@@ -533,7 +536,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void exceptionCaught(Throwable cause)
     {
-        decoder.stop();
+        decoder.deactivate();
 
         JVMStabilityInspector.inspectThrowable(cause);
 
