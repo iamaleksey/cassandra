@@ -112,7 +112,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
-    private WaitQueue.Handle handle = null;
+    private WaitQueue.Ticket ticket = null;
 
     long receivedCount, receivedBytes;
     int corruptFramesRecovered, corruptFramesUnrecovered;
@@ -318,10 +318,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         switch (acquireCapacity(endpointReserve, globalReserve, size))
         {
             case INSUFFICIENT_ENDPOINT:
-                handle = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                ticket = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
             case INSUFFICIENT_GLOBAL:
-                handle = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                ticket = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
                 return false;
         }
 
@@ -450,13 +450,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void onEndpointReserveCapacityRegained(Limit endpointReserve)
     {
-        handle = null;
+        ticket = null;
         onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
     }
 
     private void onGlobalReserveCapacityRegained(Limit globalReserve)
     {
-        handle = null;
+        ticket = null;
         onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
     }
 
@@ -561,10 +561,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (null != largeCoprocessor)
             stopCoprocessor();
 
-        if (null != handle)
+        if (null != ticket)
         {
-            handle.invalidate();
-            handle = null;
+            ticket.invalidate();
+            ticket = null;
         }
 
         onClosed.call(this);
@@ -723,7 +723,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private final Kind kind;
         private final Limit reserveCapacity;
 
-        private final MpscLinkedQueue<Handle> queue = MpscLinkedQueue.newMpscLinkedQueue();
+        private final MpscLinkedQueue<Ticket> queue = MpscLinkedQueue.newMpscLinkedQueue();
 
         private WaitQueue(Limit reserveCapacity, Kind kind)
         {
@@ -741,12 +741,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return new WaitQueue(globalReserveCapacity, Kind.GLOBAL_CAPACITY);
         }
 
-        private Handle registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+        private Ticket registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
         {
-            Handle handle = new Handle(this, handler, bytesRequested, expiresAtNanos);
-            queue.add(handle);
+            Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
+            queue.add(ticket);
             signal();
-            return handle;
+            return ticket;
         }
 
         void signal()
@@ -770,7 +770,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             long nanoTime = ApproximateTime.nanoTime();
 
-            Handle t;
+            Ticket t;
             while ((t = queue.peek()) != null)
             {
                 if (!t.call()) // invalidated
@@ -802,24 +802,24 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         class ResumeProcessing implements Runnable
         {
-            List<Handle> handles = new ArrayList<>();
+            List<Ticket> tickets = new ArrayList<>();
 
-            private void add(Handle handle)
+            private void add(Ticket ticket)
             {
-                handles.add(handle);
+                tickets.add(ticket);
             }
 
             public void run()
             {
                 long capacity = 0L;
-                for (Handle handle : handles)
-                    capacity += handle.bytesRequested;
+                for (Ticket ticket : tickets)
+                    capacity += ticket.bytesRequested;
 
                 Limit limit = new ResourceLimits.Basic(capacity);
                 try
                 {
-                    for (Handle handle : handles)
-                        handle.processOneMessage(limit);
+                    for (Ticket ticket : tickets)
+                        ticket.processOneMessage(limit);
                 }
                 finally
                 {
@@ -831,26 +831,26 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     reserveCapacity.release(limit.remaining());
                 }
 
-                handles.forEach(Handle::resumeNormalProcessing);
+                tickets.forEach(Ticket::resumeNormalProcessing);
             }
         }
 
-        static final class Handle
+        static final class Ticket
         {
             private static final int WAITING     = 0;
             private static final int CALLED      = 1;
             private static final int INVALIDATED = 2;
 
             private volatile int state;
-            private static final AtomicIntegerFieldUpdater<Handle> stateUpdater =
-                AtomicIntegerFieldUpdater.newUpdater(Handle.class, "state");
+            private static final AtomicIntegerFieldUpdater<Ticket> stateUpdater =
+                AtomicIntegerFieldUpdater.newUpdater(Ticket.class, "state");
 
             private final WaitQueue waitQueue;
             private final InboundMessageHandler handler;
             private final int bytesRequested;
             private final long expiresAtNanos;
 
-            private Handle(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+            private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
             {
                 this.waitQueue = waitQueue;
                 this.handler = handler;
