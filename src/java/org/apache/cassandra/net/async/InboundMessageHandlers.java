@@ -48,10 +48,10 @@ public final class InboundMessageHandlers
     private final InboundMessageHandler.WaitQueue endpointWaitQueue;
     private final InboundMessageHandler.WaitQueue globalWaitQueue;
 
-    private final Collection<InboundMessageHandler> handlers;
     private final InternodeInboundMetrics metrics;
 
-    private final Function<MessageCallbacks, MessageCallbacks> callbackAdapter;
+    // allow tests to wrap or replace MessageCallbacks used by individual handlers
+    private final Function<MessageCallbacks, MessageCallbacks> callbacksTransformer;
 
     private final InboundCounters urgentCounters = new InboundCounters();
     private final InboundCounters smallCounters  = new InboundCounters();
@@ -67,6 +67,8 @@ public final class InboundMessageHandlers
     private final MessageProcessor smallProcessor;
     private final MessageProcessor largeProcessor;
     private final MessageProcessor legacyProcessor;
+
+    private final Collection<InboundMessageHandler> handlers = new CopyOnWriteArrayList<>();
 
     public InboundMessageHandlers(InetAddressAndPort peer,
                                   int queueCapacity,
@@ -84,20 +86,18 @@ public final class InboundMessageHandlers
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
                                   MessageProcessor messageProcessor,
-                                  Function<MessageCallbacks, MessageCallbacks> callbackAdapter)
+                                  Function<MessageCallbacks, MessageCallbacks> callbacksTransformer)
     {
         this.peer = peer;
 
         this.queueCapacity = queueCapacity;
         this.endpointReserveCapacity = new ResourceLimits.Concurrent(endpointReserveCapacity);
         this.globalReserveCapacity = globalReserveCapacity;
-        this.callbackAdapter = callbackAdapter;
 
         this.endpointWaitQueue = InboundMessageHandler.WaitQueue.endpoint(this.endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
 
-        this.handlers = new CopyOnWriteArrayList<>();
-        this.metrics = new InternodeInboundMetrics(peer, this);
+        this.callbacksTransformer = callbacksTransformer;
 
         urgentCallbacks = makeMessageCallbacks(peer, urgentCounters);
         smallCallbacks  = makeMessageCallbacks(peer, smallCounters);
@@ -108,6 +108,8 @@ public final class InboundMessageHandlers
         smallProcessor  = wrapProcessorForMetrics(messageProcessor, smallCounters);
         largeProcessor  = wrapProcessorForMetrics(messageProcessor, largeCounters);
         legacyProcessor = wrapProcessorForMetrics(messageProcessor, legacyCounters);
+
+        metrics = new InternodeInboundMetrics(peer, this);
     }
 
     InboundMessageHandler createHandler(FrameDecoder frameDecoder, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
@@ -131,7 +133,7 @@ public final class InboundMessageHandlers
 
                                       this::onHandlerClosed,
                                       callbacksFor(type),
-                                      callbackAdapter,
+                                      callbacksTransformer,
                                       processorFor(type));
         handlers.add(handler);
         return handler;
