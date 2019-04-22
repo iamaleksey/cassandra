@@ -869,7 +869,7 @@ public class OutboundConnection
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-OUT-" + FBUtilities.getBroadcastAddressAndPort() + "->" + settings.endpoint + '-' + type;
+                threadName = "Messaging-OUT-" + settings.from + "->" + settings.endpoint + '-' + type;
                 Thread.currentThread().setName(threadName);
 
                 super.run();

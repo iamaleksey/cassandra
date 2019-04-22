@@ -86,6 +86,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final ConnectionType type;
     private final Channel channel;
+    private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
     private final int version;
 
@@ -127,6 +128,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                           ConnectionType type,
                           Channel channel,
+                          InetAddressAndPort self,
                           InetAddressAndPort peer,
                           int version,
 
@@ -148,6 +150,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         this.type = type;
         this.channel = channel;
+        this.self = self;
         this.peer = peer;
         this.version = version;
 
@@ -627,7 +630,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-IN-" + peer + "->" + FBUtilities.getBroadcastAddressAndPort() + '-' + type + '-' + id;
+                threadName = "Messaging-IN-" + peer + "->" + self + '-' + type + '-' + id;
                 Thread.currentThread().setName(threadName);
 
                 processLargeMessage();

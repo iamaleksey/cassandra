@@ -96,7 +96,7 @@ public class ConnectionBurnTest extends ConnectionTest
             {
                 Map<InetAddressAndPort, InboundMessageHandlers> handlersBySender = new HashMap<>();
                 for (InetAddressAndPort sender : endpoints)
-                    handlersBySender.put(sender, new InboundMessageHandlers(sender, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, process, callbacks));
+                    handlersBySender.put(sender, new InboundMessageHandlers(recipient, sender, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, process, callbacks));
 
                 handlersByRecipientThenSender.put(recipient, handlersBySender);
                 bind.add(settings.template.withHandlers(handlersBySender::get).withBindAddress(recipient));

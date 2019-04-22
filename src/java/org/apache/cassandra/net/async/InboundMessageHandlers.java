@@ -39,6 +39,7 @@ import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 
 public final class InboundMessageHandlers
 {
+    private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
 
     private final int queueCapacity;
@@ -70,17 +71,19 @@ public final class InboundMessageHandlers
 
     private final Collection<InboundMessageHandler> handlers = new CopyOnWriteArrayList<>();
 
-    public InboundMessageHandlers(InetAddressAndPort peer,
+    public InboundMessageHandlers(InetAddressAndPort self,
+                                  InetAddressAndPort peer,
                                   int queueCapacity,
                                   long endpointReserveCapacity,
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
                                   MessageProcessor messageProcessor)
     {
-        this(peer, queueCapacity, endpointReserveCapacity, globalReserveCapacity, globalWaitQueue, messageProcessor, Functions.identity());
+        this(self, peer, queueCapacity, endpointReserveCapacity, globalReserveCapacity, globalWaitQueue, messageProcessor, Functions.identity());
     }
 
-    public InboundMessageHandlers(InetAddressAndPort peer,
+    public InboundMessageHandlers(InetAddressAndPort self,
+                                  InetAddressAndPort peer,
                                   int queueCapacity,
                                   long endpointReserveCapacity,
                                   ResourceLimits.Limit globalReserveCapacity,
@@ -88,6 +91,7 @@ public final class InboundMessageHandlers
                                   MessageProcessor messageProcessor,
                                   Function<MessageCallbacks, MessageCallbacks> callbacksTransformer)
     {
+        this.self = self;
         this.peer = peer;
 
         this.queueCapacity = queueCapacity;
@@ -119,6 +123,7 @@ public final class InboundMessageHandlers
 
                                       type,
                                       channel,
+                                      self,
                                       peer,
                                       version,
 

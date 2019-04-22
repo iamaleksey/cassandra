@@ -515,7 +515,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             return handlers;
 
         return messageHandlers.computeIfAbsent(from, addr ->
-            new InboundMessageHandlers(addr,
+            new InboundMessageHandlers(FBUtilities.getLocalAddressAndPort(),
+                                       addr,
                                        DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes(),
                                        DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes(),
                                        reserveReceiveQueueGlobalLimitInBytes,
