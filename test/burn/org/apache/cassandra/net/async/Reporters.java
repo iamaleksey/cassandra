@@ -43,15 +43,18 @@ class Reporters
         this.connections = connections;
         this.reporters = ImmutableList.of(
             outboundReporter (true,  "Outbound Throughput",          OutboundConnection::sentBytes,          ConnectionBurnTest::prettyPrintMemory),
-            outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
-            outboundReporter (true,  "Outbound Errors",              OutboundConnection::errorCount,         Long::toString),
-            outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
-            outboundReporter (true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, Long::toString),
-
             inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        ConnectionBurnTest::prettyPrintMemory),
+
+            outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
+            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          ConnectionBurnTest::prettyPrintMemory),
+
+            outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
             inboundReporter  (true,  "Inbound Expirations",          InboundCounters::expiredCount,          Long::toString),
+
+            outboundReporter (true,  "Outbound Errors",              OutboundConnection::errorCount,         Long::toString),
             inboundReporter  (true,  "Inbound Errors",               InboundCounters::errorCount,            Long::toString),
-            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          ConnectionBurnTest::prettyPrintMemory)
+
+            outboundReporter (true,  "Outbound Connection Attempts", OutboundConnection::connectionAttempts, Long::toString)
         );
     }
 
@@ -63,7 +66,8 @@ class Reporters
 
     void print()
     {
-        System.out.println(prettyPrintElapsed(System.nanoTime() - start));
+        System.out.println("==" + prettyPrintElapsed(System.nanoTime() - start) + "==\n");
+
         for (Reporter reporter : reporters)
         {
             reporter.print();
@@ -110,9 +114,9 @@ class Reporters
             for (int column = 0 ; column < endpoints.size() * 3 ; column += 3)
             {
                 String endpoint = Integer.toString(1 + column / 3);
-                columnNames[    column] = endpoint + " Urgent";
-                columnNames[1 + column] = endpoint + " Small";
-                columnNames[2 + column] = endpoint + " Large";
+                columnNames[    column] = endpoint + ".Urgent";
+                columnNames[1 + column] = endpoint + ".Small";
+                columnNames[2 + column] = endpoint + ".Large";
             }
             columnNames[columnNames.length - 1] = "Total";
 
@@ -214,7 +218,8 @@ class Reporters
             if (rowMask.isEmpty() && columnMask.isEmpty())
                 return;
 
-            System.out.println(heading);
+            System.out.println(heading + '\n');
+
             Arrays.fill(width, 0);
             for (int row = 0 ; row < print.length ; ++row)
             {
@@ -226,14 +231,14 @@ class Reporters
 
             for (int row = 0 ; row < print.length ; ++row)
             {
-                if (row > 0 && !rowMask.get(row - 1))
-                    continue;
+//                if (row > 0 && !rowMask.get(row - 1))
+//                    continue;
 
                 StringBuilder builder = new StringBuilder();
                 for (int column = 0 ; column < width.length ; ++column)
                 {
-                    if (column > 0 && !columnMask.get(column - 1))
-                        continue;
+//                    if (column > 0 && !columnMask.get(column - 1))
+//                        continue;
 
                     String s = print[row][column];
                     int pad = width[column] - s.length();
