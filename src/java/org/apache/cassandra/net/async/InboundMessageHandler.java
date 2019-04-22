@@ -108,7 +108,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final MessageCallbacks callbacks;
     private final MessageProcessor processor;
 
-    private int largeBytesRemaining; // remainig bytes we need to supply to the coprocessor to deserialize the in-flight large message
+    private int largeBytesRemaining; // remaining bytes we need to supply to the coprocessor to deserialize the in-flight large message
     private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
@@ -390,7 +390,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = coprocessor.supplyAndRequestClosure(bytes.sliceAndConsume(size).atomic());
-        largeExecutor.submit(coprocessor);
+        largeExecutor.execute(coprocessor);
         return isKeepingUp;
     }
 
@@ -576,7 +576,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private void startCoprocessor(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         largeCoprocessor = new LargeCoprocessor(messageSize, id, expiresAtNanos, callBackOnFailure);
-        largeExecutor.submit(largeCoprocessor);
+        largeExecutor.execute(largeCoprocessor);
     }
 
     private void stopCoprocessor()
@@ -703,7 +703,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             int prevUnconsumed = unconsumed + size;
 
             if (unconsumed <= maxUnconsumedBytes && prevUnconsumed > maxUnconsumedBytes)
-                channel.eventLoop().submit(InboundMessageHandler.this::onCoprocessorCaughtUp);
+                channel.eventLoop().execute(InboundMessageHandler.this::onCoprocessorCaughtUp);
         }
     }
 

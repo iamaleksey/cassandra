@@ -20,6 +20,7 @@ package org.apache.cassandra.utils;
 
 import java.util.concurrent.TimeUnit;
 
+import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -111,7 +112,11 @@ public class ApproximateTime
         ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostSameTime, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, TimeUnit.MILLISECONDS);
     }
 
-    /** request an immediate refresh; this shouldn't generally be invoked, except perhaps by tests */
+    /**
+     * Request an immediate refresh; this shouldn't generally be invoked, except perhaps by tests
+     * WARNING: this can break monotonicity of almostNowNanos if invoked directly, so don't do it.
+     */
+    @VisibleForTesting
     public static void refresh()
     {
         refreshAlmostNow.run();

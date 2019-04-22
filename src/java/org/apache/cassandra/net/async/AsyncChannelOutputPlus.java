@@ -178,7 +178,7 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
         Throwable t = flushFailed;
         if (t != null)
         {
-            if (t instanceof ClosedChannelException)
+            if (SocketFactory.isConnectionResetException(t))
                 throw new IOException("The channel this output stream was writing to has been closed", t);
             throw new IOException("This output stream is in an unsafe state after an asynchronous flush failed", t);
         }
