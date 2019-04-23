@@ -28,14 +28,12 @@ import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.memory.BufferPool;
-import org.apache.hadoop.mapred.JobTracker;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 

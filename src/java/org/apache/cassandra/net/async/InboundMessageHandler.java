@@ -45,6 +45,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
+import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
@@ -79,7 +80,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final Message.Serializer serializer = Message.serializer;
 
     private boolean isClosed;
-    private boolean isBlocked;
 
     private final FrameDecoder decoder;
 
@@ -108,8 +108,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final MessageCallbacks callbacks;
     private final MessageProcessor processor;
 
-    private int largeBytesRemaining; // remaining bytes we need to supply to the coprocessor to deserialize the in-flight large message
-    private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
+    private int largeBytesRemaining; // remaining bytes of an in-flight multi-frame large message
+    private LargeCoprocessor largeCoprocessor;
+    private boolean isSkippingLargeMessage;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -117,7 +118,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     long receivedCount, receivedBytes;
     int corruptFramesRecovered, corruptFramesUnrecovered;
 
-    private LargeCoprocessor largeCoprocessor;
 
     private volatile int largeUnconsumedBytes; // unconsumed bytes in all ByteBufs queued up in all coprocessors
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
@@ -170,7 +170,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     @Override
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        decoder.activate(this::readFrame);
+        decoder.activate(this::processFrame);
     }
 
     @Override
@@ -179,121 +179,41 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         throw new IllegalStateException("InboundMessageHandler doesn't expect channelRead() to be invoked");
     }
 
-    private boolean readFrame(Frame frame) throws IOException
+    private boolean processFrame(Frame frame) throws IOException
     {
-        return readFrame(frame, endpointReserveCapacity, globalReserveCapacity, false);
-    }
+        if (frame instanceof IntactFrame)
+            return processIntactFrame((IntactFrame) frame, endpointReserveCapacity, globalReserveCapacity);
 
-    private boolean readFrame(Frame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws IOException
-    {
-        return frame instanceof IntactFrame
-             ? readIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, processOnce)
-             : readCorruptFrame((CorruptFrame) frame);
-    }
-
-    private boolean readIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws InvalidLegacyProtocolMagic
-    {
-        SharedBytes bytes = frame.contents;
-        ByteBuffer buf = bytes.get();
-        int readableBytes = buf.remaining();
-
-        if (frame.isSelfContained)
-        {
-            return processMessages(true, frame.contents, endpointReserve, globalReserve, processOnce);
-        }
-        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
-        {
-            return processMessages(false, frame.contents, endpointReserve, globalReserve, processOnce);
-        }
-        else if (largeBytesRemaining > 0)
-        {
-            receivedBytes += readableBytes;
-            largeBytesRemaining -= readableBytes;
-
-            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
-            if (largeBytesRemaining == 0)
-            {
-                receivedCount++;
-                stopCoprocessor();
-            }
-
-            return isKeepingUp;
-        }
-        else if (skipBytesRemaining > 0)
-        {
-            receivedBytes += readableBytes;
-            skipBytesRemaining -= readableBytes;
-
-            bytes.skipBytes(readableBytes);
-            if (skipBytesRemaining == 0)
-                receivedCount++;
-
-            return true;
-        }
-        else
-        {
-            throw new IllegalStateException();
-        }
-    }
-
-    private boolean readCorruptFrame(CorruptFrame frame) throws InvalidCrc
-    {
-        if (!frame.isRecoverable())
-        {
-            corruptFramesUnrecovered++;
-            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
-        }
-
-        int frameSize = frame.frameSize;
-        receivedBytes += frameSize;
-
-        if (frame.isSelfContained)
-        {
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
-        }
-        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
-        {
-            corruptFramesUnrecovered++;
-            noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a message)", id());
-            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
-        }
-        else if (largeBytesRemaining > 0)
-        {
-            stopCoprocessor();
-            skipBytesRemaining = largeBytesRemaining - frameSize;
-            largeBytesRemaining = 0;
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
-        }
-        else if (skipBytesRemaining > 0)
-        {
-            skipBytesRemaining -= frameSize;
-            if (skipBytesRemaining == 0)
-                receivedCount++;
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
-        }
-        else
-        {
-            throw new IllegalStateException();
-        }
-
-        corruptFramesRecovered++;
-
+        processCorruptFrame((CorruptFrame) frame);
         return true;
     }
 
-    private boolean processMessages(boolean contained, SharedBytes bytes, Limit endpointReserve, Limit globalReserve, boolean processOnce)
-    throws InvalidLegacyProtocolMagic
+    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
-        do
-        {
-            isBlocked = !processMessage(bytes, contained, endpointReserve, globalReserve);
-        }
-        while (bytes.isReadable() && !isBlocked && !processOnce);
-
-        return !isBlocked && !processOnce;
+        if (frame.isSelfContained)
+            return processFrameOfContainedMessages(frame.contents, endpointReserve, globalReserve);
+        else if (largeBytesRemaining == 0)
+            return processFirstFrameOfLargeMessage(frame, endpointReserve, globalReserve);
+        else
+            return processSubsequentFrameOfLargeMessage(frame);
     }
 
-    private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve)
+    /*
+     * Handling of contained messages (not crossing boundaries of a frame) - both small and 'large', for the inbound
+     * definition of 'large' (breaching the size threshold for what we are willing to process on event-loop vs.
+     * off event-loop).
+     */
+
+    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
+    {
+        while (bytes.isReadable())
+            if (!processOneContainedMessage(bytes, endpointReserve, globalReserve))
+                return false;
+        return true;
+    }
+
+    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
     throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
@@ -307,16 +227,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (expiresAtNanos < currentTimeNanos)
         {
             callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
-
-            int skipped = contained ? size : buf.remaining();
-            receivedBytes += skipped;
-            bytes.skipBytes(skipped);
-
-            if (contained)
-                receivedCount++;
-            else
-                skipBytesRemaining = size - skipped;
-
+            receivedCount++;
+            receivedBytes += size;
+            bytes.skipBytes(size);
             return true;
         }
 
@@ -330,21 +243,18 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 return false;
         }
 
-        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
-
-        if (contained && size <= largeThreshold)
-            return processMessageOnEventLoop(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else if (size <= buf.remaining())
-            return processMessageOffEventLoopContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else
-            return processMessageOffEventLoopUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-    }
-
-    private boolean processMessageOnEventLoop(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
-    {
         receivedCount++;
         receivedBytes += size;
 
+        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
+
+        return size < largeThreshold
+             ? processContainedSmallMessage(bytes, size, id, expiresAtNanos, callBackOnFailure)
+             : processContainedLargeMessage(bytes, size, id, expiresAtNanos, callBackOnFailure);
+    }
+
+    private boolean processContainedSmallMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
         final int end = buf.limit();
@@ -385,26 +295,129 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processMessageOffEventLoopContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processContainedLargeMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
-        receivedCount++;
-        receivedBytes += size;
-
         LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = coprocessor.supplyAndRequestClosure(bytes.sliceAndConsume(size).atomic());
         largeExecutor.execute(coprocessor);
         return isKeepingUp;
     }
 
-    private boolean processMessageOffEventLoopUncontained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    /*
+     * Handling of multi-frame large messages
+     */
+
+    private boolean processFirstFrameOfLargeMessage(IntactFrame frame, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
     {
-        int readableBytes = bytes.readableBytes();
+        SharedBytes bytes = frame.contents;
+        ByteBuffer buf = bytes.get();
+        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
+
+        long currentTimeNanos = ApproximateTime.nanoTime();
+        long id = serializer.getId(buf, version);
+        long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
+        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
+
+        if (expiresAtNanos < currentTimeNanos)
+        {
+            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            int skipped = buf.remaining();
+            receivedBytes += skipped;
+            bytes.skipBytes(skipped);
+            largeBytesRemaining = size - skipped;
+            isSkippingLargeMessage = true;
+            return true;
+        }
+
+        switch (acquireCapacity(endpointReserve, globalReserve, size))
+        {
+            case INSUFFICIENT_ENDPOINT:
+                ticket = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                return false;
+            case INSUFFICIENT_GLOBAL:
+                ticket = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                return false;
+        }
+
+        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
+
+        int readableBytes = buf.remaining();
         receivedBytes += readableBytes;
 
         startCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
         largeBytesRemaining = size - readableBytes;
         return isKeepingUp;
+    }
+
+    private boolean processSubsequentFrameOfLargeMessage(IntactFrame frame)
+    {
+        SharedBytes bytes = frame.contents;
+        int frameSize = bytes.readableBytes();
+
+        largeBytesRemaining -= frameSize;
+        boolean isLastFrame = largeBytesRemaining == 0;
+        if (isLastFrame)
+            receivedCount++;
+        receivedBytes += frameSize;
+
+        if (isSkippingLargeMessage)
+        {
+            bytes.skipBytes(frameSize);
+            if (isLastFrame)
+                isSkippingLargeMessage = false;
+            return true;
+        }
+        else
+        {
+            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(frameSize).atomic());
+            if (isLastFrame)
+                stopCoprocessor();
+            return isKeepingUp;
+        }
+    }
+
+    private void processCorruptSubsequentFrameOfLargeMessage(CorruptFrame frame)
+    {
+        largeBytesRemaining -= frame.frameSize;
+        boolean isLastFrame = largeBytesRemaining == 0;
+        if (isLastFrame)
+            receivedCount++;
+
+        if (!isSkippingLargeMessage)
+            stopCoprocessor();
+        isSkippingLargeMessage = !isLastFrame;
+    }
+
+    private void processCorruptFrame(CorruptFrame frame) throws InvalidCrc
+    {
+        if (!frame.isRecoverable())
+        {
+            corruptFramesUnrecovered++;
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
+
+        int frameSize = frame.frameSize;
+        receivedBytes += frameSize;
+
+        if (frame.isSelfContained)
+        {
+            corruptFramesRecovered++;
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
+        }
+        else if (largeBytesRemaining == 0) // first frame of a large message
+        {
+            corruptFramesUnrecovered++;
+            noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a large message)", id());
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
+        else // subsequent frame of a large message
+        {
+            processCorruptSubsequentFrameOfLargeMessage(frame);
+            corruptFramesRecovered++;
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
+        }
     }
 
     /*
@@ -446,48 +459,105 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         assert channel.eventLoop().inEventLoop();
 
-        if (!isClosed)
+        try
         {
-            isBlocked = false;
-            try
-            {
+            if (!isClosed)
                 decoder.reactivate();
-            }
-            catch (Throwable t)
+        }
+        catch (Throwable t)
+        {
+            exceptionCaught(t);
+        }
+    }
+
+    private boolean onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
+    {
+        assert channel.eventLoop().inEventLoop();
+        ticket = null;
+        return !isClosed && processUpToOneMessage(endpointReserve, globalReserveCapacity);
+    }
+
+    private boolean onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
+    {
+        assert channel.eventLoop().inEventLoop();
+        ticket = null;
+        return !isClosed && processUpToOneMessage(endpointReserveCapacity, globalReserve);
+    }
+
+    /*
+     * Return true if the handler should be reactivated.
+     */
+    private boolean processUpToOneMessage(Limit endpointReserve, Limit globalReserve) throws IOException
+    {
+        UpToOneMessageFrameProcessor processor = new UpToOneMessageFrameProcessor(endpointReserve, globalReserve);
+        decoder.processBacklog(processor);
+        return processor.isActive;
+    }
+
+    private class UpToOneMessageFrameProcessor implements FrameProcessor
+    {
+        private final Limit endpointReserve;
+        private final Limit globalReserve;
+
+        boolean isActive = true;
+        boolean firstFrame = true;
+
+        private UpToOneMessageFrameProcessor(Limit endpointReserve, Limit globalReserve)
+        {
+            this.endpointReserve = endpointReserve;
+            this.globalReserve = globalReserve;
+        }
+
+        @Override
+        public boolean process(Frame frame) throws IOException
+        {
+            if (firstFrame)
             {
-                exceptionCaught(t);
+                if (!(frame instanceof IntactFrame))
+                    throw new IllegalStateException("First backlog frame must be intact");
+                firstFrame = false;
+                return processFirstFrame((IntactFrame) frame);
+            }
+            else
+            {
+                return processSubsequentFrame(frame);
+            }
+        }
+
+        private boolean processFirstFrame(IntactFrame frame) throws IOException
+        {
+            if (frame.isSelfContained)
+            {
+                isActive = processOneContainedMessage(frame.contents, endpointReserve, globalReserve);
+                return false; // stop after one message
+            }
+            else
+            {
+                isActive = processFirstFrameOfLargeMessage(frame, endpointReserve, globalReserve);
+                return isActive; // continue unless fallen behind coprocessor or ran out of reserve capacity again
+            }
+        }
+
+        private boolean processSubsequentFrame(Frame frame) throws IOException
+        {
+            if (frame instanceof IntactFrame)
+            {
+                isActive = processSubsequentFrameOfLargeMessage((IntactFrame) frame);
+                return isActive && largeBytesRemaining > 0; // continue unless blocked or done with the large message
+            }
+            else
+            {
+                processCorruptFrame((CorruptFrame) frame);
+                return largeBytesRemaining > 0;
             }
         }
     }
 
-    private void onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
-    {
-        ticket = null;
-        onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
-    }
-
-    private void onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
-    {
-        ticket = null;
-        onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
-    }
-
-    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve) throws IOException
+    private void resume() throws IOException
     {
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed)
-        {
-            isBlocked = false;
-            decoder.processBacklog(frame -> readFrame(frame, endpointReserve, globalReserve, true));
-        }
-    }
-
-    private void resumeIfNotBlocked() throws IOException
-    {
-        assert channel.eventLoop().inEventLoop();
-
-        if (!isClosed && !isBlocked)
             decoder.reactivate();
     }
 
@@ -793,9 +863,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 if (!t.call()) // invalidated
                 {
-                    if (t != queue.poll())
-                        throw new IllegalStateException("Queue peek() != poll()");
-
+                    queue.poll();
                     continue;
                 }
 
@@ -808,8 +876,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (null == tasks)
                     tasks = new IdentityHashMap<>();
 
-                if (t != queue.poll())
-                    throw new IllegalStateException("Queue peek() != poll()");
+                queue.poll();
 
                 tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ResumeProcessing()).add(t);
             }
@@ -829,6 +896,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             public void run()
             {
+                // FIXME: exclude capacity for expired tickets
                 long capacity = 0L;
                 for (Ticket ticket : tickets)
                     capacity += ticket.bytesRequested;
@@ -837,7 +905,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 try
                 {
                     for (Ticket ticket : tickets)
-                        ticket.processOneMessage(limit);
+                        ticket.reactivate(limit);
                 }
                 finally
                 {
@@ -849,8 +917,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     reserveCapacity.release(limit.remaining());
                     // TODO: should we re-signal if limit.remaining() > 0?
                 }
-
-                tickets.forEach(Ticket::resumeNormalProcessing);
             }
         }
 
@@ -877,42 +943,27 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 this.expiresAtNanos = expiresAtNanos;
             }
 
-            private void processOneMessage(Limit capacity)
+            private void reactivate(Limit capacity)
             {
                 try
                 {
-                    if (waitQueue.kind == Kind.ENDPOINT_CAPACITY)
-                        handler.onEndpointReserveCapacityRegained(capacity);
-                    else
-                        handler.onGlobalReserveCapacityRegained(capacity);
+                    boolean isActive = waitQueue.kind == Kind.ENDPOINT_CAPACITY
+                                     ? handler.onEndpointReserveCapacityRegained(capacity)
+                                     : handler.onGlobalReserveCapacityRegained(capacity);
+
+                    if (isActive)
+                        handler.resume();
                 }
                 catch (Throwable t)
                 {
-                    handleException(t);
-                }
-            }
-
-            private void resumeNormalProcessing()
-            {
-                try
-                {
-                    handler.resumeIfNotBlocked();
-                }
-                catch (Throwable t)
-                {
-                    handleException(t);
-                }
-            }
-
-            private void handleException(Throwable t)
-            {
-                try
-                {
-                    handler.exceptionCaught(t);
-                }
-                catch (Throwable e)
-                {
-                    logger.error("{} exception caught while invoking InboundMessageHandler's exceptionCaught()", handler.id(), e);
+                    try
+                    {
+                        handler.exceptionCaught(t);
+                    }
+                    catch (Throwable e)
+                    {
+                        logger.error("{} exception caught while invoking InboundMessageHandler's exceptionCaught()", handler.id(), e);
+                    }
                 }
             }
 
