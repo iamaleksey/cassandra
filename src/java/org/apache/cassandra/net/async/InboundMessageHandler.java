@@ -450,34 +450,41 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!isClosed)
         {
             isBlocked = false;
-            decoder.reactivate();
+            try
+            {
+                decoder.reactivate();
+            }
+            catch (IOException e)
+            {
+                exceptionCaught(e);
+            }
         }
     }
 
-    private void onEndpointReserveCapacityRegained(Limit endpointReserve)
+    private void onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
     {
         ticket = null;
         onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
     }
 
-    private void onGlobalReserveCapacityRegained(Limit globalReserve)
+    private void onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
     {
         ticket = null;
         onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
     }
 
-    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve)
+    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve) throws IOException
     {
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed)
         {
             isBlocked = false;
-            decoder.reactivateOnce(frame -> readFrame(frame, endpointReserve, globalReserve, true));
+            decoder.processBacklog(frame -> readFrame(frame, endpointReserve, globalReserve, true));
         }
     }
 
-    private void resumeIfNotBlocked()
+    private void resumeIfNotBlocked() throws IOException
     {
         assert channel.eventLoop().inEventLoop();
 

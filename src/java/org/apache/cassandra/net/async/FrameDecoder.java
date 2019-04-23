@@ -116,7 +116,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     ByteBuffer stash;
     private final Deque<Frame> frames = new ArrayDeque<>(4);
-    private boolean active = false;
     private ChannelHandlerContext ctx;
     private ChannelConfig config;
 
@@ -124,7 +123,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     abstract void addLastTo(ChannelPipeline pipeline);
 
     private static final FrameProcessor NO_PROCESSOR =
-        frame -> { throw new IllegalStateException("Frame processor invoked in a non-activated FrameDecoder"); };
+        frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
+
+    private static final FrameProcessor CLOSED_PROCESSOR =
+        frame -> { throw new IllegalStateException("Frame processor invoked on a closed FrameDecoder"); };
 
     interface FrameProcessor
     {
@@ -144,38 +146,36 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     void activate(FrameProcessor processor)
     {
-        if (active || this.processor != NO_PROCESSOR)
+        if (this.processor != NO_PROCESSOR)
             throw new IllegalStateException("Attempted to activate an already active FrameDecoder");
 
         this.processor = processor;
-
-        active = true;
-        config.setAutoRead(true);
+        config.setAutoRead(true); // WARNING this can throw an exception internally and fireExceptionCaught
     }
 
     /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
      * receiving frames after previously indicating that processing should be paused.
      */
-    void reactivate()
+    void reactivate() throws IOException
     {
-        reactivateOnce(processor);
+        if (config.isAutoRead())
+            throw new IllegalStateException("Tried to reactivate an already active FrameDecoder");
+
+        if (deliver(processor))
+            config.setAutoRead(true); // WARNING this can throw an exception internally and fireExceptionCaught
     }
 
     /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
      * receiving frames after previously indicating that processing should be paused.
      *
-     * Activates once using the provided processor, then reverts to using the default one.
+     * Does not reactivate processing or reading from the wire, but permits processing as many frames (or parts thereof)
+     * that are already waiting as the processor requires.
      */
-    void reactivateOnce(FrameProcessor processor)
+    void processBacklog(FrameProcessor processor) throws IOException
     {
-        if (active)
-            throw new IllegalStateException("Attempted to reactivate an already active FrameDecoder");
-        active = true;
-        deliver(ctx, processor);
-        if (active) // we could have paused again before delivery completed
-            config.setAutoRead(true);
+        deliver(processor);
     }
 
     /**
@@ -184,9 +184,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     void deactivate()
     {
-        active = false;
+        processor = CLOSED_PROCESSOR;
+
+        // WARNING this can throw an exception internally and fireExceptionCaught
+        // however, note that if this is invoked from an exceptionCaught, Netty will suppress the exception
         config.setAutoRead(false);
-        processor = NO_PROCESSOR;
     }
 
     /**
@@ -196,7 +198,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      * These buffers are unwrapped and passed to {@link #decode(Collection, SharedBytes)},
      * which collects decoded frames into {@link #frames}, which we send upstream in {@link #deliver}
      */
-    public void channelRead(ChannelHandlerContext ctx, Object msg)
+    public void channelRead(ChannelHandlerContext ctx, Object msg) throws IOException
     {
         ByteBuffer buf;
         if (msg instanceof BufferPoolAllocator.Wrapped)
@@ -216,35 +218,32 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         decode(frames, SharedBytes.wrap(buf));
 
-        deliver(ctx, processor);
-        if (!active)
-            config.setAutoRead(false);
+        if (!deliver(processor))
+            config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
     }
 
     /**
-     * Deliver any waiting frames, including those that were incompletely read last time
+     * Deliver any waiting frames, including those that were incompletely read last time, to the provided processor
+     * until the processor returns {@code false}, or we finish the backlog.
+     *
+     * Propagate the final return value of the processor.
      */
-    private void deliver(ChannelHandlerContext ctx, FrameProcessor processor)
+    private boolean deliver(FrameProcessor processor) throws IOException
     {
-        try
+        boolean active = true;
+        while (active && !frames.isEmpty())
         {
-            while (active && !frames.isEmpty())
-            {
-                Frame frame = frames.peek();
-                active = processor.process(frame);
+            Frame frame = frames.peek();
+            active = processor.process(frame);
 
-                assert !active || frame.isConsumed();
-                if (active || frame.isConsumed())
-                {
-                    frames.poll();
-                    frame.release();
-                }
+            assert !active || frame.isConsumed();
+            if (active || frame.isConsumed())
+            {
+                frames.poll();
+                frame.release();
             }
         }
-        catch (IOException e)
-        {
-            ctx.fireExceptionCaught(e);
-        }
+        return active;
     }
 
     void stash(SharedBytes in, int stashLength, int begin, int length)
@@ -259,7 +258,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     {
         ctx = null;
         config = null;
-        active = false;
         if (stash != null)
         {
             ByteBuffer bytes = stash;
@@ -275,7 +273,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         this.ctx = ctx;
         this.config = ctx.channel().config();
 
-        config.setAutoRead(false);
+        config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
     }
 
     public void channelInactive(ChannelHandlerContext ctx)
