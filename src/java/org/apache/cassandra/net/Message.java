@@ -220,7 +220,7 @@ public class Message<T>
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
-        return new Message<>(from, payload, noFlags(), buildParams(paramType, paramValue), verb, ApproximateTime.nanoTime(), expiresAtNanos, id);
+        return new Message<>(from, payload, noFlags(), buildParams(paramType, paramValue), verb, createdAtNanos, expiresAtNanos, id);
     }
 
     public static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
