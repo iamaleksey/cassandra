@@ -453,9 +453,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 decoder.reactivate();
             }
-            catch (IOException e)
+            catch (Throwable t)
             {
-                exceptionCaught(e);
+                exceptionCaught(t);
             }
         }
     }
