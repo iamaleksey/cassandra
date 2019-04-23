@@ -50,7 +50,6 @@ import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
-import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.jctools.queues.MpscLinkedQueue;
@@ -250,12 +249,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (frame.isSelfContained)
         {
-            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading messages from {} (corrupted self-contained frame)", peer);
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
         }
         else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
             corruptFramesUnrecovered++;
-            noSpamLogger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} (corrupted first frame of a message)", peer);
+            noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a message)", id());
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
         }
         else if (largeBytesRemaining > 0)
@@ -263,14 +262,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             stopCoprocessor();
             skipBytesRemaining = largeBytesRemaining - frameSize;
             largeBytesRemaining = 0;
-            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a large message from {}", peer);
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
         }
         else if (skipBytesRemaining > 0)
         {
             skipBytesRemaining -= frameSize;
             if (skipBytesRemaining == 0)
                 receivedCount++;
-            noSpamLogger.warn("Invalid, recoverable CRC mismatch detected while reading a message from {}", peer);
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
         }
         else
         {
@@ -358,12 +357,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         catch (UnknownTableException | UnknownColumnException e)
         {
-            noSpamLogger.info("{} caught while reading a small message from {}", e.getClass().getSimpleName(), peer, e);
+            noSpamLogger.info("{} {} caught while reading a small message", id(), e.getClass().getSimpleName(), e);
             callbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
         }
         catch (IOException e)
         {
-            logger.error("Unexpected IOException caught while reading a small message from {}", peer, e);
+            logger.error("{} unexpected IOException caught while reading a small message", id(), e);
             callbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, e);
         }
         catch (Throwable t)
@@ -551,9 +550,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         JVMStabilityInspector.inspectThrowable(cause);
 
         if (cause instanceof Message.InvalidLegacyProtocolMagic)
-            logger.error("Invalid, unrecoverable CRC mismatch detected while reading messages from {} - closing the connection", peer);
+            logger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages - closing the connection", id());
         else
-            logger.error("Unexpected exception caught while processing inbound messages from {}; terminating connection", peer, cause);
+            logger.error("{} unexpected exception caught while processing inbound messages; terminating connection", id(), cause);
 
         channel.close();
     }
@@ -599,6 +598,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     public ConnectionType type()
     {
         return type;
+    }
+
+    private String id()
+    {
+        return peer + "->" + self + '-' + type + '-' + channel.id().asShortText();
     }
 
     /**
@@ -658,18 +662,18 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
-                noSpamLogger.info("{} caught while reading a large message from {}", e.getClass().getSimpleName(), peer, e);
+                noSpamLogger.info("{} {} caught while reading a large message", e.getClass().getSimpleName(), id(), e);
                 callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
             }
             catch (IOException e)
             {
-                logger.error("Unexpected IOException caught while reading a large message from {}", peer, e);
+                logger.error("{} unexpected IOException caught while reading a large message", id(), e);
                 callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
-                logger.error("Unexpected exception caught while reading a large message from {}", peer, t);
+                logger.error("{} unexpected exception caught while reading a large message", id(), t);
                 callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
             }
