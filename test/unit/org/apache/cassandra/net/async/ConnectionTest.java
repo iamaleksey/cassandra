@@ -268,7 +268,7 @@ public class ConnectionTest
             Message<?> message = Message.out(Verb._TEST_1, noPayload);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            Assert.assertTrue(done.await(10, MINUTES));
+            Assert.assertTrue(done.await(1, MINUTES));
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
