@@ -551,7 +551,7 @@ public class OutboundConnection
         /**
          * Invalidate the channel if the exception indicates the channel is in a bad state
          */
-        boolean maybeInvalidateChannel(Channel channel, Throwable cause)
+        boolean invalidateChannelIfConnectionReset(Channel channel, Throwable cause)
         {
             // TODO: should we just invalidate the channel whatever happens?
             if (isCausedBy(cause, t ->    isConnectionReset(t)
@@ -908,12 +908,15 @@ public class OutboundConnection
             {
                 onError(send, t);
                 out.discard();
-                if (out.flushed() > 0)
+                if (out.flushed() > 0 ||
+                    isCausedBy(t, cause ->    isConnectionReset(cause)
+                                           || cause instanceof Errors.NativeIoException
+                                           || cause instanceof AsyncChannelOutputPlus.FlushException))
                 {
                     invalidateChannel(channel, t);
-                    return false;
+                    return false; // wait until we have reconnected
                 }
-                return !maybeInvalidateChannel(channel, t);
+                return true;
             }
         }
 
