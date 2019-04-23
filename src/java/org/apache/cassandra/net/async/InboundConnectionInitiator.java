@@ -406,15 +406,19 @@ public class InboundConnectionInitiator
 
             frameDecoder.addLastTo(pipeline);
 
-            logger.info("connection established from {}, version = {}, compress = {}, encryption = {}", from, useMessagingVersion, initiate.withCompression,
-                        encryptionLogStatement(settings.encryption));
-
             InboundMessageHandler handler =
                 settings.handlers.apply(from).createHandler(frameDecoder,
                                                             settings.socketFactory.synchronousWorkExecutor,
                                                             initiate.type,
                                                             pipeline.channel(),
                                                             useMessagingVersion);
+
+            logger.info("{} connection established, version = {}, compress = {}, encryption = {}",
+                        handler.id(),
+                        useMessagingVersion,
+                        initiate.withCompression,
+                        pipeline.get("ssl") != null ? encryptionLogStatement(settings.encryption) : "disabled");
+
             pipeline.addLast("deserialize", handler);
 
             pipeline.remove(this);

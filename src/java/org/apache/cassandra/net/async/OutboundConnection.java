@@ -1022,8 +1022,10 @@ public class OutboundConnection
                     isConnected = true;
                     ++successfulConnections;
 
-                    logger.info("{} successfully connected, version = {}, compress = {}, coalescing = {}, encryption = {}", id(), messagingVersion, settings.withCompression,
-                                     settings.coalescingStrategy != null ? settings.coalescingStrategy : CoalescingStrategies.Strategy.DISABLED,
+                    logger.info("{} successfully connected, version = {}, compress = {}, encryption = {}",
+                                id(),
+                                messagingVersion,
+                                settings.withCompression,
                                 encryptionLogStatement(settings.encryption));
                     break;
 

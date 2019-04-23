@@ -600,7 +600,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return type;
     }
 
-    private String id()
+    String id()
     {
         return peer + "->" + self + '-' + type + '-' + channel.id().asShortText();
     }
