@@ -167,15 +167,27 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     }
 
     /**
+     * FIXME
+     *
      * For use by InboundMessageHandler (or other upstream handlers) that want to resume
      * receiving frames after previously indicating that processing should be paused.
      *
      * Does not reactivate processing or reading from the wire, but permits processing as many frames (or parts thereof)
      * that are already waiting as the processor requires.
      */
-    void processBacklog(FrameProcessor processor) throws IOException
+    boolean processOneFrame(FrameProcessor processor) throws IOException
     {
-        deliver(processor);
+        Frame frame = frames.peek();
+        if (frame == null)
+            throw new IllegalStateException("Tried to process one frame when the queue was empty");
+
+        boolean active = processor.process(frame);
+        if (frame.isConsumed())
+        {
+            frames.poll();
+            frame.release();
+        }
+        return active;
     }
 
     /**

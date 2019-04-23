@@ -79,7 +79,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private static final Message.Serializer serializer = Message.serializer;
 
     private boolean isClosed;
-    private boolean isBlocked;
 
     private final FrameDecoder decoder;
 
@@ -170,7 +169,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     @Override
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        decoder.activate(this::readFrame);
+        decoder.activate(this::processFrame);
     }
 
     @Override
@@ -179,19 +178,20 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         throw new IllegalStateException("InboundMessageHandler doesn't expect channelRead() to be invoked");
     }
 
-    private boolean readFrame(Frame frame) throws IOException
+    private boolean processFrame(Frame frame) throws IOException
     {
-        return readFrame(frame, endpointReserveCapacity, globalReserveCapacity, false);
+        return processFrame(frame, endpointReserveCapacity, globalReserveCapacity, false);
     }
 
-    private boolean readFrame(Frame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws IOException
+    private boolean processFrame(Frame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws IOException
     {
         return frame instanceof IntactFrame
-             ? readIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, processOnce)
-             : readCorruptFrame((CorruptFrame) frame);
+             ? processIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, processOnce)
+             : processCorruptFrame((CorruptFrame) frame);
     }
 
-    private boolean readIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws InvalidLegacyProtocolMagic
+    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce)
+    throws InvalidLegacyProtocolMagic
     {
         SharedBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
@@ -199,11 +199,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (frame.isSelfContained)
         {
-            return processMessages(true, frame.contents, endpointReserve, globalReserve, processOnce);
+            return processOnce
+                 ? processContainedMessage(bytes, endpointReserve, globalReserve)
+                 : processFrameOfContainedMessages(bytes, endpointReserve, globalReserve);
         }
         else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
         {
-            return processMessages(false, frame.contents, endpointReserve, globalReserve, processOnce);
+            return processFirstFrameOfLargeMessage(bytes, endpointReserve, globalReserve);
         }
         else if (largeBytesRemaining > 0)
         {
@@ -236,7 +238,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private boolean readCorruptFrame(CorruptFrame frame) throws InvalidCrc
+    private boolean processCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
         {
@@ -281,20 +283,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processMessages(boolean contained, SharedBytes bytes, Limit endpointReserve, Limit globalReserve, boolean processOnce)
-    throws InvalidLegacyProtocolMagic
+    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
-        do
-        {
-            isBlocked = !processMessage(bytes, contained, endpointReserve, globalReserve);
-        }
-        while (bytes.isReadable() && !isBlocked && !processOnce);
-
-        return !isBlocked && !processOnce;
+        while (bytes.isReadable())
+            if (!processContainedMessage(bytes, endpointReserve, globalReserve))
+                return false;
+        return true;
     }
 
-    private boolean processMessage(SharedBytes bytes, boolean contained, Limit endpointReserve, Limit globalReserve)
-    throws InvalidLegacyProtocolMagic
+    private boolean processContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
         int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
@@ -307,16 +304,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (expiresAtNanos < currentTimeNanos)
         {
             callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
-
-            int skipped = contained ? size : buf.remaining();
-            receivedBytes += skipped;
-            bytes.skipBytes(skipped);
-
-            if (contained)
-                receivedCount++;
-            else
-                skipBytesRemaining = size - skipped;
-
+            receivedCount++;
+            receivedBytes += size;
+            bytes.skipBytes(size);
             return true;
         }
 
@@ -332,15 +322,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
-        if (contained && size <= largeThreshold)
-            return processMessageOnEventLoop(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else if (size <= buf.remaining())
-            return processMessageOffEventLoopContained(bytes, size, id, expiresAtNanos, callBackOnFailure);
-        else
-            return processMessageOffEventLoopUncontained(bytes, size, id, expiresAtNanos, callBackOnFailure);
+        return size < largeThreshold
+             ? processSmallMessage(bytes, size, id, expiresAtNanos, callBackOnFailure)
+             : processContainedLargeMessage(bytes, size, id, expiresAtNanos, callBackOnFailure);
     }
 
-    private boolean processMessageOnEventLoop(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processSmallMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
@@ -385,7 +372,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processMessageOffEventLoopContained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processContainedLargeMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         receivedCount++;
         receivedBytes += size;
@@ -396,9 +383,40 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return isKeepingUp;
     }
 
-    private boolean processMessageOffEventLoopUncontained(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processFirstFrameOfLargeMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
     {
-        int readableBytes = bytes.readableBytes();
+        ByteBuffer buf = bytes.get();
+        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
+
+        long currentTimeNanos = ApproximateTime.nanoTime();
+        long id = serializer.getId(buf, version);
+        long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
+        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
+
+        if (expiresAtNanos < currentTimeNanos)
+        {
+            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            int skipped = buf.remaining();
+            receivedBytes += skipped;
+            bytes.skipBytes(skipped);
+            skipBytesRemaining = size - skipped;
+            return true;
+        }
+
+        switch (acquireCapacity(endpointReserve, globalReserve, size))
+        {
+            case INSUFFICIENT_ENDPOINT:
+                ticket = endpointWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                return false;
+            case INSUFFICIENT_GLOBAL:
+                ticket = globalWaitQueue.registerAndSignal(this, size, expiresAtNanos);
+                return false;
+        }
+
+        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
+
+        int readableBytes = buf.remaining();
         receivedBytes += readableBytes;
 
         startCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
@@ -446,48 +464,44 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         assert channel.eventLoop().inEventLoop();
 
-        if (!isClosed)
+        try
         {
-            isBlocked = false;
-            try
-            {
+            if (!isClosed)
                 decoder.reactivate();
-            }
-            catch (Throwable t)
-            {
-                exceptionCaught(t);
-            }
+        }
+        catch (Throwable t)
+        {
+            exceptionCaught(t);
         }
     }
 
-    private void onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
+    private boolean onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
     {
         ticket = null;
-        onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
+        return onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
     }
 
-    private void onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
+    private boolean onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
     {
         ticket = null;
-        onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
+        return onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
     }
 
-    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve) throws IOException
+    /*
+     * Return true if the handler should be reactivated.
+     */
+    private boolean onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve) throws IOException
+    {
+        assert channel.eventLoop().inEventLoop();
+
+        return !isClosed && decoder.processOneFrame(frame -> processFrame(frame, endpointReserve, globalReserve, true));
+    }
+
+    private void resume() throws IOException
     {
         assert channel.eventLoop().inEventLoop();
 
         if (!isClosed)
-        {
-            isBlocked = false;
-            decoder.processBacklog(frame -> readFrame(frame, endpointReserve, globalReserve, true));
-        }
-    }
-
-    private void resumeIfNotBlocked() throws IOException
-    {
-        assert channel.eventLoop().inEventLoop();
-
-        if (!isClosed && !isBlocked)
             decoder.reactivate();
     }
 
@@ -848,7 +862,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     reserveCapacity.release(limit.remaining());
                 }
 
-                tickets.forEach(Ticket::resumeNormalProcessing);
+                tickets.forEach(Ticket::resumeProcessing);
             }
         }
 
@@ -867,6 +881,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             private final int bytesRequested;
             private final long expiresAtNanos;
 
+            private boolean isResumable;
+
             private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
             {
                 this.waitQueue = waitQueue;
@@ -879,10 +895,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 try
                 {
-                    if (waitQueue.kind == Kind.ENDPOINT_CAPACITY)
-                        handler.onEndpointReserveCapacityRegained(capacity);
-                    else
-                        handler.onGlobalReserveCapacityRegained(capacity);
+                    isResumable = waitQueue.kind == Kind.ENDPOINT_CAPACITY
+                                ? handler.onEndpointReserveCapacityRegained(capacity)
+                                : handler.onGlobalReserveCapacityRegained(capacity);
                 }
                 catch (Throwable t)
                 {
@@ -890,11 +905,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 }
             }
 
-            private void resumeNormalProcessing()
+            private void resumeProcessing()
             {
                 try
                 {
-                    handler.resumeIfNotBlocked();
+                    if (isResumable)
+                        handler.resume();
                 }
                 catch (Throwable t)
                 {
