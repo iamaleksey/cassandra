@@ -910,7 +910,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 }
                 catch (Throwable e)
                 {
-                    // no-op
+                    logger.error("{} exception caught while invoking InboundMessageHandler's exceptionCaught()", handler.id(), e);
                 }
             }
 
