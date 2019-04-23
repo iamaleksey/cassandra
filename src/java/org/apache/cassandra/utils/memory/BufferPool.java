@@ -23,7 +23,9 @@ import java.lang.ref.ReferenceQueue;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
@@ -90,6 +92,11 @@ public class BufferPool
         protected LocalPool initialValue()
         {
             return new LocalPool();
+        }
+
+        protected void onRemoval(LocalPool value)
+        {
+            value.release();
         }
     };
 
@@ -390,6 +397,7 @@ public class BufferPool
 
         private final Queue<ByteBuffer> reuseObjects;
         private final Supplier<Chunk> parent;
+        private final LocalPoolRef leakRef;
 
         /**
          * If we are on outer LocalPool, whose chunks are == NORMAL_CHUNK_SIZE, we may service allocation requests
@@ -403,7 +411,7 @@ public class BufferPool
             this.parent = globalPool;
             this.tinyLimit = TINY_ALLOCATION_LIMIT;
             this.reuseObjects = new ArrayDeque<>();
-            localPoolReferences.add(new LocalPoolRef(this, localPoolRefQueue));
+            localPoolReferences.add(leakRef = new LocalPoolRef(this, localPoolRefQueue));
         }
 
         /**
@@ -420,6 +428,7 @@ public class BufferPool
             };
             this.tinyLimit = 0; // we only currently permit one layer of nesting (which brings us down to 32 byte allocations, so is plenty)
             this.reuseObjects = parent.reuseObjects; // we share the same ByteBuffer object reuse pool, as we both have the same exclusive access to it
+            localPoolReferences.add(leakRef = new LocalPoolRef(this, localPoolRefQueue));
         }
 
         private Chunk addChunkFromParent()
@@ -582,12 +591,11 @@ public class BufferPool
         {
             chunkCount = 0;
             Chunk.release(chunks);
-            if (tinyPool != null)
-            {
-                tinyPool.chunkCount = 0;
-                Chunk.release(tinyPool.chunks);
-            }
             reuseObjects.clear();
+            localPoolReferences.remove(leakRef);
+            leakRef.clear();
+            if (tinyPool != null)
+                tinyPool.release();
         }
     }
 
@@ -606,16 +614,7 @@ public class BufferPool
         }
     }
 
-    /**
-     * Release all chunks still owned by the calling thread, to avoid depending on the phantom reference handler
-     */
-    public static void releaseLocalPool()
-    {
-        if (!DISABLED)
-            localPool.get().release();
-    }
-
-    private static final ConcurrentLinkedQueue<LocalPoolRef> localPoolReferences = new ConcurrentLinkedQueue<>();
+    private static final Set<LocalPoolRef> localPoolReferences = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
     private static final ReferenceQueue<Object> localPoolRefQueue = new ReferenceQueue<>();
     private static final InfiniteLoopExecutor EXEC = new InfiniteLoopExecutor("LocalPool-Cleaner", BufferPool::cleanupOneReference).start();

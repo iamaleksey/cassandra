@@ -432,7 +432,7 @@ public class OutboundConnection
         /** Will begin a new execution some time after this state is taken, but only once some condition is met.
          *  This state will initially be taken in tandem with EXECUTING, but if delivery completes without clearing
          *  the state, the condition will be held on its own until {@link #executeAgain} is invoked */
-        private static final int WAITING_TO_EXECUTE = 4;
+        private static final int WAITING_TO_EXECUTE    = 4;
 
         /**
          * Force all task execution to stop, once any currently in progress work is completed
@@ -1182,7 +1182,7 @@ public class OutboundConnection
 
     /**
      * The channel is already known to be invalid, so there's no point waiting for a clean break in delivery.
-     * 
+     *
      * Delivery will be executed again if necessary after this completes.
      */
     private void closeChannelNow(Channel closeIfIs)
