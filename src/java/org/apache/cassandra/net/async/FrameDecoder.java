@@ -137,7 +137,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     final Deque<Frame> frames = new ArrayDeque<>(4);
     ByteBuffer stash;
 
-    private boolean active;
+    private boolean isActive;
     private Channel channel;
     private FrameProcessor processor = NO_PROCESSOR;
 
@@ -154,7 +154,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         this.processor = processor;
 
-        active = true;
+        isActive = true;
         channel.read();
     }
 
@@ -164,12 +164,12 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     void reactivate() throws IOException
     {
-        if (active)
+        if (isActive)
             throw new IllegalStateException("Tried to reactivate an already active FrameDecoder");
 
         if (deliver(processor))
         {
-            active = true;
+            isActive = true;
             channel.read();
         }
     }
@@ -222,10 +222,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         decode(frames, SharedBytes.wrap(buf));
 
-        if (active)
+        if (isActive)
         {
             if (deliver(processor)) channel.read();
-            else active = false;
+            else isActive = false;
         }
     }
 
