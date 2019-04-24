@@ -27,6 +27,7 @@ import java.util.Deque;
 import com.google.common.annotations.VisibleForTesting;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.Channel;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -137,7 +138,9 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     @VisibleForTesting
     final Deque<Frame> frames = new ArrayDeque<>(4);
     ByteBuffer stash;
-    private ChannelConfig config;
+
+    private boolean active;
+    private Channel channel;
     private FrameProcessor processor = NO_PROCESSOR;
 
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
@@ -152,7 +155,9 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             throw new IllegalStateException("Attempted to activate an already active FrameDecoder");
 
         this.processor = processor;
-        config.setAutoRead(true); // WARNING this can throw an exception internally and fireExceptionCaught
+
+        active = true;
+        channel.read();
     }
 
     /**
@@ -161,11 +166,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     void reactivate() throws IOException
     {
-        if (config.isAutoRead())
+        if (active)
             throw new IllegalStateException("Tried to reactivate an already active FrameDecoder");
 
         if (deliver(processor))
-            config.setAutoRead(true); // WARNING this can throw an exception internally and fireExceptionCaught
+        {
+            active = true;
+            channel.read();
+        }
     }
 
     /**
@@ -187,10 +195,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     void deactivate()
     {
         processor = CLOSED_PROCESSOR;
-
-        // WARNING this can throw an exception internally and fireExceptionCaught
-        // however, note that if this is invoked from an exceptionCaught, Netty will suppress the exception
-        config.setAutoRead(false);
     }
 
     /**
@@ -220,11 +224,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         decode(frames, SharedBytes.wrap(buf));
 
-        if (config.isAutoRead())
+        if (active)
         {
-            // we can be invoked with !isAutoRead(), but deliver must honour isAutoRead
-            if (!deliver(processor))
-                config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
+            if (deliver(processor)) channel.read();
+            else active = false;
         }
     }
 
@@ -236,20 +239,20 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     private boolean deliver(FrameProcessor processor) throws IOException
     {
-        boolean active = true;
-        while (active && !frames.isEmpty())
+        boolean deliver = true;
+        while (deliver && !frames.isEmpty())
         {
             Frame frame = frames.peek();
-            active = processor.process(frame);
+            deliver = processor.process(frame);
 
-            assert !active || frame.isConsumed();
-            if (active || frame.isConsumed())
+            assert !deliver || frame.isConsumed();
+            if (deliver || frame.isConsumed())
             {
                 frames.poll();
                 frame.release();
             }
         }
-        return active;
+        return deliver;
     }
 
     void stash(SharedBytes in, int stashLength, int begin, int length)
@@ -262,7 +265,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     void discard()
     {
-        config = null;
+        channel = null;
         if (stash != null)
         {
             ByteBuffer bytes = stash;
@@ -275,8 +278,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        config = ctx.channel().config();
-        config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
+        channel = ctx.channel();
+        channel.config().setAutoRead(false);
     }
 
     public void channelInactive(ChannelHandlerContext ctx)
