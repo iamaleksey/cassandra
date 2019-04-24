@@ -109,6 +109,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private int largeBytesRemaining; // remaining bytes we need to supply to the coprocessor to deserialize the in-flight large message
     private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
+    private LargeCoprocessor largeCoprocessor;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -116,7 +117,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     long receivedCount, receivedBytes;
     int corruptFramesRecovered, corruptFramesUnrecovered;
 
-    private LargeCoprocessor largeCoprocessor;
 
     private volatile int largeUnconsumedBytes; // unconsumed bytes in all ByteBufs queued up in all coprocessors
     private static final AtomicIntegerFieldUpdater<InboundMessageHandler> largeUnconsumedBytesUpdater =
@@ -194,8 +194,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     throws InvalidLegacyProtocolMagic
     {
         SharedBytes bytes = frame.contents;
-        ByteBuffer buf = bytes.get();
-        int readableBytes = buf.remaining();
 
         if (frame.isSelfContained)
         {
@@ -207,34 +205,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             return processFirstFrameOfLargeMessage(bytes, endpointReserve, globalReserve);
         }
-        else if (largeBytesRemaining > 0)
-        {
-            receivedBytes += readableBytes;
-            largeBytesRemaining -= readableBytes;
-
-            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
-            if (largeBytesRemaining == 0)
-            {
-                receivedCount++;
-                stopCoprocessor();
-            }
-
-            return isKeepingUp;
-        }
-        else if (skipBytesRemaining > 0)
-        {
-            receivedBytes += readableBytes;
-            skipBytesRemaining -= readableBytes;
-
-            bytes.skipBytes(readableBytes);
-            if (skipBytesRemaining == 0)
-                receivedCount++;
-
-            return true;
-        }
         else
         {
-            throw new IllegalStateException();
+            return processSubsequentFrameOfLargeMessage(bytes);
         }
     }
 
@@ -273,13 +246,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 receivedCount++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
         }
-        else
-        {
-            throw new IllegalStateException();
-        }
 
         corruptFramesRecovered++;
-
         return true;
     }
 
@@ -423,6 +391,38 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
         largeBytesRemaining = size - readableBytes;
         return isKeepingUp;
+    }
+
+    private boolean processSubsequentFrameOfLargeMessage(SharedBytes bytes)
+    {
+        ByteBuffer buf = bytes.get();
+        int readableBytes = buf.remaining();
+
+        receivedBytes += readableBytes;
+
+        if (largeBytesRemaining > 0)
+        {
+            largeBytesRemaining -= readableBytes;
+
+            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
+            if (largeBytesRemaining == 0)
+            {
+                receivedCount++;
+                stopCoprocessor();
+            }
+
+            return isKeepingUp;
+        }
+        else
+        {
+            skipBytesRemaining -= readableBytes;
+
+            bytes.skipBytes(readableBytes);
+            if (skipBytesRemaining == 0)
+                receivedCount++;
+
+            return true;
+        }
     }
 
     /*
