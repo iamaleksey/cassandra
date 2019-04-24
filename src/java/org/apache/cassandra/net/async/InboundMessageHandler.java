@@ -107,9 +107,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final MessageCallbacks callbacks;
     private final MessageProcessor processor;
 
-    private int largeBytesRemaining; // remaining bytes we need to supply to the coprocessor to deserialize the in-flight large message
-    private int skipBytesRemaining;  // remaining bytes we need to skip to get over the expired message
+    private int largeBytesRemaining; // remaining bytes of an in-flight multi-frame large message
     private LargeCoprocessor largeCoprocessor;
+    private boolean isSkippingLargeMessage;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -201,57 +201,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                  ? processContainedMessage(bytes, endpointReserve, globalReserve)
                  : processFrameOfContainedMessages(bytes, endpointReserve, globalReserve);
         }
-        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
-        {
-            return processFirstFrameOfLargeMessage(bytes, endpointReserve, globalReserve);
-        }
-        else
-        {
-            return processSubsequentFrameOfLargeMessage(bytes);
-        }
+
+        return largeBytesRemaining == 0
+             ? processFirstFrameOfLargeMessage(bytes, endpointReserve, globalReserve)
+             : processSubsequentFrameOfLargeMessage(bytes);
     }
 
-    private boolean processCorruptFrame(CorruptFrame frame) throws InvalidCrc
-    {
-        if (!frame.isRecoverable())
-        {
-            corruptFramesUnrecovered++;
-            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
-        }
-
-        int frameSize = frame.frameSize;
-        receivedBytes += frameSize;
-
-        if (frame.isSelfContained)
-        {
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
-        }
-        else if (largeBytesRemaining == 0 && skipBytesRemaining == 0)
-        {
-            corruptFramesUnrecovered++;
-            noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a message)", id());
-            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
-        }
-        else if (largeBytesRemaining > 0)
-        {
-            stopCoprocessor();
-            skipBytesRemaining = largeBytesRemaining - frameSize;
-            largeBytesRemaining = 0;
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
-        }
-        else if (skipBytesRemaining > 0)
-        {
-            skipBytesRemaining -= frameSize;
-            if (skipBytesRemaining == 0)
-                receivedCount++;
-            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
-        }
-
-        corruptFramesRecovered++;
-        return true;
-    }
-
-    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
     {
         while (bytes.isReadable())
             if (!processContainedMessage(bytes, endpointReserve, globalReserve))
@@ -259,7 +216,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
+    throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
         int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
@@ -288,6 +246,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 return false;
         }
 
+        receivedCount++;
+        receivedBytes += size;
+
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
         return size < largeThreshold
@@ -297,9 +258,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean processSmallMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
-        receivedCount++;
-        receivedBytes += size;
-
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
         final int end = buf.limit();
@@ -342,9 +300,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean processContainedLargeMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
-        receivedCount++;
-        receivedBytes += size;
-
         LargeCoprocessor coprocessor = new LargeCoprocessor(size, id, expiresAtNanos, callBackOnFailure);
         boolean isKeepingUp = coprocessor.supplyAndRequestClosure(bytes.sliceAndConsume(size).atomic());
         largeExecutor.execute(coprocessor);
@@ -368,7 +323,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             int skipped = buf.remaining();
             receivedBytes += skipped;
             bytes.skipBytes(skipped);
-            skipBytesRemaining = size - skipped;
+            largeBytesRemaining = size - skipped;
+            isSkippingLargeMessage = true;
             return true;
         }
 
@@ -398,29 +354,64 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         ByteBuffer buf = bytes.get();
         int readableBytes = buf.remaining();
 
+        largeBytesRemaining -= readableBytes;
+        boolean isLastFrame = largeBytesRemaining == 0;
+        if (isLastFrame)
+            receivedCount++;
         receivedBytes += readableBytes;
 
-        if (largeBytesRemaining > 0)
+        if (isSkippingLargeMessage)
         {
-            largeBytesRemaining -= readableBytes;
-
-            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
-            if (largeBytesRemaining == 0)
-            {
-                receivedCount++;
-                stopCoprocessor();
-            }
-
-            return isKeepingUp;
+            bytes.skipBytes(readableBytes);
+            if (isLastFrame)
+                isSkippingLargeMessage = false;
+            return true;
         }
         else
         {
-            skipBytesRemaining -= readableBytes;
+            boolean isKeepingUp = largeCoprocessor.supply(bytes.sliceAndConsume(readableBytes).atomic());
+            if (isLastFrame)
+                stopCoprocessor();
+            return isKeepingUp;
+        }
+    }
 
-            bytes.skipBytes(readableBytes);
-            if (skipBytesRemaining == 0)
+    private boolean processCorruptFrame(CorruptFrame frame) throws InvalidCrc
+    {
+        if (!frame.isRecoverable())
+        {
+            corruptFramesUnrecovered++;
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
+
+        int frameSize = frame.frameSize;
+        receivedBytes += frameSize;
+
+        if (frame.isSelfContained)
+        {
+            corruptFramesRecovered++;
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
+            return true;
+        }
+        else if (largeBytesRemaining == 0) // first frame of a large message
+        {
+            corruptFramesUnrecovered++;
+            noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a large message)", id());
+            throw new InvalidCrc(frame.readCRC, frame.computedCRC);
+        }
+        else // subsequent frame of a large message
+        {
+            largeBytesRemaining -= frameSize;
+            boolean isLastFrame = largeBytesRemaining == 0;
+            if (isLastFrame)
                 receivedCount++;
 
+            if (!isSkippingLargeMessage)
+                stopCoprocessor();
+            isSkippingLargeMessage = !isLastFrame;
+
+            corruptFramesRecovered++;
+            noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
             return true;
         }
     }
