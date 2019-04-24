@@ -196,7 +196,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (frame.isSelfContained)
         {
             return processOnce
-                 ? processContainedMessage(frame.contents, endpointReserve, globalReserve)
+                 ? processOneContainedMessage(frame.contents, endpointReserve, globalReserve)
                  : processFrameOfContainedMessages(frame.contents, endpointReserve, globalReserve);
         }
 
@@ -215,12 +215,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     throws InvalidLegacyProtocolMagic
     {
         while (bytes.isReadable())
-            if (!processContainedMessage(bytes, endpointReserve, globalReserve))
+            if (!processOneContainedMessage(bytes, endpointReserve, globalReserve))
                 return false;
         return true;
     }
 
-    private boolean processContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
+    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
     throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
@@ -256,11 +256,11 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
         return size < largeThreshold
-             ? processSmallMessage(bytes, size, id, expiresAtNanos, callBackOnFailure)
+             ? processContainedSmallMessage(bytes, size, id, expiresAtNanos, callBackOnFailure)
              : processContainedLargeMessage(bytes, size, id, expiresAtNanos, callBackOnFailure);
     }
 
-    private boolean processSmallMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private boolean processContainedSmallMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
