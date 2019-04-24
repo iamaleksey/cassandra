@@ -109,28 +109,40 @@ class FrameDecoderLegacy extends FrameDecoder
                 }
             }
 
+            // we loop incrementing our end pointer until we have no more complete messages,
+            // at which point we slice the complete messages, and stash the remainder
             int begin = in.position();
             int end = begin;
             int limit = in.limit();
+
+            if (begin == limit)
+                return;
+
             while (true)
             {
                 int length = Message.serializer.messageSize(in, end, limit, messagingVersion);
 
-                if (length >= 0 && end + length < limit)
+                if (length >= 0)
                 {
-                    end += length;
-                    continue;
+                    if (end + length <= limit)
+                    {
+                        // we have a complete message, so just bump our end pointer
+                        end += length;
+
+                        // if we have more bytes, continue to look for another message
+                        if (end < limit)
+                            continue;
+
+                        // otherwise reset length, as we have accounted for it in end
+                        length = 0;
+                    }
                 }
 
-                if (end + length == limit)
-                {
-                    end = limit;
-                    length = 0;
-                }
-
+                // we are done; if we have found any complete messages, slice them all into a single frame
                 if (begin < end)
                     into.add(new IntactFrame(true, newBytes.slice(begin, end)));
 
+                // now consider stashing anything leftover
                 if (length < 0)
                 {
                     stash(newBytes, max(64, limit - end), end, limit - end);

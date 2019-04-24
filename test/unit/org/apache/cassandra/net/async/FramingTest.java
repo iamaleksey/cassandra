@@ -18,21 +18,40 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
 
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBuf;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.*;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
+import static org.apache.cassandra.net.MessagingService.VERSION_3014;
+import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.net.MessagingService.minimum_version;
+import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 import static org.apache.cassandra.net.async.SharedBytes.wrap;
 
 // TODO: test corruption
@@ -40,9 +59,39 @@ import static org.apache.cassandra.net.async.SharedBytes.wrap;
 // TODO: use quick theories
 public class FramingTest
 {
-    static
+    private static final Logger logger = LoggerFactory.getLogger(FramingTest.class);
+
+    @BeforeClass
+    public static void begin() throws NoSuchFieldException, IllegalAccessException
     {
         DatabaseDescriptor.daemonInitialization();
+        Verb._TEST_1.unsafeSetSerializer(() -> new IVersionedSerializer<byte[]>()
+        {
+
+            public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
+            {
+                out.writeUnsignedVInt(t.length);
+                out.write(t);
+            }
+
+            public byte[] deserialize(DataInputPlus in, int version) throws IOException
+            {
+                byte[] r = new byte[(int) in.readUnsignedVInt()];
+                in.readFully(r);
+                return r;
+            }
+
+            public long serializedSize(byte[] t, int version)
+            {
+                return VIntCoding.computeUnsignedVIntSize(t.length) + t.length;
+            }
+        });
+    }
+
+    @AfterClass
+    public static void after() throws NoSuchFieldException, IllegalAccessException
+    {
+        Verb._TEST_1.unsafeSetSerializer(() -> null);
     }
 
     private static class SequenceOfFrames
@@ -60,27 +109,29 @@ public class FramingTest
     }
 
     @Test
-    public void testRandomLZ4() throws Exception
+    public void testRandomLZ4()
     {
-        testSome(FrameEncoderLZ4.fastInstance, FrameDecoderLZ4.fast());
+        testSomeFrames(FrameEncoderLZ4.fastInstance, FrameDecoderLZ4.fast());
     }
 
     @Test
-    public void testRandomCrc() throws Exception
+    public void testRandomCrc()
     {
-        testSome(FrameEncoderCrc.instance, FrameDecoderCrc.create());
+        testSomeFrames(FrameEncoderCrc.instance, FrameDecoderCrc.create());
     }
 
-    public void testSome(FrameEncoder encoder, FrameDecoder decoder) throws Exception
+    public void testSomeFrames(FrameEncoder encoder, FrameDecoder decoder)
     {
-        Random random = new Random(0);
+        long seed = new SecureRandom().nextLong();
+        logger.info("seed: {}, decoder: {}", seed, decoder.getClass().getSimpleName());
+        Random random = new Random(seed);
         for (int i = 0 ; i < 1000 ; ++i)
-            testTwoRandom(random, encoder, decoder);
+            testRandomSequenceOfFrames(random, encoder, decoder);
     }
 
-    private void testTwoRandom(Random random, FrameEncoder encoder, FrameDecoder decoder) throws Exception
+    private void testRandomSequenceOfFrames(Random random, FrameEncoder encoder, FrameDecoder decoder)
     {
-        SequenceOfFrames sequenceOfFrames = pairOfFrames(random, encoder);
+        SequenceOfFrames sequenceOfFrames = sequenceOfFrames(random, encoder);
 
         List<byte[]> uncompressed = sequenceOfFrames.original;
         SharedBytes frames = sequenceOfFrames.frames;
@@ -107,16 +158,28 @@ public class FramingTest
         for (FrameDecoder.Frame frame : out)
             frame.release();
         frames.release();
+        Assert.assertEquals(null, decoder.stash);
+        Assert.assertTrue(decoder.frames.isEmpty());
     }
 
     private static void verify(byte[] expect, SharedBytes actual)
     {
-        byte[] fetch = new byte[expect.length];
-        actual.get().get(fetch);
-        Assert.assertArrayEquals(expect, fetch);
+        verify(expect, 0, expect.length, actual);
     }
 
-    private static SequenceOfFrames pairOfFrames(Random random, FrameEncoder encoder)
+    private static void verify(byte[] expect, int start, int end, SharedBytes actual)
+    {
+        byte[] fetch = new byte[end - start];
+        Assert.assertEquals(end - start, actual.readableBytes());
+        actual.get().get(fetch);
+        boolean equals = true;
+        for (int i = start ; equals && i < end ; ++i)
+            equals = expect[i] == fetch[i - start];
+        if (!equals)
+            Assert.assertArrayEquals(Arrays.copyOfRange(expect, start, end), fetch);
+    }
+
+    private static SequenceOfFrames sequenceOfFrames(Random random, FrameEncoder encoder)
     {
         int frameCount = 1 + random.nextInt(8);
         List<byte[]> uncompressed = new ArrayList<>();
@@ -124,7 +187,7 @@ public class FramingTest
         int[] cumulativeCompressedLength = new int[frameCount];
         for (int i = 0 ; i < frameCount ; ++i)
         {
-            byte[] bytes = randomishBytes(random);
+            byte[] bytes = randomishBytes(random, 1, 1 << 15);
             uncompressed.add(bytes);
 
             FrameEncoder.Payload payload = encoder.allocator().allocate(true, bytes.length);
@@ -146,9 +209,219 @@ public class FramingTest
         return new SequenceOfFrames(uncompressed, cumulativeCompressedLength, frames);
     }
 
-    private static byte[] randomishBytes(Random random)
+    @Test
+    public void burnRandomLegacy()
     {
-        byte[] bytes = new byte[1 + random.nextInt(1 << 15)];
+        burnRandomLegacy(1000);
+    }
+
+    public void burnRandomLegacy(int count)
+    {
+        SecureRandom seed = new SecureRandom();
+        Random random = new Random();
+        for (int i = 0 ; i < count ; ++i)
+        {
+            long innerSeed = seed.nextLong();
+            float ratio = seed.nextFloat();
+            int version = minimum_version + random.nextInt(1 + current_version - minimum_version);
+            logger.debug("seed: {}, ratio: {}, version: {}", innerSeed, ratio, version);
+            random.setSeed(innerSeed);
+            testRandomSequenceOfMessages(random, ratio, version, new FrameDecoderLegacy(version));
+        }
+    }
+
+    @Test
+    public void testRandomLegacy()
+    {
+        testRandomLegacy(250);
+    }
+
+    public void testRandomLegacy(int count)
+    {
+        SecureRandom seeds = new SecureRandom();
+        for (int messagingVersion : new int[] { VERSION_30, VERSION_3014, current_version})
+        {
+            FrameDecoder decoder = new FrameDecoderLegacy(messagingVersion);
+            testSomeMessages(seeds.nextLong(), count, 0.0f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 0.1f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 0.95f, messagingVersion, decoder);
+            testSomeMessages(seeds.nextLong(), count, 1.0f, messagingVersion, decoder);
+        }
+    }
+
+    public void testSomeMessages(long seed, int count, float largeRatio, int messagingVersion, FrameDecoder decoder)
+    {
+        logger.info("seed: {}, iterations: {}, largeRatio: {}, messagingVersion: {}, decoder: {}", seed, count, largeRatio, messagingVersion, decoder.getClass().getSimpleName());
+        Random random = new Random(seed);
+        for (int i = 0 ; i < count ; ++i)
+        {
+            long innerSeed = random.nextLong();
+            logger.debug("inner seed: {}, iteration: {}", innerSeed, i);
+            random.setSeed(innerSeed);
+            testRandomSequenceOfMessages(random, largeRatio, messagingVersion, decoder);
+        }
+    }
+
+    private void testRandomSequenceOfMessages(Random random, float largeRatio, int messagingVersion, FrameDecoder decoder)
+    {
+        SequenceOfFrames sequenceOfMessages = sequenceOfMessages(random, largeRatio, messagingVersion);
+
+        List<byte[]> messages = sequenceOfMessages.original;
+        SharedBytes stream = sequenceOfMessages.frames;
+
+        int end = stream.get().limit();
+        List<FrameDecoder.Frame> out = new ArrayList<>();
+
+        int messageStart = 0;
+        int messageIndex = 0;
+        for (int i = 0 ; i < end ; )
+        {
+            int limit = i + random.nextInt(1 + end - i);
+            decoder.decode(out, stream.slice(i, limit));
+
+            int outIndex = 0;
+            byte[] message = messages.get(messageIndex);
+            if (i > messageStart)
+            {
+                int start;
+                if (message.length <= LARGE_MESSAGE_THRESHOLD)
+                {
+                    start = 0;
+                }
+                else  if (!lengthIsReadable(message, i - messageStart, messagingVersion))
+                {
+                    // we should have an initial frame containing only some prefix of the message (probably 64 bytes)
+                    // that was stashed only to decide how big the message was
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertEquals(false, frame.isSelfContained);
+                    start = frame.contents.readableBytes();
+                    verify(message, 0, frame.contents.readableBytes(), frame.contents);
+                }
+                else
+                {
+                    start = i - messageStart;
+                }
+
+                if (limit >= message.length + messageStart)
+                {
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertEquals(start == 0, frame.isSelfContained);
+                    // verify remainder of a large message, or a single fully stashed small message
+                    verify(message, start, message.length, frame.contents);
+
+                    messageStart += message.length;
+                    if (++messageIndex < messages.size())
+                        message = messages.get(messageIndex);
+                }
+                else if (message.length > LARGE_MESSAGE_THRESHOLD)
+                {
+                    FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                    Assert.assertFalse(frame.isSelfContained);
+                    // verify next portion of a large message
+                    verify(message, start, limit - messageStart, frame.contents);
+
+                    Assert.assertEquals(outIndex, out.size());
+                    for (FrameDecoder.Frame f : out)
+                        f.release();
+                    out.clear();
+                    i = limit;
+                    continue;
+                }
+            }
+
+            // message is fresh
+            int beginFrame = messageStart;
+            int beginFrameIndex = messageIndex;
+            while (messageStart + message.length <= limit)
+            {
+                messageStart += message.length;
+                if (++messageIndex < messages.size())
+                    message = messages.get(messageIndex);
+            }
+
+            if (beginFrameIndex < messageIndex)
+            {
+                FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                Assert.assertTrue(frame.isSelfContained);
+                while (beginFrameIndex < messageIndex)
+                {
+                    byte[] m = messages.get(beginFrameIndex);
+                    verify(m, frame.contents.sliceAndConsume(m.length));
+                    ++beginFrameIndex;
+                }
+                Assert.assertFalse(frame.contents.isReadable());
+            }
+
+            if (limit > messageStart
+                && message.length > LARGE_MESSAGE_THRESHOLD
+                && lengthIsReadable(message, limit - messageStart, messagingVersion))
+            {
+                FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
+                Assert.assertFalse(frame.isSelfContained);
+                verify(message, 0, limit - messageStart, frame.contents);
+            }
+
+            Assert.assertEquals(outIndex, out.size());
+            for (FrameDecoder.Frame frame : out)
+                frame.release();
+            out.clear();
+
+            i = limit;
+        }
+        stream.release();
+        Assert.assertEquals(null, decoder.stash);
+        Assert.assertTrue(decoder.frames.isEmpty());
+    }
+
+    private static boolean lengthIsReadable(byte[] message, int limit, int messagingVersion)
+    {
+        try
+        {
+            return Message.serializer.messageSize(ByteBuffer.wrap(message), 0, limit, messagingVersion) >= 0;
+        }
+        catch (Message.InvalidLegacyProtocolMagic e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static SequenceOfFrames sequenceOfMessages(Random random, float largeRatio, int messagingVersion)
+    {
+        int messageCount = 1 + random.nextInt(63);
+        List<byte[]> messages = new ArrayList<>();
+        int[] cumulativeLength = new int[messageCount];
+        for (int i = 0 ; i < messageCount ; ++i)
+        {
+            byte[] payload;
+            if (random.nextFloat() < largeRatio) payload = randomishBytes(random, 1 << 16, 1 << 17);
+            else payload = randomishBytes(random, 1, 1 << 16);
+            Message<byte[]> messageObj = Message.out(Verb._TEST_1, payload);
+
+            byte[] message;
+            try (DataOutputBuffer out = new DataOutputBuffer(messageObj.serializedSize(messagingVersion)))
+            {
+                Message.serializer.serialize(messageObj, out, messagingVersion);
+                message = out.toByteArray();
+            }
+            catch (IOException e)
+            {
+                throw new IllegalStateException(e);
+            }
+            messages.add(message);
+
+            cumulativeLength[i] = (i == 0 ? 0 : cumulativeLength[i - 1]) + message.length;
+        }
+
+        ByteBuffer frames = BufferPool.getAtLeast(cumulativeLength[messageCount - 1], BufferType.OFF_HEAP);
+        for (byte[] buffer : messages)
+            frames.put(buffer);
+        frames.flip();
+        return new SequenceOfFrames(messages, cumulativeLength, frames);
+    }
+
+    private static byte[] randomishBytes(Random random, int minLength, int maxLength)
+    {
+        byte[] bytes = new byte[minLength + random.nextInt(maxLength - minLength)];
         int runLength = 1 + random.nextInt(255);
         for (int i = 0 ; i < bytes.length ; i += runLength)
         {

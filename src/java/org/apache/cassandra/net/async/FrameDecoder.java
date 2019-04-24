@@ -24,6 +24,8 @@ import java.util.ArrayDeque;
 import java.util.Collection;
 import java.util.Deque;
 
+import com.google.common.annotations.VisibleForTesting;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelConfig;
 import io.netty.channel.ChannelHandlerContext;
@@ -132,8 +134,9 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
+    @VisibleForTesting
+    final Deque<Frame> frames = new ArrayDeque<>(4);
     ByteBuffer stash;
-    private final Deque<Frame> frames = new ArrayDeque<>(4);
     private ChannelConfig config;
     private FrameProcessor processor = NO_PROCESSOR;
 

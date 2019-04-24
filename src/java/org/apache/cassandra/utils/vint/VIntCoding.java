@@ -94,7 +94,10 @@ public class VIntCoding
      */
     public static long getUnsignedVInt(ByteBuffer input, int readerIndex)
     {
-        int readerLimit = input.limit();
+        return getUnsignedVInt(input, readerIndex, input.limit());
+    }
+    public static long getUnsignedVInt(ByteBuffer input, int readerIndex, int readerLimit)
+    {
         if (readerIndex >= readerLimit)
             return -1;
 
@@ -126,8 +129,11 @@ public class VIntCoding
      */
     public static int computeUnsignedVIntSize(ByteBuffer input, int readerIndex)
     {
-        int readerLimit = input.limit();
-        if (readerIndex == readerLimit)
+        return computeUnsignedVIntSize(input, readerIndex, input.limit());
+    }
+    public static int computeUnsignedVIntSize(ByteBuffer input, int readerIndex, int readerLimit)
+    {
+        if (readerIndex >= readerLimit)
             return -1;
 
         int firstByte = input.get(readerIndex);

@@ -604,43 +604,45 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePost40(ByteBuffer buf, int index, int limit)
+        private int messageSizePost40(ByteBuffer buf, int readerIndex, int readerLimit)
         {
-            int idSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            int index = readerIndex;
+
+            int idSize = VIntCoding.computeUnsignedVIntSize(buf, index, readerLimit);
             if (idSize < 0)
                 return -1; // not enough bytes to read id
             index += idSize;
 
             index += CREATION_TIME_SIZE;
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
 
-            int expirationSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            int expirationSize = VIntCoding.computeUnsignedVIntSize(buf, index, readerLimit);
             if (expirationSize < 0)
                 return -1;
             index += expirationSize;
 
-            int verbIdSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            int verbIdSize = VIntCoding.computeUnsignedVIntSize(buf, index, readerLimit);
             if (verbIdSize < 0)
                 return -1;
             index += verbIdSize;
 
-            int flagsSize = VIntCoding.computeUnsignedVIntSize(buf, index);
+            int flagsSize = VIntCoding.computeUnsignedVIntSize(buf, index, readerLimit);
             if (flagsSize < 0)
                 return -1;
             index += flagsSize;
 
-            int paramsSize = serializedParamsSizePost40(buf, index);
+            int paramsSize = serializedParamsSizePost40(buf, index, readerLimit);
             if (paramsSize < 0)
                 return -1;
             index += paramsSize;
 
-            long payloadSize = VIntCoding.getUnsignedVInt(buf, index);
+            long payloadSize = VIntCoding.getUnsignedVInt(buf, index, readerLimit);
             if (payloadSize < 0)
                 return -1;
             index += VIntCoding.computeUnsignedVIntSize(payloadSize) + payloadSize;
 
-            return index - buf.position();
+            return index - readerIndex;
         }
 
         private long getCreatedAtNanosPost40(ByteBuffer buf, InetAddressAndPort peer)
@@ -769,12 +771,12 @@ public class Message<T>
             return Ints.checkedCast(size);
         }
 
-        private int messageSizePre40(ByteBuffer buf, int index, int limit) throws InvalidLegacyProtocolMagic
+        private int messageSizePre40(ByteBuffer buf, int readerIndex, int readerLimit) throws InvalidLegacyProtocolMagic
         {
-            int begin = index;
+            int index = readerIndex;
             // protocol magic
             index += 4;
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
             validateLegacyProtocolMagic(buf.getInt(index - 4));
 
@@ -782,15 +784,15 @@ public class Message<T>
             index += PRE_40_MESSAGE_PREFIX_SIZE - 4;
             // ip address
             index += 1;
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
             index += buf.get(index - 1);
             // verb
             index += 4;
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
 
-            int paramsSize = serializedParamsSizePre40(buf, index, limit);
+            int paramsSize = serializedParamsSizePre40(buf, index, readerLimit);
             if (paramsSize < 0)
                 return -1;
             index += paramsSize;
@@ -798,11 +800,11 @@ public class Message<T>
             // payload
             index += 4;
 
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
             index += buf.getInt(index - 4);
 
-            return index - begin;
+            return index - readerIndex;
         }
 
         private long getCreatedAtNanosPre40(ByteBuffer buf, InetAddressAndPort peer)
@@ -969,23 +971,23 @@ public class Message<T>
             return size;
         }
 
-        private int serializedParamsSizePost40(ByteBuffer buf, int readerIndex)
+        private int serializedParamsSizePost40(ByteBuffer buf, int readerIndex, int readerLimit)
         {
             int index = readerIndex;
 
-            long paramsCount = VIntCoding.getUnsignedVInt(buf, index);
+            long paramsCount = VIntCoding.getUnsignedVInt(buf, index, readerLimit);
             if (paramsCount < 0)
                 return -1;
             index += VIntCoding.computeUnsignedVIntSize(paramsCount);
 
             for (int i = 0; i < paramsCount; i++)
             {
-                long type = VIntCoding.getUnsignedVInt(buf, index);
+                long type = VIntCoding.getUnsignedVInt(buf, index, readerLimit);
                 if (type < 0)
                     return -1;
                 index += VIntCoding.computeUnsignedVIntSize(type);
 
-                long length = VIntCoding.getUnsignedVInt(buf, index);
+                long length = VIntCoding.getUnsignedVInt(buf, index, readerLimit);
                 if (length < 0)
                     return -1;
                 index += VIntCoding.computeUnsignedVIntSize(length) + length;
@@ -994,12 +996,12 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private int serializedParamsSizePre40(ByteBuffer buf, int readerIndex, int limit)
+        private int serializedParamsSizePre40(ByteBuffer buf, int readerIndex, int readerLimit)
         {
             int index = readerIndex;
 
             index += 4;
-            if (index > limit)
+            if (index > readerLimit)
                 return -1;
             int paramsCount = buf.getInt(index - 4);
 
@@ -1008,12 +1010,12 @@ public class Message<T>
                 // try to read length and skip to the end of the param name
                 index += 2;
 
-                if (index > limit)
+                if (index > readerLimit)
                     return -1;
                 index += buf.getShort(index - 2);
                 // try to read length and skip to the end of the param value
                 index += 4;
-                if (index > limit)
+                if (index > readerLimit)
                     return -1;
                 index += buf.getInt(index - 4);
             }
