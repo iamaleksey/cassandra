@@ -758,6 +758,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return new WaitQueue(globalReserveCapacity, Kind.GLOBAL_CAPACITY);
         }
 
+        // TODO: why do we signal here?
         private Ticket registerAndSignal(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
         {
             Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
@@ -846,6 +847,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                      * message in the unprocessed stream has expired in the narrow time window.
                      */
                     reserveCapacity.release(limit.remaining());
+                    // TODO: should we re-signal if limit.remaining() > 0?
                 }
 
                 tickets.forEach(Ticket::resumeNormalProcessing);

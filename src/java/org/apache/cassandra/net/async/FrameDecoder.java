@@ -32,11 +32,29 @@ import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.memory.BufferPool;
+import org.apache.hadoop.mapred.JobTracker;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
 abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
+    private static final FrameProcessor NO_PROCESSOR =
+    frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
+
+    private static final FrameProcessor CLOSED_PROCESSOR =
+    frame -> { throw new IllegalStateException("Frame processor invoked on a closed FrameDecoder"); };
+
+    interface FrameProcessor
+    {
+        /**
+         * Frame processor that the frames should be handed off to.
+         *
+         * @return true if more frames can be taken by the processor, false if the decoder should pause until
+         * it's explicitly resumed.
+         */
+        boolean process(Frame frame) throws IOException;
+    }
+
     abstract static class Frame
     {
         abstract void release();
@@ -116,30 +134,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     ByteBuffer stash;
     private final Deque<Frame> frames = new ArrayDeque<>(4);
-    private ChannelHandlerContext ctx;
     private ChannelConfig config;
+    private FrameProcessor processor = NO_PROCESSOR;
 
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
     abstract void addLastTo(ChannelPipeline pipeline);
-
-    private static final FrameProcessor NO_PROCESSOR =
-        frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
-
-    private static final FrameProcessor CLOSED_PROCESSOR =
-        frame -> { throw new IllegalStateException("Frame processor invoked on a closed FrameDecoder"); };
-
-    interface FrameProcessor
-    {
-        /**
-         * Frame processor that the frames should be handed off to.
-         *
-         * @return true if more frames can be taken by the processor, false if the decoder should pause until
-         * it's explicitly resumed.
-         */
-        boolean process(Frame frame) throws IOException;
-    }
-
-    private FrameProcessor processor = NO_PROCESSOR;
 
     /**
      * For use by InboundMessageHandler (or other upstream handlers) that want to start receiving frames.
@@ -218,8 +217,12 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         decode(frames, SharedBytes.wrap(buf));
 
-        if (!deliver(processor))
-            config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
+        if (config.isAutoRead())
+        {
+            // we can be invoked with !isAutoRead(), but deliver must honour isAutoRead
+            if (!deliver(processor))
+                config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
+        }
     }
 
     /**
@@ -256,7 +259,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     void discard()
     {
-        ctx = null;
         config = null;
         if (stash != null)
         {
@@ -270,9 +272,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        this.ctx = ctx;
-        this.config = ctx.channel().config();
-
+        config = ctx.channel().config();
         config.setAutoRead(false); // WARNING this can throw an exception internally and fireExceptionCaught
     }
 
