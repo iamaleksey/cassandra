@@ -45,6 +45,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
+import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
@@ -180,29 +181,21 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean processFrame(Frame frame) throws IOException
     {
-        return processFrame(frame, endpointReserveCapacity, globalReserveCapacity, false);
+        if (frame instanceof IntactFrame)
+            return processIntactFrame((IntactFrame) frame, endpointReserveCapacity, globalReserveCapacity);
+
+        processCorruptFrame((CorruptFrame) frame);
+        return true;
     }
 
-    private boolean processFrame(Frame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce) throws IOException
-    {
-        return frame instanceof IntactFrame
-             ? processIntactFrame((IntactFrame) frame, endpointReserve, globalReserve, processOnce)
-             : processCorruptFrame((CorruptFrame) frame);
-    }
-
-    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve, boolean processOnce)
-    throws InvalidLegacyProtocolMagic
+    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         if (frame.isSelfContained)
-        {
-            return processOnce
-                 ? processOneContainedMessage(frame.contents, endpointReserve, globalReserve)
-                 : processFrameOfContainedMessages(frame.contents, endpointReserve, globalReserve);
-        }
-
-        return largeBytesRemaining == 0
-             ? processFirstFrameOfLargeMessage(frame, endpointReserve, globalReserve)
-             : processSubsequentFrameOfLargeMessage(frame);
+            return processFrameOfContainedMessages(frame.contents, endpointReserve, globalReserve);
+        else if (largeBytesRemaining == 0)
+            return processFirstFrameOfLargeMessage(frame, endpointReserve, globalReserve);
+        else
+            return processSubsequentFrameOfLargeMessage(frame);
     }
 
     /*
@@ -397,7 +390,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         isSkippingLargeMessage = !isLastFrame;
     }
 
-    private boolean processCorruptFrame(CorruptFrame frame) throws InvalidCrc
+    private void processCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
         {
@@ -412,7 +405,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             corruptFramesRecovered++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
-            return true;
         }
         else if (largeBytesRemaining == 0) // first frame of a large message
         {
@@ -425,7 +417,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             processCorruptSubsequentFrameOfLargeMessage(frame);
             corruptFramesRecovered++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
-            return true;
         }
     }
 
@@ -481,24 +472,85 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
     {
+        assert channel.eventLoop().inEventLoop();
         ticket = null;
-        return onReserveCapacityRegained(endpointReserve, globalReserveCapacity);
+        return !isClosed && processUpToOneMessage(endpointReserve, globalReserveCapacity);
     }
 
     private boolean onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
     {
+        assert channel.eventLoop().inEventLoop();
         ticket = null;
-        return onReserveCapacityRegained(endpointReserveCapacity, globalReserve);
+        return !isClosed && processUpToOneMessage(endpointReserveCapacity, globalReserve);
     }
 
     /*
      * Return true if the handler should be reactivated.
      */
-    private boolean onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve) throws IOException
+    private boolean processUpToOneMessage(Limit endpointReserve, Limit globalReserve) throws IOException
     {
-        assert channel.eventLoop().inEventLoop();
+        UpToOneMessageFrameProcessor processor = new UpToOneMessageFrameProcessor(endpointReserve, globalReserve);
+        decoder.processBacklog(processor);
+        return !processor.isBlocked;
+    }
 
-        return !isClosed && decoder.processOneFrame(frame -> processFrame(frame, endpointReserve, globalReserve, true));
+    private class UpToOneMessageFrameProcessor implements FrameProcessor
+    {
+        private final Limit endpointReserve;
+        private final Limit globalReserve;
+
+        boolean firstFrame = true;
+        boolean isBlocked = false;
+
+        private UpToOneMessageFrameProcessor(Limit endpointReserve, Limit globalReserve)
+        {
+            this.endpointReserve = endpointReserve;
+            this.globalReserve = globalReserve;
+        }
+
+        @Override
+        public boolean process(Frame frame) throws IOException
+        {
+            if (firstFrame)
+            {
+                if (!(frame instanceof IntactFrame))
+                    throw new IllegalStateException("First backlog frame must be intact");
+                firstFrame = false;
+                return processFirstFrame((IntactFrame) frame);
+            }
+            else
+            {
+                return processSubsequentFrame(frame);
+            }
+        }
+
+        private boolean processFirstFrame(IntactFrame frame) throws IOException
+        {
+            if (frame.isSelfContained)
+            {
+                isBlocked = !processOneContainedMessage(frame.contents, endpointReserve, globalReserve);
+                return false; // stop after one message
+            }
+            else
+            {
+                isBlocked = !processFirstFrameOfLargeMessage(frame, endpointReserve, globalReserve);
+                return !isBlocked; // continue unless fallen behind coprocessor or ran out of reserve capacity again
+            }
+        }
+
+        private boolean processSubsequentFrame(Frame frame) throws IOException
+        {
+            if (frame instanceof IntactFrame)
+            {
+                isBlocked = !processSubsequentFrameOfLargeMessage((IntactFrame) frame);
+                return !isBlocked && largeBytesRemaining > 0; // continue unless blocked or done with the large message
+            }
+            else
+            {
+                processCorruptFrame((CorruptFrame) frame);
+                return largeBytesRemaining > 0;
+            }
+        }
     }
 
     private void resume() throws IOException
