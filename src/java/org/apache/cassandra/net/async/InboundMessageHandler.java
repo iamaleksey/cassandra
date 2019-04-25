@@ -597,7 +597,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         if (null != largeMessage)
         {
-            largeMessage.discard();
+            largeMessage.abort();
             largeMessage = null;
         }
 
@@ -666,7 +666,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             long currentTimeNanos = ApproximateTime.nanoTime();
             if (!isSkipping && expiresAtNanos < currentTimeNanos)
             {
-                discard();
+                releaseBuffers();
                 isSkipping = true;
 
                 try
@@ -693,7 +693,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             if (!isSkipping)
             {
-                discard();
+                releaseBuffers();
                 isSkipping = true;
 
                 try
@@ -709,12 +709,22 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return bytesReceived == size;
         }
 
-        private void discard()
+        private void releaseBuffers()
         {
             if (buffers != null)
             {
                 buffers.forEach(SharedBytes::release);
                 buffers = null;
+            }
+        }
+
+        private void abort()
+        {
+            if (!isSkipping)
+            {
+                releaseCapacity(size);
+                releaseBuffers();
+                isSkipping = true;
             }
         }
 
@@ -765,9 +775,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private void processLargeMessage()
         {
             Message<?> message = null;
+            long currentTimeNanos = ApproximateTime.nanoTime();
+
             try (ChunkedInputPlus input = ChunkedInputPlus.of(msg.buffers))
             {
-                message = serializer.deserialize(input, peer, version);
+                if (msg.expiresAtNanos >= currentTimeNanos)
+                    message = serializer.deserialize(input, peer, version);
+                else
+                    callbacks.onArrivedExpired(msg.size, msg.id, msg.verb, currentTimeNanos - msg.createdAtNanos, TimeUnit.NANOSECONDS);
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
