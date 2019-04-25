@@ -122,9 +122,12 @@ public class ExpiringMap<K, V>
 
     public void awaitTerminationUntil(long deadlineNanos) throws TimeoutException, InterruptedException
     {
-        long wait = deadlineNanos - System.nanoTime();
-        if (wait <= 0 || !service.awaitTermination(wait, NANOSECONDS))
-            throw new TimeoutException();
+        if (!service.isTerminated())
+        {
+            long wait = deadlineNanos - System.nanoTime();
+            if (wait <= 0 || !service.awaitTermination(wait, NANOSECONDS))
+                throw new TimeoutException();
+        }
     }
 
     private void expire()

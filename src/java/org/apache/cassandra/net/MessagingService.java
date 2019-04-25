@@ -428,6 +428,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                           if (shutdownExecutors)
                               shutdownExecutors(deadline);
                       },
+                      () -> callbacks.awaitTerminationUntil(deadline),
                       messageSink::clear);
         }
         else
@@ -444,6 +445,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                           if (shutdownExecutors)
                               shutdownExecutors(deadline);
                       },
+                      () -> callbacks.awaitTerminationUntil(deadline),
                       messageSink::clear);
         }
     }
