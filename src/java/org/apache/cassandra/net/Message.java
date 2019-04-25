@@ -139,6 +139,12 @@ public class Message<T>
             return this;
         }
 
+        public Builder<T> withFlags(int flags)
+        {
+            this.flags = flags;
+            return this;
+        }
+
         public Builder<T> withParam(ParamType type, Object value)
         {
             params.put(type, value);
@@ -252,6 +258,7 @@ public class Message<T>
     public static <T> Builder<T> builder(Message<T> message)
     {
         return new Builder<T>().from(message.from)
+                               .withFlags(message.flags)
                                .withPayload(message.payload)
                                .ofVerb(message.verb)
                                .withId(message.id)
