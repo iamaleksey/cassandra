@@ -18,56 +18,47 @@
 package org.apache.cassandra.net.async;
 
 import java.io.EOFException;
-import java.util.Iterator;
+
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.io.util.RebufferingInputStream;
 
 class ChunkedInputPlus extends RebufferingInputStream
 {
-    private SharedBytes current;
-    private final Iterator<SharedBytes> remaining;
+    private final PeekingIterator<SharedBytes> iter;
 
-    private ChunkedInputPlus(SharedBytes current, Iterator<SharedBytes> remaining)
+    private ChunkedInputPlus(PeekingIterator<SharedBytes> iter)
     {
-        super(current.get());
-        this.current = current;
-        this.remaining = remaining;
+        super(iter.peek().get());
+        this.iter = iter;
     }
 
     static ChunkedInputPlus of(Iterable<SharedBytes> buffers)
     {
-        Iterator<SharedBytes> iter = buffers.iterator();
+        PeekingIterator<SharedBytes> iter = Iterators.peekingIterator(buffers.iterator());
         if (!iter.hasNext())
             throw new IllegalArgumentException();
-        SharedBytes first = iter.next();
-
-        return new ChunkedInputPlus(first, iter);
+        return new ChunkedInputPlus(iter);
     }
 
     @Override
     protected void reBuffer() throws EOFException
     {
         buffer = null;
-        current.release();
-        current = null;
+        iter.peek().release();
+        iter.next();
 
-        if (!remaining.hasNext())
+        if (!iter.hasNext())
             throw new EOFException();
 
-        current = remaining.next();
-        buffer = current.get();
+        buffer = iter.peek().get();
     }
 
     @Override
     public void close()
     {
-        if (null != current)
-        {
-            buffer = null;
-            current.release();
-            current = null;
-        }
-
-        remaining.forEachRemaining(SharedBytes::release);
+        buffer = null;
+        iter.forEachRemaining(SharedBytes::release);
     }
 }
