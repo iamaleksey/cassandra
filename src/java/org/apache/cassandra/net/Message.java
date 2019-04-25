@@ -199,7 +199,7 @@ public class Message<T>
             return buildUnsafe();
         }
 
-        public Message<T> buildUnsafe()
+        Message<T> buildUnsafe()
         {
             return new Message<>(from, payload, flags, params, verb, createdAtNanos, expiresAtNanos, id);
         }
@@ -446,6 +446,24 @@ public class Message<T>
             throw new InvalidLegacyProtocolMagic(magic);
     }
 
+    public static class Header
+    {
+        public final long id;
+        public final Verb verb;
+
+        public final long createdAtNanos;
+        public final long expiresAtNanos;
+
+        Header(long id, Verb verb, long createdAtNanos, long expiresAtNanos)
+        {
+            this.id = id;
+            this.verb = verb;
+
+            this.createdAtNanos = createdAtNanos;
+            this.expiresAtNanos = expiresAtNanos;
+        }
+    }
+
     /**
      * Each message contains a header with several fixed fields, an optional key-value params section, and then
      * the message payload itself. Below is a visualization of the layout.
@@ -529,33 +547,16 @@ public class Message<T>
             return version >= VERSION_40 ? messageSizePost40(buf, index, limit) : messageSizePre40(buf, index, limit);
         }
 
-        public long getId(ByteBuffer buf, int version)
+        public Header getHeader(ByteBuffer buf, long currentTimeNanos, int version)
         {
-            return version >= VERSION_40 ? VIntCoding.getUnsignedVInt(buf, buf.position()) : buf.getInt(buf.position() + 4);
+            return version >= VERSION_40 ? getHeaderPost40(buf, currentTimeNanos) : getHeaderPre40(buf, currentTimeNanos);
         }
 
-        public long getCreatedAtNanos(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos, int version)
-        {
-            return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, timeSnapshot, currentTimeNanos) : getCreatedAtNanosPre40(buf, timeSnapshot, currentTimeNanos);
-        }
-
-        public long getExpiresAtNanos(ByteBuffer buf, long createdAtNanos, long currentTimeNanos, int version)
-        {
-            if (!DatabaseDescriptor.hasCrossNodeTimeout() || createdAtNanos > currentTimeNanos)
-                createdAtNanos = currentTimeNanos;
-            return version >= VERSION_40 ? getExpiresAtNanosPost40(buf, createdAtNanos) : getExpiresAtNanosPre40(buf, createdAtNanos);
-        }
-
-        public long getExpiresAtNanos(long createdAtNanos, long currentTimeNanos, long expirationPeriodNanos)
+        long getExpiresAtNanos(long createdAtNanos, long currentTimeNanos, long expirationPeriodNanos)
         {
             if (!DatabaseDescriptor.hasCrossNodeTimeout() || createdAtNanos > currentTimeNanos)
                 createdAtNanos = currentTimeNanos;
             return createdAtNanos + expirationPeriodNanos;
-        }
-
-        public Verb getVerb(ByteBuffer buf, int version)
-        {
-            return version >= VERSION_40 ? getVerbPost40(buf) : getVerbPre40(buf);
         }
 
         public boolean getCallBackOnFailure(ByteBuffer buf, int version)
@@ -664,28 +665,28 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private long getCreatedAtNanosPost40(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos)
+        private Header getHeaderPost40(ByteBuffer buf, long currentTimeNanos)
         {
-            int index = buf.position();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
-            return calculateCreationTimeNanos(buf.getInt(index), timeSnapshot, currentTimeNanos);
-        }
+            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
 
-        private long getExpiresAtNanosPost40(ByteBuffer buf, long createdAtNanos)
-        {
             int index = buf.position();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
-            index += CREATION_TIME_SIZE;
-            return createdAtNanos + TimeUnit.MILLISECONDS.toNanos(VIntCoding.getUnsignedVInt(buf, index));
-        }
 
-        private Verb getVerbPost40(ByteBuffer buf)
-        {
-            int index = buf.position();
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
+            long id = VIntCoding.getUnsignedVInt(buf, index);
+            index += VIntCoding.computeUnsignedVIntSize(id);
+
+            int createdAtMillis = buf.getInt(index);
             index += CREATION_TIME_SIZE;
-            index += VIntCoding.computeUnsignedVIntSize(buf, index); // expiration
-            return Verb.fromId(Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index)));
+
+            long expiresInMillis = VIntCoding.getUnsignedVInt(buf, index);
+            index += VIntCoding.computeUnsignedVIntSize(expiresInMillis);
+
+            Verb verb = Verb.fromId(Ints.checkedCast(VIntCoding.getUnsignedVInt(buf, index)));
+            index += VIntCoding.computeUnsignedVIntSize(verb.id);
+
+            long createdAtNanos = calculateCreationTimeNanos(createdAtMillis, timeSnapshot, currentTimeNanos);
+            long expiresAtNanos = getExpiresAtNanos(createdAtNanos, currentTimeNanos, TimeUnit.MILLISECONDS.toNanos(expiresInMillis));
+
+            return new Header(id, verb, createdAtNanos, expiresAtNanos);
         }
 
         private boolean getCallBackOnFailurePost40(ByteBuffer buf)
@@ -829,27 +830,29 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private long getCreatedAtNanosPre40(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos)
+        private Header getHeaderPre40(ByteBuffer buf, long currentTimeNanos)
         {
+            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+
             int index = buf.position();
+
             index += 4; // protocol magic
-            index += 4; // message id
-            return calculateCreationTimeNanos(buf.getInt(index), timeSnapshot, currentTimeNanos);
-        }
 
-        private long getExpiresAtNanosPre40(ByteBuffer buf, long createdAtNanos)
-        {
-            return getVerbPre40(buf).expiresAtNanos(createdAtNanos);
-        }
+            long id = buf.getInt(index);
+            index += 4;
 
-        private Verb getVerbPre40(ByteBuffer buf)
-        {
-            int index = buf.position();
-            index += 4;                  // protocol magic
-            index += 4;                  // id
-            index += 4;                  // creation time
+            int createdAtMillis = buf.getInt(index);
+            index += 4;
+
             index += 1 + buf.get(index); // from
-            return Verb.fromId(buf.getInt(index));
+
+            Verb verb = Verb.fromId(buf.getInt(index));
+            index += 4;
+
+            long createdAtNanos = calculateCreationTimeNanos(createdAtMillis, timeSnapshot, currentTimeNanos);
+            long expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
+
+            return new Header(id, verb, createdAtNanos, expiresAtNanos);
         }
 
         private Message<?> toPre40FailureResponse(Message<RequestFailureReason> post40)

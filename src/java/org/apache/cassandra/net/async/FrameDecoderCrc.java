@@ -30,9 +30,14 @@ import static org.apache.cassandra.net.async.Crc.updateCrc32;
 
 public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
 {
-    public static FrameDecoderCrc create()
+    private FrameDecoderCrc(BufferPoolAllocator allocator)
     {
-        return new FrameDecoderCrc();
+        super(allocator);
+    }
+
+    public static FrameDecoderCrc create(BufferPoolAllocator allocator)
+    {
+        return new FrameDecoderCrc(allocator);
     }
 
     static final int HEADER_LENGTH = 6;

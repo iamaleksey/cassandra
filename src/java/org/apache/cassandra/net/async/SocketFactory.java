@@ -25,7 +25,6 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Predicate;
 import javax.annotation.Nullable;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
@@ -61,7 +60,6 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.Throwables;
 
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
@@ -140,7 +138,7 @@ public final class SocketFactory
 
         Bootstrap bootstrap = new Bootstrap()
                               .group(eventLoop)
-                              .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
+                              .option(ChannelOption.ALLOCATOR, GlobalBufferPoolAllocator.instance)
                               .option(ChannelOption.SO_KEEPALIVE, true);
 
         switch (providerOf(eventLoop))
@@ -164,7 +162,7 @@ public final class SocketFactory
     {
         ServerBootstrap bootstrap = new ServerBootstrap()
                .group(acceptGroup, defaultGroup)
-               .option(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance)
+               .option(ChannelOption.ALLOCATOR, GlobalBufferPoolAllocator.instance)
                .option(ChannelOption.SO_REUSEADDR, true);
 
         switch (providerOf(defaultGroup))

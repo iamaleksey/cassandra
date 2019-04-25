@@ -69,7 +69,7 @@ public class TestChannel extends EmbeddedChannel
             ByteBuf buf;
             if (msg instanceof FileRegion)
             {
-                buf = BufferPoolAllocator.instance.directBuffer((int) ((FileRegion) msg).count());
+                buf = GlobalBufferPoolAllocator.instance.directBuffer((int) ((FileRegion) msg).count());
                 try
                 {
                     ((FileRegion) msg).transferTo(new WritableByteChannel()

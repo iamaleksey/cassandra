@@ -82,7 +82,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
         flush.flip();
         int byteCount = flush.limit();
         ChannelPromise promise = beginFlush(byteCount, 0, Integer.MAX_VALUE);
-        channel.writeAndFlush(BufferPoolAllocator.wrap(flush), promise);
+        channel.writeAndFlush(GlobalBufferPoolAllocator.wrap(flush), promise);
         allocateBuffer();
     }
 
@@ -155,7 +155,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
         BufferPool.putUnusedPortion(buffer, false);
 
         int length = buffer.limit();
-        channel.writeAndFlush(BufferPoolAllocator.wrap(buffer), holder.promise);
+        channel.writeAndFlush(GlobalBufferPoolAllocator.wrap(buffer), holder.promise);
         return length;
     }
 

@@ -111,13 +111,13 @@ public class FramingTest
     @Test
     public void testRandomLZ4()
     {
-        testSomeFrames(FrameEncoderLZ4.fastInstance, FrameDecoderLZ4.fast());
+        testSomeFrames(FrameEncoderLZ4.fastInstance, FrameDecoderLZ4.fast(GlobalBufferPoolAllocator.instance));
     }
 
     @Test
     public void testRandomCrc()
     {
-        testSomeFrames(FrameEncoderCrc.instance, FrameDecoderCrc.create());
+        testSomeFrames(FrameEncoderCrc.instance, FrameDecoderCrc.create(GlobalBufferPoolAllocator.instance));
     }
 
     public void testSomeFrames(FrameEncoder encoder, FrameDecoder decoder)
@@ -226,7 +226,7 @@ public class FramingTest
             int version = minimum_version + random.nextInt(1 + current_version - minimum_version);
             logger.debug("seed: {}, ratio: {}, version: {}", innerSeed, ratio, version);
             random.setSeed(innerSeed);
-            testRandomSequenceOfMessages(random, ratio, version, new FrameDecoderLegacy(version));
+            testRandomSequenceOfMessages(random, ratio, version, new FrameDecoderLegacy(GlobalBufferPoolAllocator.instance, version));
         }
     }
 
@@ -241,7 +241,7 @@ public class FramingTest
         SecureRandom seeds = new SecureRandom();
         for (int messagingVersion : new int[] { VERSION_30, VERSION_3014, current_version})
         {
-            FrameDecoder decoder = new FrameDecoderLegacy(messagingVersion);
+            FrameDecoder decoder = new FrameDecoderLegacy(GlobalBufferPoolAllocator.instance, messagingVersion);
             testSomeMessages(seeds.nextLong(), count, 0.0f, messagingVersion, decoder);
             testSomeMessages(seeds.nextLong(), count, 0.1f, messagingVersion, decoder);
             testSomeMessages(seeds.nextLong(), count, 0.95f, messagingVersion, decoder);

@@ -15,27 +15,45 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
+import org.apache.cassandra.utils.memory.BufferPool;
 
-@ChannelHandler.Sharable
-class FrameEncoderLegacy extends FrameEncoder
+/**
+ * Equivalent to {@link GlobalBufferPoolAllocator}, except explicitly using a specified
+ * {@link org.apache.cassandra.utils.memory.BufferPool.LocalPool} to allocate from.
+ *
+ * Exists to facilitate more efficient handling large messages on the inbound path.
+ *
+ * TODO: enforce that get() and getAtLeast() are invoked from within the expected thread
+ */
+public class LocalBufferPoolAllocator extends BufferPoolAllocator
 {
-    public static final FrameEncoderLegacy instance = new FrameEncoderLegacy();
+    private final BufferPool.LocalPool pool;
 
-    ByteBuf encode(boolean isSelfContained, ByteBuffer buffer)
+    LocalBufferPoolAllocator()
     {
-        return GlobalBufferPoolAllocator.wrap(buffer);
+        super();
+        this.pool = new BufferPool.LocalPool();
     }
 
-    void addLastTo(ChannelPipeline pipeline)
+    @Override
+    ByteBuffer get(int size)
     {
-        pipeline.addLast("frameEncoderNone", this);
+        return pool.take(size, false);
+    }
+
+    @Override
+    ByteBuffer getAtLeast(int size)
+    {
+        return pool.take(size, true);
+    }
+
+    @Override
+    public void release()
+    {
+        pool.release();
     }
 }

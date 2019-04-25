@@ -34,6 +34,11 @@ import net.nicoulaj.compilecommand.annotations.Inline;
  */
 abstract class FrameDecoderWith8bHeader extends FrameDecoder
 {
+    FrameDecoderWith8bHeader(BufferPoolAllocator allocator)
+    {
+        super(allocator);
+    }
+
     /**
      * Read a header that is 8 bytes or shorter, without modifying the buffer position.
      * If your header is longer than this, you will need to implement your own {@link #decode}

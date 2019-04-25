@@ -31,19 +31,17 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
-import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
 abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
     private static final FrameProcessor NO_PROCESSOR =
-    frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
+        frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
 
     private static final FrameProcessor CLOSED_PROCESSOR =
-    frame -> { throw new IllegalStateException("Frame processor invoked on a closed FrameDecoder"); };
+        frame -> { throw new IllegalStateException("Frame processor invoked on a closed FrameDecoder"); };
 
     interface FrameProcessor
     {
@@ -133,6 +131,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
+    protected final BufferPoolAllocator allocator;
+
     @VisibleForTesting
     final Deque<Frame> frames = new ArrayDeque<>(4);
     ByteBuffer stash;
@@ -141,6 +141,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     private Channel channel;
     private ChannelHandlerContext closed;
     private FrameProcessor processor = NO_PROCESSOR;
+
+    FrameDecoder(BufferPoolAllocator allocator)
+    {
+        this.allocator = allocator;
+    }
 
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
     abstract void addLastTo(ChannelPipeline pipeline);
@@ -199,7 +204,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         {
             ByteBuffer bytes = stash;
             stash = null;
-            BufferPool.put(bytes);
+            allocator.put(bytes);
         }
         while (!frames.isEmpty())
             frames.poll().release();
@@ -207,7 +212,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     /**
      * Called by Netty pipeline when a new message arrives; we anticipate in normal operation
-     * this will receive messages of type {@link BufferPoolAllocator.Wrapped}
+     * this will receive messages of type {@link GlobalBufferPoolAllocator.Wrapped} or
+     * {@link LocalBufferPoolAllocator.Wrapped}.
      *
      * These buffers are unwrapped and passed to {@link #decode(Collection, SharedBytes)},
      * which collects decoded frames into {@link #frames}, which we send upstream in {@link #deliver}
@@ -218,14 +224,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         if (msg instanceof BufferPoolAllocator.Wrapped)
         {
             buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
-            BufferPool.putUnusedPortion(buf, false); // netty will probably have mis-predicted the space needed
+            allocator.putUnusedPortion(buf, false); // netty will probably have mis-predicted the space needed
         }
         else
         {
             // this is only necessary for pre40, which uses the legacy LZ4,
             // which sometimes allocates on heap explicitly for some reason
             ByteBuf in = (ByteBuf) msg;
-            buf = BufferPool.get(in.readableBytes());
+            buf = allocator.get(in.readableBytes());
             in.readBytes(buf);
             buf.flip();
         }
@@ -277,11 +283,12 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     void stash(SharedBytes in, int stashLength, int begin, int length)
     {
-        ByteBuffer out = BufferPool.getAtLeast(stashLength, BufferType.OFF_HEAP);
+        ByteBuffer out = allocator.getAtLeast(stashLength);
         copyBytes(in.get(), begin, out, 0, length);
         out.position(length);
         stash = out;
     }
+
 
     public void handlerAdded(ChannelHandlerContext ctx)
     {
@@ -294,6 +301,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         closed = ctx;
         if (frames.isEmpty())
             close();
+        allocator.release();
     }
 
     private boolean isClosed()
@@ -336,15 +344,15 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      * @return {@code in} if has sufficient capacity, otherwise
      *         a replacement from {@code BufferPool} that {@code in} is copied into
      */
-    static ByteBuffer ensureCapacity(ByteBuffer in, int capacity)
+    ByteBuffer ensureCapacity(ByteBuffer in, int capacity)
     {
         if (in.capacity() >= capacity)
             return in;
 
-        ByteBuffer out = BufferPool.getAtLeast(capacity, BufferType.OFF_HEAP);
+        ByteBuffer out = allocator.getAtLeast(capacity);
         in.flip();
         out.put(in);
-        BufferPool.put(in);
+        allocator.put(in);
         return out;
     }
 }

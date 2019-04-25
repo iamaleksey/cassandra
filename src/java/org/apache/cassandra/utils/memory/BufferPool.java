@@ -145,9 +145,9 @@ public class BufferPool
                : ByteBuffer.allocateDirect(size);
     }
 
-    private static ByteBuffer takeFromPool(int size, boolean exactSize, boolean allocateOnHeapWhenExhausted)
+    private static ByteBuffer takeFromPool(int size, boolean sizeIsLowerBound, boolean allocateOnHeapWhenExhausted)
     {
-        ByteBuffer ret = maybeTakeFromPool(size, exactSize, allocateOnHeapWhenExhausted);
+        ByteBuffer ret = maybeTakeFromPool(size, sizeIsLowerBound, allocateOnHeapWhenExhausted);
         if (ret != null)
             return ret;
 
@@ -382,7 +382,7 @@ public class BufferPool
      * A thread local class that grabs chunks from the global pool for this thread allocations.
      * Only one thread can do the allocations but multiple threads can release the allocations.
      */
-    static final class LocalPool
+    public static final class LocalPool
     {
         private static final Consumer<Chunk> TINY_RECYCLER = chunk -> BufferPool.put(chunk.slab);
 
@@ -571,6 +571,36 @@ public class BufferPool
             chunkCount--;
         }
 
+        public ByteBuffer take(int size, boolean exactSize)
+        {
+            if (size < 0)
+                throw new IllegalArgumentException("Size must be positive (" + size + ')');
+
+            if (size == 0)
+                return EMPTY_BUFFER;
+
+            if (size > NORMAL_CHUNK_SIZE)
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Requested buffer size {} is bigger than {}; allocating directly",
+                                 prettyPrintMemory(size),
+                                 prettyPrintMemory(NORMAL_CHUNK_SIZE));
+
+                metrics.misses.mark();
+                return allocate(size, false);
+            }
+
+            ByteBuffer ret = get(size, exactSize);
+            if (ret != null)
+                return ret;
+
+            if (logger.isTraceEnabled())
+                logger.trace("Requested buffer size {} has been allocated directly due to lack of capacity", prettyPrintMemory(size));
+
+            metrics.misses.mark();
+            return allocate(size, false);
+        }
+
         @VisibleForTesting
         void reset()
         {
@@ -587,7 +617,7 @@ public class BufferPool
             }
         }
 
-        void release()
+        public void release()
         {
             chunkCount = 0;
             Chunk.release(chunks);

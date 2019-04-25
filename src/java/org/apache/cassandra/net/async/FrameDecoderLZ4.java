@@ -27,15 +27,14 @@ import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
 import org.apache.cassandra.io.compress.BufferType;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.net.async.Crc.*;
 
 final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
 {
-    public static FrameDecoderLZ4 fast()
+    public static FrameDecoderLZ4 fast(BufferPoolAllocator allocator)
     {
-        return new FrameDecoderLZ4(LZ4Factory.fastestInstance().fastDecompressor());
+        return new FrameDecoderLZ4(allocator, LZ4Factory.fastestInstance().fastDecompressor());
     }
 
     private static final int HEADER_LENGTH = 8;
@@ -61,8 +60,9 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
 
     private final LZ4FastDecompressor decompressor;
 
-    private FrameDecoderLZ4(LZ4FastDecompressor decompressor)
+    private FrameDecoderLZ4(BufferPoolAllocator allocator, LZ4FastDecompressor decompressor)
     {
+        super(allocator);
         this.decompressor = decompressor;
     }
 
@@ -111,7 +111,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
         }
         else
         {
-            ByteBuffer out = BufferPool.get(uncompressedLength, BufferType.OFF_HEAP);
+            ByteBuffer out = allocator.get(uncompressedLength);
             try
             {
                 decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
@@ -119,7 +119,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
             }
             catch (Throwable t)
             {
-                BufferPool.put(out, false);
+                allocator.put(out, false);
                 throw t;
             }
         }

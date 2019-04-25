@@ -15,28 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
-import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
-import io.netty.handler.codec.compression.Lz4FrameDecoder;
-import net.jpountz.lz4.LZ4Factory;
-import net.jpountz.xxhash.XXHashFactory;
+import java.nio.ByteBuffer;
 
-@ChannelHandler.Sharable
-class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
+import io.netty.buffer.ByteBuf;
+
+public class GlobalBufferPoolAllocator extends BufferPoolAllocator
 {
-    private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
+    public static final GlobalBufferPoolAllocator instance = new GlobalBufferPoolAllocator();
 
-    FrameDecoderLegacyLZ4(BufferPoolAllocator allocator, int messagingVersion)
+    private GlobalBufferPoolAllocator()
     {
-        super(allocator, messagingVersion);
+        super();
     }
 
-    void addLastTo(ChannelPipeline pipeline)
+    public static ByteBuf wrap(ByteBuffer buffer)
     {
-        pipeline.addLast("legacylz4", new Lz4FrameDecoder(LZ4Factory.fastestInstance(), XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum()));
-        pipeline.addLast("frameDecoderNone", this);
+        return new Wrapped(instance, buffer);
     }
 }
