@@ -37,9 +37,14 @@ import static org.apache.cassandra.net.async.FrameDecoderCrc.verifyHeader6b;
  */
 final class FrameDecoderUnprotected extends FrameDecoderWith8bHeader
 {
-    public static FrameDecoderUnprotected create()
+    FrameDecoderUnprotected(BufferPoolAllocator allocator)
     {
-        return new FrameDecoderUnprotected();
+        super(allocator);
+    }
+
+    public static FrameDecoderUnprotected create(BufferPoolAllocator allocator)
+    {
+        return new FrameDecoderUnprotected(allocator);
     }
 
     final long readHeader(ByteBuffer frame, int begin)

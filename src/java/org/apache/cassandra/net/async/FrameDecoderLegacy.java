@@ -24,7 +24,6 @@ import java.util.Collection;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
@@ -36,7 +35,11 @@ class FrameDecoderLegacy extends FrameDecoder
 
     private int remainingBytesInLargeMessage = 0;
 
-    FrameDecoderLegacy(int messagingVersion) { this.messagingVersion = messagingVersion; }
+    FrameDecoderLegacy(BufferPoolAllocator allocator, int messagingVersion)
+    {
+        super(allocator);
+        this.messagingVersion = messagingVersion;
+    }
 
     final void decode(Collection<Frame> into, SharedBytes newBytes)
     {
@@ -73,7 +76,7 @@ class FrameDecoderLegacy extends FrameDecoder
                         stash = ensureCapacity(stash, length);
 
                     stash.limit(length);
-                    BufferPool.putUnusedPortion(stash); // we may be overcapacity from earlier doubling
+                    allocator.putUnusedPortion(stash); // we may be overcapacity from earlier doubling
                     if (!copyToSize(in, stash, length))
                         return;
                 }
@@ -83,7 +86,7 @@ class FrameDecoderLegacy extends FrameDecoder
                     remainingBytesInLargeMessage = length - stash.position();
 
                     stash.limit(stash.position());
-                    BufferPool.putUnusedPortion(stash);
+                    allocator.putUnusedPortion(stash);
                 }
 
                 stash.flip();

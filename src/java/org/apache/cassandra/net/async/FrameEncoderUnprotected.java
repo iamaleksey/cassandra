@@ -55,7 +55,7 @@ public class FrameEncoderUnprotected extends FrameEncoder
                 throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
 
             writeHeader(frame, isSelfContained, dataLength);
-            return BufferPoolAllocator.wrap(frame);
+            return GlobalBufferPoolAllocator.wrap(frame);
         }
         catch (Throwable t)
         {

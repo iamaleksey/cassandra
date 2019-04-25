@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
@@ -72,7 +71,7 @@ public class InboundConnectionInitiator
         private final InboundConnectionSettings settings;
         private final ChannelGroup channelGroup;
 
-        public Initializer(InboundConnectionSettings settings, ChannelGroup channelGroup)
+        Initializer(InboundConnectionSettings settings, ChannelGroup channelGroup)
         {
             this.settings = settings;
             this.channelGroup = channelGroup;
@@ -83,7 +82,7 @@ public class InboundConnectionInitiator
         {
             channelGroup.add(channel);
 
-            channel.config().setOption(ChannelOption.ALLOCATOR, BufferPoolAllocator.instance);
+            channel.config().setOption(ChannelOption.ALLOCATOR, GlobalBufferPoolAllocator.instance);
             channel.config().setOption(ChannelOption.SO_KEEPALIVE, true);
             channel.config().setOption(ChannelOption.SO_REUSEADDR, true);
             channel.config().setOption(ChannelOption.TCP_NODELAY, true); // we only send handshake messages; no point ever delaying
@@ -388,21 +387,28 @@ public class InboundConnectionInitiator
         void setupMessagingPipeline(InetAddressAndPort from, int useMessagingVersion, int maxMessagingVersion, ChannelPipeline pipeline)
         {
             handshakeTimeout.cancel(true);
-            
             // record the "true" endpoint, i.e. the one the peer is identified with, as opposed to the socket it connected over
             instance().versions.set(from, maxMessagingVersion);
 
+            BufferPoolAllocator allocator = GlobalBufferPoolAllocator.instance;
+            if (initiate.type == ConnectionType.LARGE_MESSAGES)
+            {
+                // for large messages, swap the global pool allocator for a local one, to optimise utilisation of chunks
+                allocator = new LocalBufferPoolAllocator();
+                pipeline.channel().config().setAllocator(allocator);
+            }
+
             FrameDecoder frameDecoder;
             if (initiate.withCompression && useMessagingVersion >= VERSION_40)
-                frameDecoder = FrameDecoderLZ4.fast();
+                frameDecoder = FrameDecoderLZ4.fast(allocator);
             else if (initiate.withCompression)
-                frameDecoder = new FrameDecoderLegacyLZ4(useMessagingVersion);
+                frameDecoder = new FrameDecoderLegacyLZ4(allocator, useMessagingVersion);
             else if (initiate.withCrc)
-                frameDecoder = FrameDecoderCrc.create();
+                frameDecoder = FrameDecoderCrc.create(allocator);
             else if (useMessagingVersion >= VERSION_40)
-                frameDecoder = new FrameDecoderUnprotected();
+                frameDecoder = new FrameDecoderUnprotected(allocator);
             else
-                frameDecoder = new FrameDecoderLegacy(useMessagingVersion);
+                frameDecoder = new FrameDecoderLegacy(allocator, useMessagingVersion);
 
             frameDecoder.addLastTo(pipeline);
 

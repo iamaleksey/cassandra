@@ -150,7 +150,7 @@ public class HandshakeProtocol
                     out.writeInt(computeCrc32(buffer, 0, buffer.position()));
                 }
                 buffer.flip();
-                return BufferPoolAllocator.wrap(buffer);
+                return GlobalBufferPoolAllocator.wrap(buffer);
             }
             catch (IOException e)
             {
@@ -354,7 +354,7 @@ public class HandshakeProtocol
                 out.writeInt(maxMessagingVersion);
                 CompactEndpointSerializationHelper.instance.serialize(from, out, maxMessagingVersion);
                 buffer.flip();
-                return BufferPoolAllocator.wrap(buffer);
+                return GlobalBufferPoolAllocator.wrap(buffer);
             }
             catch (IOException e)
             {

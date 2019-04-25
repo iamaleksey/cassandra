@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
@@ -24,60 +23,97 @@ import io.netty.buffer.AbstractByteBufAllocator;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.buffer.UnpooledUnsafeDirectByteBuf;
-import io.netty.channel.ChannelHandlerContext;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
 
-import static java.lang.Math.min;
-
 /**
  * A trivial wrapper around BufferPool for integrating with Netty, but retaining ownership of pooling behaviour
- * that is integrated into Cassandra's other pooling
+ * that is integrated into Cassandra's other pooling.
  */
-public class BufferPoolAllocator extends AbstractByteBufAllocator
+abstract class BufferPoolAllocator extends AbstractByteBufAllocator
 {
-    public static final BufferPoolAllocator instance = new BufferPoolAllocator();
-    private BufferPoolAllocator() { super(true); }
+    BufferPoolAllocator()
+    {
+        super(true);
+    }
 
+    @Override
+    public boolean isDirectBufferPooled()
+    {
+        return true;
+    }
+
+    @Override
     protected ByteBuf newHeapBuffer(int minCapacity, int maxCapacity)
     {
         // for pre40; Netty LZ4 decoder sometimes allocates on heap explicitly for some reason
         return Unpooled.buffer(minCapacity, maxCapacity);
     }
 
+    @Override
     protected ByteBuf newDirectBuffer(int minCapacity, int maxCapacity)
     {
-        ByteBuf result = wrap(BufferPool.getAtLeast(minCapacity, BufferType.OFF_HEAP));
+        ByteBuf result = new Wrapped(this, getAtLeast(minCapacity));
         result.clear();
         return result;
     }
 
-    public static ByteBuf wrap(ByteBuffer buffer)
+    ByteBuffer get(int size)
     {
-        return new Wrapped(buffer);
+        return BufferPool.get(size, BufferType.OFF_HEAP);
+    }
+
+    ByteBuffer getAtLeast(int size)
+    {
+        return BufferPool.getAtLeast(size, BufferType.OFF_HEAP);
+    }
+
+    void put(ByteBuffer buffer)
+    {
+        BufferPool.put(buffer);
+    }
+
+    void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
+    {
+        BufferPool.put(buffer, returnChunkToGlobalPoolIfFree);
+    }
+
+    void putUnusedPortion(ByteBuffer buffer)
+    {
+        BufferPool.putUnusedPortion(buffer);
+    }
+
+    void putUnusedPortion(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
+    {
+        BufferPool.putUnusedPortion(buffer, returnChunkToGlobalPoolIfFree);
+    }
+
+    void release()
+    {
     }
 
     /**
      * A simple extension to UnpooledUnsafeDirectByteBuf that returns buffers to BufferPool on deallocate,
-     * and permits extracting the buffer from it to take ownership and use directly,
-     * which is used in {@link FrameDecoder#channelRead(ChannelHandlerContext, Object)}
+     * and permits extracting the buffer from it to take ownership and use directly.
      */
-    static class Wrapped extends UnpooledUnsafeDirectByteBuf
+    public static class Wrapped extends UnpooledUnsafeDirectByteBuf
     {
         private ByteBuffer wrapped;
-        public Wrapped(ByteBuffer wrap)
+
+        Wrapped(BufferPoolAllocator allocator, ByteBuffer wrap)
         {
-            super(instance, wrap, wrap.capacity());
+            super(allocator, wrap, wrap.capacity());
             wrapped = wrap;
         }
 
+        @Override
         public void deallocate()
         {
             if (wrapped != null)
                 BufferPool.put(wrapped, false);
         }
 
-        ByteBuffer adopt()
+        public ByteBuffer adopt()
         {
             if (refCnt() > 1)
                 throw new IllegalStateException();
@@ -86,10 +122,5 @@ public class BufferPoolAllocator extends AbstractByteBufAllocator
             wrapped = null;
             return adopt;
         }
-    }
-
-    public boolean isDirectBufferPooled()
-    {
-        return true;
     }
 }
