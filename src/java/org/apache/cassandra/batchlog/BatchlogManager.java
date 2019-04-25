@@ -508,7 +508,7 @@ public class BatchlogManager implements BatchlogManagerMBean
 
         /**
          * A wrapper of WriteResponseHandler that stores the addresses of the endpoints from
-         * which we did not receive a successful respond.
+         * which we did not receive a successful response.
          */
         private static class ReplayWriteResponseHandler<T> extends WriteResponseHandler<T>
         {

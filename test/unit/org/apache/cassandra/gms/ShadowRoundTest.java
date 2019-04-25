@@ -87,7 +87,7 @@ public class ShadowRoundTest
                             Collections.singletonList(new GossipDigest(to, hb.getGeneration(), hb.getHeartBeatVersion())),
                             Collections.singletonMap(to, state));
 
-                    logger.debug("Simulating digest ACK respond");
+                    logger.debug("Simulating digest ACK response");
                     return Message.builder(Verb.GOSSIP_DIGEST_ACK, payload)
                                   .from(to)
                                   .build();

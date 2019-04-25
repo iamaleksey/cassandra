@@ -177,7 +177,7 @@ class Connection implements MessageCallbacks, MessageProcessor
         // TODO: must discount those that have failed before sending
         else if (difference(id, oldest.getKey()) > 16)
         {
-            long waitUntil = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(100L);
+            long waitUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(10L);
             while (true)
             {
                 WaitQueue.Signal signal = waitQueue.register();

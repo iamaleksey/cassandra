@@ -60,8 +60,8 @@ public class MatcherResponse
     }
 
     /**
-     * Respond with provided message in respond to each intercepted outbound message.
-     * @param message   the message to use as mock respond from the cluster
+     * Respond with provided message in response to each intercepted outbound message.
+     * @param message   the message to use as mock response from the cluster
      */
     public MockMessagingSpy respond(Message<?> message)
     {
@@ -69,8 +69,8 @@ public class MatcherResponse
     }
 
     /**
-     * Respond a limited number of times with the provided message in respond to each intercepted outbound message.
-     * @param response  the message to use as mock respond from the cluster
+     * Respond a limited number of times with the provided message in response to each intercepted outbound message.
+     * @param response  the message to use as mock response from the cluster
      * @param limit     number of times to respond with message
      */
     public MockMessagingSpy respondN(final Message<?> response, int limit)
@@ -80,7 +80,7 @@ public class MatcherResponse
 
     /**
      * Respond with the message created by the provided function that will be called with each intercepted outbound message.
-     * @param fnResponse    function to call for creating respond based on intercepted message and target address
+     * @param fnResponse    function to call for creating response based on intercepted message and target address
      */
     public <T, S> MockMessagingSpy respond(BiFunction<Message<T>, InetAddressAndPort, Message<S>> fnResponse)
     {
@@ -91,7 +91,7 @@ public class MatcherResponse
      * Respond with message wrapping the payload object created by provided function called for each intercepted outbound message.
      * The target address from the intercepted message will automatically be used as the created message's sender address.
      * @param fnResponse    function to call for creating payload object based on intercepted message and target address
-     * @param verb          verb to use for respond message
+     * @param verb          verb to use for response message
      */
     public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Function<Message<T>, S> fnResponse, Verb verb)
     {
@@ -103,7 +103,7 @@ public class MatcherResponse
      * each intercepted outbound message. The target address from the intercepted message will automatically be used as the
      * created message's sender address.
      * @param fnResponse    function to call for creating payload object based on intercepted message and target address
-     * @param verb          verb to use for respond message
+     * @param verb          verb to use for response message
      */
     public <T, S> MockMessagingSpy respondNWithPayloadForEachReceiver(Function<Message<T>, S> fnResponse, Verb verb, int limit)
     {
@@ -119,9 +119,9 @@ public class MatcherResponse
 
     /**
      * Responds to each intercepted outbound message by creating a response message wrapping the next element consumed
-     * from the provided queue. No respond will be send when the queue has been exhausted.
+     * from the provided queue. No response will be send when the queue has been exhausted.
      * @param cannedResponses   prepared payload messages to use for responses
-     * @param verb              verb to use for respond message
+     * @param verb              verb to use for response message
      */
     public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(Queue<S> cannedResponses, Verb verb)
     {
@@ -132,7 +132,7 @@ public class MatcherResponse
      * Responds to each intercepted outbound message by creating a response message wrapping the next element consumed
      * from the provided queue. This method will block until queue elements are available.
      * @param cannedResponses   prepared payload messages to use for responses
-     * @param verb              verb to use for respond message
+     * @param verb              verb to use for response message
      */
     public <T, S> MockMessagingSpy respondWithPayloadForEachReceiver(BlockingQueue<S> cannedResponses, Verb verb)
     {
@@ -151,7 +151,7 @@ public class MatcherResponse
     /**
      * Respond a limited number of times with the message created by the provided function that will be called with
      * each intercepted outbound message.
-     * @param fnResponse    function to call for creating respond based on intercepted message and target address
+     * @param fnResponse    function to call for creating response based on intercepted message and target address
      */
     public <T, S> MockMessagingSpy respondN(BiFunction<Message<T>, InetAddressAndPort, Message<S>> fnResponse, int limit)
     {

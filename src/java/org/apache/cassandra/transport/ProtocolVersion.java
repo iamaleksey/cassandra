@@ -110,7 +110,7 @@ public enum ProtocolVersion implements Comparable<ProtocolVersion>
                     throw new ProtocolException(ProtocolVersion.invalidVersionMessage(versionNum), version);
             }
 
-            // If the version is invalid respond with the highest version that we support
+            // If the version is invalid response with the highest version that we support
             throw new ProtocolException(invalidVersionMessage(versionNum), MAX_SUPPORTED_VERSION);
         }
 
