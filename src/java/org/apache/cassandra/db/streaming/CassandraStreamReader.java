@@ -28,6 +28,7 @@ import com.google.common.collect.UnmodifiableIterator;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.util.TrackedDataInputPlus;
 import org.apache.cassandra.schema.TableId;
@@ -142,7 +143,7 @@ public class CassandraStreamReader implements IStreamReader
         }
     }
 
-    protected SerializationHeader getHeader(TableMetadata metadata)
+    protected SerializationHeader getHeader(TableMetadata metadata) throws UnknownColumnException
     {
         return header != null? header.toHeader(metadata) : null; //pre-3.0 sstable have no SerializationHeader
     }
