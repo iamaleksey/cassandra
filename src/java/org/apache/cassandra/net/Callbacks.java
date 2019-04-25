@@ -145,11 +145,6 @@ public class Callbacks
         callbacks.shutdownGracefully();
     }
 
-    void awaitTerminationUntil(long deadlineNanos) throws TimeoutException, InterruptedException
-    {
-        callbacks.awaitTerminationUntil(deadlineNanos);
-    }
-
     @VisibleForTesting
     public void unsafeClear()
     {

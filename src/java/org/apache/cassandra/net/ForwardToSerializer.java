@@ -122,16 +122,4 @@ public class ForwardToSerializer implements IVersionedSerializer<ForwardToContai
             return size;
         }
     }
-
-    public static ForwardToContainer fromBytes(byte[] bytes, int version)
-    {
-        try (DataInputBuffer input = new DataInputBuffer(bytes))
-        {
-            return instance.deserialize(input, version);
-        }
-        catch (IOException e)
-        {
-            throw new RuntimeException(e);
-        }
-    }
 }
