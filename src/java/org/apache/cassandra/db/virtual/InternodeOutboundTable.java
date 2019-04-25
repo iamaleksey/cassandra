@@ -46,8 +46,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
     private static final String EXPIRED_BYTES = "expired_bytes";
     private static final String ERROR_COUNT = "error_count";
     private static final String ERROR_BYTES = "error_bytes";
-    private static final String OVERFLOW_COUNT = "overflow_count";
-    private static final String OVERFLOW_BYTES = "overflow_bytes";
+    private static final String OVERLOAD_COUNT = "overload_count";
+    private static final String OVERLOAD_BYTES = "overload_bytes";
     private static final String ACTIVE_CONNECTION_COUNT = "active_connections";
     private static final String CONNECTION_ATTEMPTS = "connection_attempts";
     private static final String SUCCESSFUL_CONNECTION_ATTEMPTS = "successful_connection_attempts";
@@ -67,8 +67,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                            .addRegularColumn(EXPIRED_BYTES, LongType.instance)
                            .addRegularColumn(ERROR_COUNT, LongType.instance)
                            .addRegularColumn(ERROR_BYTES, LongType.instance)
-                           .addRegularColumn(OVERFLOW_COUNT, LongType.instance)
-                           .addRegularColumn(OVERFLOW_BYTES, LongType.instance)
+                           .addRegularColumn(OVERLOAD_COUNT, LongType.instance)
+                           .addRegularColumn(OVERLOAD_BYTES, LongType.instance)
                            .addRegularColumn(ACTIVE_CONNECTION_COUNT, LongType.instance)
                            .addRegularColumn(CONNECTION_ATTEMPTS, LongType.instance)
                            .addRegularColumn(SUCCESSFUL_CONNECTION_ATTEMPTS, LongType.instance)
@@ -111,8 +111,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                .column(EXPIRED_BYTES, sum(connections, OutboundConnection::expiredBytes))
                .column(ERROR_COUNT, sum(connections, OutboundConnection::errorCount))
                .column(ERROR_BYTES, sum(connections, OutboundConnection::errorBytes))
-               .column(OVERFLOW_COUNT, sum(connections, OutboundConnection::overloadBytes))
-               .column(OVERFLOW_BYTES, sum(connections, OutboundConnection::overloadCount))
+               .column(OVERLOAD_COUNT, sum(connections, OutboundConnection::overloadCount))
+               .column(OVERLOAD_BYTES, sum(connections, OutboundConnection::overloadBytes))
                .column(ACTIVE_CONNECTION_COUNT, sum(connections, c -> c.isConnected() ? 1 : 0))
                .column(CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::connectionAttempts))
                .column(SUCCESSFUL_CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::successfulConnections));
