@@ -206,20 +206,22 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
-    throws InvalidLegacyProtocolMagic
+    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
     {
         ByteBuffer buf = bytes.get();
-        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
 
-        long currentTimeNanos = ApproximateTime.nanoTime();
         long id = serializer.getId(buf, version);
+        Verb verb = serializer.getVerb(buf, version);
+        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
         long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
+        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
+        long currentTimeNanos = ApproximateTime.nanoTime();
         if (expiresAtNanos < currentTimeNanos)
         {
-            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            callbacks.onArrivedExpired(size, id, verb, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+
             receivedCount++;
             receivedBytes += size;
             bytes.skipBytes(size);
@@ -239,12 +241,10 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         receivedCount++;
         receivedBytes += size;
 
-        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
-
         if (size < largeThreshold)
             processContainedSmallMessage(bytes, size, id, expiresAtNanos, callBackOnFailure);
         else
-            processContainedLargeMessage(bytes, size, id, expiresAtNanos, callBackOnFailure);
+            processContainedLargeMessage(bytes, size, verb, id, createdAtNanos, expiresAtNanos, callBackOnFailure);
 
         return true;
     }
@@ -289,9 +289,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             processor.process(message, size, callbacks);
     }
 
-    private void processContainedLargeMessage(SharedBytes bytes, int size, long id, long expiresAtNanos, boolean callBackOnFailure)
+    private void processContainedLargeMessage(SharedBytes bytes, int size, Verb verb, long id, long createdAtNanos, long expiresAtNanos, boolean callBackOnFailure)
     {
-        new LargeMessage(id, size, expiresAtNanos, callBackOnFailure, bytes.sliceAndConsume(size).atomic()).scheduleCoprocessor();
+        new LargeMessage(id, verb, size, createdAtNanos, expiresAtNanos, callBackOnFailure, bytes.sliceAndConsume(size).atomic()).scheduleCoprocessor();
     }
 
     /*
@@ -303,20 +303,21 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         SharedBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
-        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
 
-        long currentTimeNanos = ApproximateTime.nanoTime();
         long id = serializer.getId(buf, version);
+        Verb verb = serializer.getVerb(buf, version);
+        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
         long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
         long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
+        long currentTimeNanos = ApproximateTime.nanoTime();
         if (expiresAtNanos < currentTimeNanos)
         {
-            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            callbacks.onArrivedExpired(size, id, verb, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
 
             receivedBytes += buf.remaining();
-            largeMessage = new LargeMessage(id, size, expiresAtNanos, callBackOnFailure, true);
+            largeMessage = new LargeMessage(id, verb, size, createdAtNanos, expiresAtNanos, callBackOnFailure, true);
             largeMessage.supply(frame);
             return true;
         }
@@ -332,7 +333,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
 
         receivedBytes += buf.remaining();
-        largeMessage = new LargeMessage(id, size, expiresAtNanos, callBackOnFailure, false);
+        largeMessage = new LargeMessage(id, verb, size, createdAtNanos, expiresAtNanos, callBackOnFailure, false);
         largeMessage.supply(frame);
         return true;
     }
@@ -624,6 +625,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         private final long id;
         private final int size;
+        private final Verb verb;
+        private final long createdAtNanos;
         private final long expiresAtNanos;
         private final boolean callBackOnFailure;
 
@@ -631,19 +634,21 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private int bytesReceived;
         private boolean isSkipping;
 
-        private LargeMessage(long id, int size, long expiresAtNanos, boolean callBackOnFailure, SharedBytes bytes)
-        {
-            this(id, size, expiresAtNanos, callBackOnFailure, false);
-            buffers = Collections.singletonList(bytes);
-        }
-
-        private LargeMessage(long id, int size, long expiresAtNanos, boolean callBackOnFailure, boolean isSkipping)
+        private LargeMessage(long id, Verb verb, int size, long createdAtNanos, long expiresAtNanos, boolean callBackOnFailure, boolean isSkipping)
         {
             this.id = id;
             this.size = size;
+            this.verb = verb;
+            this.createdAtNanos = createdAtNanos;
             this.expiresAtNanos = expiresAtNanos;
             this.callBackOnFailure = callBackOnFailure;
             this.isSkipping = isSkipping;
+        }
+
+        private LargeMessage(long id, Verb verb, int size, long createdAtNanos, long expiresAtNanos, boolean callBackOnFailure, SharedBytes bytes)
+        {
+            this(id, verb, size, createdAtNanos, expiresAtNanos, callBackOnFailure, false);
+            buffers = Collections.singletonList(bytes);
         }
 
         /*
@@ -653,6 +658,26 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             int frameSize = frame.contents.readableBytes();
             bytesReceived += frameSize;
+
+            /*
+             * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
+             * release capacity, and switch to skipping.
+             */
+            long currentTimeNanos = ApproximateTime.nanoTime();
+            if (!isSkipping && expiresAtNanos < currentTimeNanos)
+            {
+                discard();
+                isSkipping = true;
+
+                try
+                {
+                    callbacks.onArrivedExpired(size, id, verb, currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+                }
+                finally
+                {
+                    releaseCapacity(size);
+                }
+            }
 
             if (isSkipping)
                 frame.contents.skipBytes(frameSize);
@@ -670,6 +695,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 discard();
                 isSkipping = true;
+
+                try
+                {
+                    callbacks.onFailedDeserialize(size, id, expiresAtNanos, callBackOnFailure, new InvalidCrc(frame.readCRC, frame.computedCRC));
+                }
+                finally
+                {
+                    releaseCapacity(size);
+                }
             }
 
             return bytesReceived == size;
