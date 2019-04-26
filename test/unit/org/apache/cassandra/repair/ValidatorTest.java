@@ -131,7 +131,7 @@ public class ValidatorTest
         assertNotNull(tree.hash(new Range<>(min, min)));
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(Verb.REPAIR_REQ, message.verb);
+        assertEquals(Verb.REPAIR_REQ, message.verb());
         RepairMessage m = (RepairMessage) message.payload;
         assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
         assertEquals(desc, m.desc);
@@ -154,7 +154,7 @@ public class ValidatorTest
         validator.fail();
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(Verb.REPAIR_REQ, message.verb);
+        assertEquals(Verb.REPAIR_REQ, message.verb());
         RepairMessage m = (RepairMessage) message.payload;
         assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
         assertEquals(desc, m.desc);
@@ -212,7 +212,7 @@ public class ValidatorTest
         ValidationManager.instance.submitValidation(cfs, validator);
 
         Message message = outgoingMessageSink.get(TEST_TIMEOUT, TimeUnit.SECONDS);
-        assertEquals(Verb.REPAIR_REQ, message.verb);
+        assertEquals(Verb.REPAIR_REQ, message.verb());
         RepairMessage m = (RepairMessage) message.payload;
         assertEquals(RepairMessage.Type.VALIDATION_COMPLETE, m.messageType);
         assertEquals(desc, m.desc);

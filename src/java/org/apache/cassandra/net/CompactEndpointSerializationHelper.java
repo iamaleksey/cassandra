@@ -24,11 +24,10 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.IVersionedSerializer;
-import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.streaming.messages.StreamMessage;
+import org.apache.cassandra.utils.ByteBufferUtil;
 
 /*
  * As of version 4.0 the endpoint description includes a port number as an unsigned short
@@ -37,7 +36,7 @@ public class CompactEndpointSerializationHelper implements IVersionedSerializer<
 {
     public static final int MAXIMUM_SIZE = 19;
 
-    public static final IVersionedSerializer<InetAddressAndPort> instance = new CompactEndpointSerializationHelper();
+    public static final CompactEndpointSerializationHelper instance = new CompactEndpointSerializationHelper();
 
     private CompactEndpointSerializationHelper() {}
 
@@ -85,6 +84,30 @@ public class CompactEndpointSerializationHelper implements IVersionedSerializer<
                 throw new AssertionError("Unexpected size " + size);
 
         }
+    }
+
+    /**
+     * Extract {@link InetAddressAndPort} from the provided {@link ByteBuffer} without altering its state.
+     */
+    public InetAddressAndPort extract(ByteBuffer buf, int position, int version) throws IOException
+    {
+        int size = buf.get(position++) & 0xFF;
+        if (size == 4 || size == 16)
+        {
+            byte[] bytes = new byte[size];
+            ByteBufferUtil.copyBytes(buf, position, bytes, 0, size);
+            return InetAddressAndPort.getByAddress(bytes);
+        }
+        else if (size == 6 || size == 18)
+        {
+            byte[] bytes = new byte[size - 2];
+            ByteBufferUtil.copyBytes(buf, position, bytes, 0, size - 2);
+            position += (size - 2);
+            int port = buf.getShort(position) & 0xFFFF;
+            return InetAddressAndPort.getByAddressOverrideDefaults(InetAddress.getByAddress(bytes), bytes, port);
+        }
+
+        throw new AssertionError("Unexpected pre-4.0 InetAddressAndPort size " + size);
     }
 
     public long serializedSize(InetAddressAndPort from, int version)

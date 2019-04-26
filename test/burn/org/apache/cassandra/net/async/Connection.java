@@ -128,9 +128,9 @@ class Connection implements MessageCallbacks, MessageProcessor
         verifier.process(message, messageSize);
     }
 
-    public void onArrived(long id, long timeElapsed, TimeUnit units)
+    public void onArrived(Message.Header header, long timeElapsed, TimeUnit units)
     {
-        verifier.arrive(id);
+        verifier.arrive(header.id);
     }
 
     public void onProcessed(int messageSize)
@@ -138,16 +138,16 @@ class Connection implements MessageCallbacks, MessageProcessor
         throw new IllegalStateException();
     }
 
-    public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit timeUnit)
+    public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
     {
         controller.fail(messageSize);
-        verifier.processExpired(id, messageSize, timeElapsed, timeUnit);
+        verifier.processExpired(header.id, messageSize, timeElapsed, timeUnit);
     }
 
-    public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit timeUnit)
+    public void onArrivedExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
     {
         controller.fail(messageSize);
-        verifier.expireOnArrival(id, messageSize, timeElapsed, timeUnit);
+        verifier.expireOnArrival(header.id, messageSize, timeElapsed, timeUnit);
     }
 
     public void onSentExpired(int messageSize, long id, long timeElapsed, TimeUnit timeUnit)
@@ -156,7 +156,7 @@ class Connection implements MessageCallbacks, MessageProcessor
         verifier.expireOnSend(id, messageSize, timeElapsed, timeUnit);
     }
 
-    public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+    public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
     {
         controller.fail(messageSize);
     }

@@ -28,6 +28,6 @@ public class ReadRepairVerbHandler implements IVerbHandler<Mutation>
     public void doVerb(Message<Mutation> message)
     {
         message.payload.apply();
-        MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
+        MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
     }
 }

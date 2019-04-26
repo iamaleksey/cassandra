@@ -27,7 +27,6 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -244,7 +243,7 @@ final class HintsDispatcher implements AutoCloseable
 
         public void response(Message msg)
         {
-            HintsServiceMetrics.updateDelayMetrics(msg.from, ApproximateTime.currentTimeMillis() - this.hintCreationTime);
+            HintsServiceMetrics.updateDelayMetrics(msg.from(), ApproximateTime.currentTimeMillis() - this.hintCreationTime);
             outcome = Outcome.SUCCESS;
             condition.signalAll();
         }

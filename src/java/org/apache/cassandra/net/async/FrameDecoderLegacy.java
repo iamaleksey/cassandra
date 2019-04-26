@@ -46,7 +46,7 @@ class FrameDecoderLegacy extends FrameDecoder
         {
             if (stash != null)
             {
-                int length = Message.serializer.messageSize(stash, 0, stash.position(), messagingVersion);
+                int length = Message.serializer.inferMessageSize(stash, 0, stash.position(), messagingVersion);
                 while (length < 0)
                 {
                     if (!in.hasRemaining())
@@ -56,7 +56,7 @@ class FrameDecoderLegacy extends FrameDecoder
                         stash = ensureCapacity(stash, stash.capacity() * 2);
                     copyToSize(in, stash, stash.capacity());
 
-                    length = Message.serializer.messageSize(stash, 0, stash.position(), messagingVersion);
+                    length = Message.serializer.inferMessageSize(stash, 0, stash.position(), messagingVersion);
                     if (length >= 0 && length < stash.position())
                     {
                         int excess = stash.position() - length;
@@ -121,7 +121,7 @@ class FrameDecoderLegacy extends FrameDecoder
 
             while (true)
             {
-                int length = Message.serializer.messageSize(in, end, limit, messagingVersion);
+                int length = Message.serializer.inferMessageSize(in, end, limit, messagingVersion);
 
                 if (length >= 0)
                 {

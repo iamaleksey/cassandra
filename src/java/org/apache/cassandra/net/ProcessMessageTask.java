@@ -52,17 +52,17 @@ public class ProcessMessageTask implements Runnable
     {
         long approxTimeNanos = ApproximateTime.nanoTime();
 
-        MessagingService.instance().metrics.addQueueWaitTime(message.verb, approxTimeNanos - approxCreationTimeNanos, NANOSECONDS);
+        MessagingService.instance().metrics.addQueueWaitTime(message.verb(), approxTimeNanos - approxCreationTimeNanos, NANOSECONDS);
 
-        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos))
+        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos()))
         {
-            callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.header, approxTimeNanos - message.createdAtNanos(), NANOSECONDS);
             return;
         }
 
         try
         {
-            message.process();
+            message.verb().handler().doVerb(message);
         }
         catch (IOException ioe)
         {
@@ -90,7 +90,7 @@ public class ProcessMessageTask implements Runnable
         if (message.callBackOnFailure())
         {
             RequestFailureReason reason = RequestFailureReason.forException(t);
-            MessagingService.instance().sendResponse(message.failureResponse(reason), message.from);
+            MessagingService.instance().sendResponse(message.failureResponse(reason), message.from());
         }
     }
 }

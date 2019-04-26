@@ -46,10 +46,10 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         InetAddressAndPort respondToAddress;
         if (from == null)
         {
-            respondToAddress = message.from;
+            respondToAddress = message.from();
             ForwardToContainer forwardTo = message.forwardTo();
             if (forwardTo != null)
-                forwardToLocalNodes(message.payload, message.verb, forwardTo, message.from);
+                forwardToLocalNodes(message.payload, message.verb(), forwardTo, message.from());
         }
         else
         {

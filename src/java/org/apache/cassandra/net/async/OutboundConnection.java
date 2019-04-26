@@ -48,7 +48,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -361,7 +360,7 @@ public class OutboundConnection
                           FBUtilities.prettyPrintMemory(pendingBytes()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
-        MessagingService.instance().callbacks.removeAndExpire(msg.id);
+        MessagingService.instance().callbacks.removeAndExpire(msg.id());
     }
 
     /**
@@ -374,8 +373,8 @@ public class OutboundConnection
         releaseCapacity(1, canonicalSize(msg));
         expiredCount += 1;
         expiredBytes += canonicalSize(msg);
-        noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), msg.verb);
-        MessagingService.instance().callbacks.removeAndExpire(msg.id);
+        noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), msg.verb());
+        MessagingService.instance().callbacks.removeAndExpire(msg.id());
         return true;
     }
 
@@ -390,8 +389,8 @@ public class OutboundConnection
         releaseCapacity(1, canonicalSize(msg));
         errorCount += 1;
         errorBytes += canonicalSize(msg);
-        logger.warn("{} dropping message of type {} due to error", id(), msg.verb, t);
-        MessagingService.instance().callbacks.removeAndExpire(msg.id);
+        logger.warn("{} dropping message of type {} due to error", id(), msg.verb(), t);
+        MessagingService.instance().callbacks.removeAndExpire(msg.id());
     }
 
     /**
@@ -402,7 +401,7 @@ public class OutboundConnection
     private void onDiscardOnClosing(Message<?> msg)
     {
         releaseCapacity(1, canonicalSize(msg));
-        MessagingService.instance().callbacks.removeAndExpire(msg.id);
+        MessagingService.instance().callbacks.removeAndExpire(msg.id());
     }
 
     /**

@@ -24,6 +24,6 @@ public class PingVerbHandler implements IVerbHandler<PingRequest>
     @Override
     public void doVerb(Message<PingRequest> message)
     {
-        MessagingService.instance().sendResponse(message.emptyResponse(), message.from, message.payload.connectionType);
+        MessagingService.instance().sendResponse(message.emptyResponse(), message.from(), message.payload.connectionType);
     }
 }

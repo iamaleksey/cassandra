@@ -128,7 +128,7 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
     public void response(Message<ReadResponse> message)
     {
         resolver.preprocess(message);
-        int n = waitingFor(message.from)
+        int n = waitingFor(message.from())
               ? recievedUpdater.incrementAndGet(this)
               : received;
 

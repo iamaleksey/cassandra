@@ -34,8 +34,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 
 public final class InboundMessageHandlers
@@ -202,10 +202,11 @@ public final class InboundMessageHandlers
     private static MessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
     {
         final MessagingMetrics.Updater latencyUpdater = MessagingService.instance().metrics.getForPeer(peer);
+
         return new MessageCallbacks()
         {
             @Override
-            public void onArrived(long id, long timeElapsed, TimeUnit unit)
+            public void onArrived(Header header, long timeElapsed, TimeUnit unit)
             {
                 latencyUpdater.addTimeTaken(timeElapsed, unit);
             }
@@ -218,24 +219,24 @@ public final class InboundMessageHandlers
             }
 
             @Override
-            public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.removePending(messageSize);
                 counters.addExpired(messageSize);
 
-                MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+                MessagingService.instance().droppedMessages.incrementWithLatency(header.verb, timeElapsed, unit);
             }
 
             @Override
-            public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.addExpired(messageSize);
 
-                MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeElapsed, unit);
+                MessagingService.instance().droppedMessages.incrementWithLatency(header.verb, timeElapsed, unit);
             }
 
             @Override
-            public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+            public void onFailedDeserialize(int messageSize, Header header, Throwable t)
             {
                 counters.addError(messageSize);
 
@@ -243,9 +244,9 @@ public final class InboundMessageHandlers
                  * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
                  * on the other end to expire.
                  */
-                if (callBackOnFailure)
+                if (header.callBackOnFailure())
                 {
-                    Message response = Message.failureResponse(id, expiresAtNanos, RequestFailureReason.forException(t));
+                    Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(t));
                     MessagingService.instance().sendOneWay(response, peer);
                 }
             }

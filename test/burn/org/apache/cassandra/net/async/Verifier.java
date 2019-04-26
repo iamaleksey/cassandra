@@ -151,7 +151,7 @@ public class Verifier
         final Message<?> message;
         EnqueueMessageEvent(EventType type, Verifier verifier, Message<?> message)
         {
-            super(type, verifier, message.id);
+            super(type, verifier, message.id());
             this.message = message;
         }
     }
@@ -188,7 +188,7 @@ public class Verifier
         final Message<?> message;
         ProcessMessageEvent(long at, Message<?> message, int size)
         {
-            super(PROCESS, at, message.id);
+            super(PROCESS, at, message.id());
             this.message = message;
             this.size = size;
         }
@@ -309,8 +309,8 @@ public class Verifier
                         MessageState m = processOutOfOrder.get(0);
                         if (now - m.lastUpdateNanos > TimeUnit.SECONDS.toNanos(10L))
                         {
-                            fail("Unreasonably long period spent waiting for out-of-order deser/delivery of received message %d", m.message.id);
-                            messages.remove(m.message.id);
+                            fail("Unreasonably long period spent waiting for out-of-order deser/delivery of received message %d", m.message.id());
+                            messages.remove(m.message.id());
                             processOutOfOrder.remove(0);
                         }
                         else break;
@@ -362,7 +362,7 @@ public class Verifier
                             MessageState pm = enqueue.get(i);
                             if (pm.enqueueEnd != 0)
                                 fail("Invalid order of events: %d (%d, %d) enqueued strictly before %d (%d, %d), but serialized after",
-                                     pm.message.id, pm.enqueueEnd, pm.serialize, m.message.id, m.enqueueEnd, m.serialize);
+                                     pm.message.id(), pm.enqueueEnd, pm.serialize, m.message.id(), m.enqueueEnd, m.serialize);
                         }
                         enqueue.remove(mi);
                         serialize.add(m);
@@ -381,7 +381,7 @@ public class Verifier
                         {
                             MessageState pm = serialize.get(i);
                             fail("Invalid order of events: %d (%d, %d) serialized strictly before %d (%d, %d), but arrived after",
-                                 pm.message.id, pm.serialize, pm.arrive, m.message.id, m.serialize, m.arrive);
+                                 pm.message.id(), pm.serialize, pm.arrive, m.message.id(), m.serialize, m.arrive);
                         }
                         serialize.remove(mi);
                         arrive.add(m);
@@ -408,7 +408,7 @@ public class Verifier
                                 if (pm.processOnEventLoop)
                                 {
                                     fail("Invalid order of events: %d (%d, %d) arrived strictly before %d (%d, %d), but deserialized after",
-                                         pm.message.id, pm.arrive, pm.deserialize, m.message.id, m.arrive, m.deserialize);
+                                         pm.message.id(), pm.arrive, pm.deserialize, m.message.id(), m.arrive, m.deserialize);
                                 }
                             }
                             deserializeOnEventLoop.add(m);
@@ -457,8 +457,8 @@ public class Verifier
                             {
                                 MessageState pm = deserializeOnEventLoop.get(i);
                                 fail("Invalid order of events: %d (%d, %d) deserialized strictly before %d (%d, %d), but processed after",
-                                     pm.message.id, pm.arrive, pm.deserialize, m.message.id, m.arrive, m.deserialize);
-                                messages.remove(pm.message.id);
+                                     pm.message.id(), pm.arrive, pm.deserialize, m.message.id(), m.arrive, m.deserialize);
+                                messages.remove(pm.message.id());
                             }
                             deserializeOnEventLoop.clearHead(mi + 1);
                         }
@@ -486,17 +486,17 @@ public class Verifier
                         assert nextId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         if (m.state != e.expectState)
-                            fail("Invalid expiry of %d: expected message in %s, found %s", m.message.id, e.expectState, m.state);
+                            fail("Invalid expiry of %d: expected message in %s, found %s", m.message.id(), e.expectState, m.state);
 
                         now = System.nanoTime();
-                        if (m.message.expiresAtNanos > now)
+                        if (m.message.expiresAtNanos() > now)
                         {
                             // TODO: even with new ApproximateTime comparison methods, there's no strict guarantees here given NTP
                             //       we could fix the conversion AlmostSameTime for an entire run, which should suffice
-                            fail("Invalid expiry of %d: expiry should occur in %dms; event believes %dms have elapsed, and %dms have actually elapsed", m.message.id,
-                                 NANOSECONDS.toMillis(m.message.expiresAtNanos - m.message.createdAtNanos),
+                            fail("Invalid expiry of %d: expiry should occur in %dms; event believes %dms have elapsed, and %dms have actually elapsed", m.message.id(),
+                                 NANOSECONDS.toMillis(m.message.expiresAtNanos() - m.message.createdAtNanos()),
                                  e.timeUnit.toMillis(e.timeElapsed),
-                                 NANOSECONDS.toMillis(now - m.message.createdAtNanos));
+                                 NANOSECONDS.toMillis(now - m.message.createdAtNanos()));
                         }
 
                         switch (m.state)

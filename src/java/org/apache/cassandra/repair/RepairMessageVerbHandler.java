@@ -80,14 +80,14 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                         columnFamilyStores.add(columnFamilyStore);
                     }
                     ActiveRepairService.instance.registerParentRepairSession(prepareMessage.parentRepairSession,
-                                                                             message.from,
+                                                                             message.from(),
                                                                              columnFamilyStores,
                                                                              prepareMessage.ranges,
                                                                              prepareMessage.isIncremental,
                                                                              prepareMessage.timestamp,
                                                                              prepareMessage.isGlobal,
                                                                              prepareMessage.previewKind);
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
+                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
                     break;
 
                 case SNAPSHOT:
@@ -110,8 +110,8 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     {
                         repairManager.snapshot(desc.parentSessionId.toString(), desc.ranges, true);
                     }
-                    logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from);
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
+                    logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from());
+                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
                     break;
 
                 case VALIDATION_REQUEST:
@@ -122,12 +122,12 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     if (store == null)
                     {
                         logger.error("Table {}.{} was dropped during snapshot phase of repair", desc.keyspace, desc.columnFamily);
-                        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc)), message.from);
+                        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc)), message.from());
                         return;
                     }
 
                     ActiveRepairService.instance.consistent.local.maybeSetRepairing(desc.parentSessionId);
-                    Validator validator = new Validator(desc, message.from, validationRequest.nowInSec,
+                    Validator validator = new Validator(desc, message.from(), validationRequest.nowInSec,
                                                         isIncremental(desc.parentSessionId), previewKind(desc.parentSessionId));
                     ValidationManager.instance.submitValidation(store, validator);
                     break;
@@ -166,11 +166,11 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     logger.debug("cleaning up repair");
                     CleanupMessage cleanup = (CleanupMessage) message.payload;
                     ActiveRepairService.instance.removeParentRepairSession(cleanup.parentRepairSession);
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
+                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
                     break;
 
                 case CONSISTENT_REQUEST:
-                    ActiveRepairService.instance.consistent.local.handlePrepareMessage(message.from, (PrepareConsistentRequest) message.payload);
+                    ActiveRepairService.instance.consistent.local.handlePrepareMessage(message.from(), (PrepareConsistentRequest) message.payload);
                     break;
 
                 case CONSISTENT_RESPONSE:
@@ -178,7 +178,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     break;
 
                 case FINALIZE_PROPOSE:
-                    ActiveRepairService.instance.consistent.local.handleFinalizeProposeMessage(message.from, (FinalizePropose) message.payload);
+                    ActiveRepairService.instance.consistent.local.handleFinalizeProposeMessage(message.from(), (FinalizePropose) message.payload);
                     break;
 
                 case FINALIZE_PROMISE:
@@ -186,25 +186,25 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     break;
 
                 case FINALIZE_COMMIT:
-                    ActiveRepairService.instance.consistent.local.handleFinalizeCommitMessage(message.from, (FinalizeCommit) message.payload);
+                    ActiveRepairService.instance.consistent.local.handleFinalizeCommitMessage(message.from(), (FinalizeCommit) message.payload);
                     break;
 
                 case FAILED_SESSION:
                     FailSession failure = (FailSession) message.payload;
                     ActiveRepairService.instance.consistent.coordinated.handleFailSessionMessage(failure);
-                    ActiveRepairService.instance.consistent.local.handleFailSessionMessage(message.from, failure);
+                    ActiveRepairService.instance.consistent.local.handleFailSessionMessage(message.from(), failure);
                     break;
 
                 case STATUS_REQUEST:
-                    ActiveRepairService.instance.consistent.local.handleStatusRequest(message.from, (StatusRequest) message.payload);
+                    ActiveRepairService.instance.consistent.local.handleStatusRequest(message.from(), (StatusRequest) message.payload);
                     break;
 
                 case STATUS_RESPONSE:
-                    ActiveRepairService.instance.consistent.local.handleStatusResponse(message.from, (StatusResponse) message.payload);
+                    ActiveRepairService.instance.consistent.local.handleStatusResponse(message.from(), (StatusResponse) message.payload);
                     break;
 
                 default:
-                    ActiveRepairService.instance.handleMessage(message.from, message.payload);
+                    ActiveRepairService.instance.handleMessage(message.from(), message.payload);
                     break;
             }
         }
@@ -221,6 +221,6 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     {
         logger.error(errorMessage);
         Message reply = respondTo.failureResponse(RequestFailureReason.UNKNOWN);
-        MessagingService.instance().sendResponse(reply, respondTo.from);
+        MessagingService.instance().sendResponse(reply, respondTo.from());
     }
 }
