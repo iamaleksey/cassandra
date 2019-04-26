@@ -44,27 +44,29 @@ public class ExpiringMap<K, V>
     {
         public final T value;
         public final long expiresAtNanos;
-        public final long createdAt;
+        public final long createdAtNanos;
 
         private CacheableObject(T value, long timeout, TimeUnit unit)
         {
-            assert value != null;
-            this.value = value;
-            this.createdAt = Clock.instance.nanoTime();
-            this.expiresAtNanos = createdAt + unit.toNanos(timeout);
+            this(value, Clock.instance.nanoTime(), timeout, unit);
         }
 
-        private CacheableObject(T value, long expiresAtNanos)
+        private CacheableObject(T value, long createdAtNanos, long timeout, TimeUnit unit)
+        {
+            this(value, createdAtNanos, createdAtNanos + unit.toNanos(timeout));
+        }
+
+        private CacheableObject(T value, long createdAtNanos, long expiresAtNanos)
         {
             assert value != null;
             this.value = value;
+            this.createdAtNanos = createdAtNanos;
             this.expiresAtNanos = expiresAtNanos;
-            this.createdAt = Clock.instance.nanoTime();
         }
 
         public long timeout()
         {
-            return expiresAtNanos - createdAt;
+            return expiresAtNanos - createdAtNanos;
         }
 
         private boolean isReadyToDieAt(long atNano)
@@ -182,7 +184,7 @@ public class ExpiringMap<K, V>
         return (previous == null) ? null : previous.value;
     }
 
-    public V putWithExpiration(K key, V value, long expiresAtNanos)
+    public V put(K key, V value, long createdAtNanos, long expiresAtNanos)
     {
         if (shutdown)
         {
@@ -192,7 +194,7 @@ public class ExpiringMap<K, V>
             // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
             Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, NANOSECONDS);
         }
-        CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, expiresAtNanos));
+        CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, createdAtNanos, expiresAtNanos));
         return (previous == null) ? null : previous.value;
     }
 
@@ -224,7 +226,7 @@ public class ExpiringMap<K, V>
     public long getCreationTimeNanos(K key)
     {
         CacheableObject<V> co = cache.get(key);
-        return co == null ? 0 : co.createdAt;
+        return co == null ? 0 : co.createdAtNanos;
     }
 
     public int size()

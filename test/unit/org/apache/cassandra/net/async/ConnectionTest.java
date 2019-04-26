@@ -358,7 +358,7 @@ public class ConnectionTest
                 {
                     return false;
                 }
-            }, message, endpoint, Long.MAX_VALUE);
+            }, message, endpoint);
             message = message.withId(id);
             AtomicInteger delivered = new AtomicInteger();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()

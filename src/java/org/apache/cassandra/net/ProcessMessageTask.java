@@ -36,33 +36,27 @@ public class ProcessMessageTask implements Runnable
 
     private final Message message;
     private final int messageSize;
-    private final long enqueueTime;
+    private final long approxCreationTimeNanos = ApproximateTime.nanoTime();
 
     private final MessageCallbacks callbacks;
 
-    public ProcessMessageTask(Message message)
-    {
-        this(message, 0, MessageCallbacks.NOOP);
-    }
-
-    ProcessMessageTask(Message message, int messageSize, MessageCallbacks callbacks)
+    public ProcessMessageTask(Message message, int messageSize, MessageCallbacks callbacks)
     {
         assert message != null;
         this.message = message;
         this.messageSize = messageSize;
-        this.enqueueTime = ApproximateTime.nanoTime();
         this.callbacks = callbacks;
     }
 
     public void run()
     {
-        long nowNanos = ApproximateTime.nanoTime();
+        long approxTimeNanos = ApproximateTime.nanoTime();
 
-        MessagingService.instance().metrics.addQueueWaitTime(message.verb, nowNanos - enqueueTime, NANOSECONDS);
+        MessagingService.instance().metrics.addQueueWaitTime(message.verb, approxTimeNanos - approxCreationTimeNanos, NANOSECONDS);
 
-        if (nowNanos > message.expiresAtNanos)
+        if (approxTimeNanos > message.expiresAtNanos)
         {
-            callbacks.onExpired(messageSize, message.id, message.verb, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 

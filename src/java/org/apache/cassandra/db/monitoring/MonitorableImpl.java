@@ -24,9 +24,9 @@ public abstract class MonitorableImpl implements Monitorable
 {
     private MonitoringState state;
     private boolean isSlow;
-    private long constructionTimeNanos = -1;
-    private long timeout;
-    private long slowTimeout;
+    private long approxCreationTimeNanos = -1;
+    private long timeoutNanos;
+    private long slowTimeoutNanos;
     private boolean isCrossNode;
 
     protected MonitorableImpl()
@@ -40,23 +40,23 @@ public abstract class MonitorableImpl implements Monitorable
      * is too complex, it would require passing new parameters to all serializers
      * or specializing the serializers to accept these message properties.
      */
-    public void setMonitoringTime(long constructionTime, boolean isCrossNode, long timeout, long slowTimeout)
+    public void setMonitoringTime(long approxCreationTimeNanos, boolean isCrossNode, long timeoutNanos, long slowTimeoutNanos)
     {
-        assert constructionTime >= 0;
-        this.constructionTimeNanos = constructionTime;
+        assert approxCreationTimeNanos >= 0;
+        this.approxCreationTimeNanos = approxCreationTimeNanos;
         this.isCrossNode = isCrossNode;
-        this.timeout = timeout;
-        this.slowTimeout = slowTimeout;
+        this.timeoutNanos = timeoutNanos;
+        this.slowTimeoutNanos = slowTimeoutNanos;
     }
 
-    public long constructionTimeNanos()
+    public long creationTimeNanos()
     {
-        return constructionTimeNanos;
+        return approxCreationTimeNanos;
     }
 
     public long timeoutNanos()
     {
-        return timeout;
+        return timeoutNanos;
     }
 
     public boolean isCrossNode()
@@ -66,7 +66,7 @@ public abstract class MonitorableImpl implements Monitorable
 
     public long slowTimeoutNanos()
     {
-        return slowTimeout;
+        return slowTimeoutNanos;
     }
 
     public boolean isInProgress()
@@ -97,7 +97,7 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (constructionTimeNanos >= 0)
+            if (approxCreationTimeNanos >= 0)
                 MonitoringTask.addFailedOperation(this, ApproximateTime.nanoTime());
 
             state = MonitoringState.ABORTED;
@@ -111,7 +111,7 @@ public abstract class MonitorableImpl implements Monitorable
     {
         if (state == MonitoringState.IN_PROGRESS)
         {
-            if (isSlow && slowTimeout > 0 && constructionTimeNanos >= 0)
+            if (isSlow && slowTimeoutNanos > 0 && approxCreationTimeNanos >= 0)
                 MonitoringTask.addSlowOperation(this, ApproximateTime.nanoTime());
 
             state = MonitoringState.COMPLETED;
@@ -123,15 +123,15 @@ public abstract class MonitorableImpl implements Monitorable
 
     private void check()
     {
-        if (constructionTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
+        if (approxCreationTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
             return;
 
-        long elapsed = ApproximateTime.nanoTime() - constructionTimeNanos;
+        long minElapsed = ApproximateTime.minElapsedSinceNanoTime(approxCreationTimeNanos);
 
-        if (elapsed >= slowTimeout && !isSlow)
+        if (minElapsed >= slowTimeoutNanos && !isSlow)
             isSlow = true;
 
-        if (elapsed >= timeout)
+        if (minElapsed >= timeoutNanos)
             abort();
     }
 }

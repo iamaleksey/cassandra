@@ -26,6 +26,10 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
+import org.apache.cassandra.config.DatabaseDescriptor;
+
+import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 /**
  * This class provides approximate time utilities:
@@ -37,7 +41,7 @@ import org.apache.cassandra.config.Config;
 public class ApproximateTime
 {
     private static final Logger logger = LoggerFactory.getLogger(ApproximateTime.class);
-    private static final int ALMOST_NOW_UPDATE_INTERVAL_MS = Math.max(5, Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "approximate_time_precision_ms", "10")));
+    private static final int ALMOST_NOW_UPDATE_INTERVAL_MS = Math.max(1, Integer.parseInt(System.getProperty(Config.PROPERTY_PREFIX + "approximate_time_precision_ms", "2")));
     private static final String CONVERSION_UPDATE_INTERVAL_PROPERTY = Config.PROPERTY_PREFIX + "NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL";
     private static final long ALMOST_SAME_TIME_UPDATE_INTERVAL_MS = Long.getLong(CONVERSION_UPDATE_INTERVAL_PROPERTY, 10000);
 
@@ -61,7 +65,7 @@ public class ApproximateTime
 
         public long toNanoTime(long currentTimeMillis)
         {
-            return nanos + TimeUnit.MILLISECONDS.toNanos(currentTimeMillis - millis);
+            return nanos + MILLISECONDS.toNanos(currentTimeMillis - millis);
         }
     }
 
@@ -116,10 +120,10 @@ public class ApproximateTime
         refreshAlmostSameTime.run();
 
         logger.info("Scheduling approximate time-check task with a precision of {} milliseconds", ALMOST_NOW_UPDATE_INTERVAL_MS);
-        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostNow, ALMOST_NOW_UPDATE_INTERVAL_MS, ALMOST_NOW_UPDATE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostNow, ALMOST_NOW_UPDATE_INTERVAL_MS, ALMOST_NOW_UPDATE_INTERVAL_MS, MILLISECONDS);
 
         logger.info("Scheduling approximate time conversion task with an interval of {} milliseconds", ALMOST_SAME_TIME_UPDATE_INTERVAL_MS);
-        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostSameTime, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, TimeUnit.MILLISECONDS);
+        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostSameTime, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, MILLISECONDS);
     }
 
     /**
@@ -145,14 +149,19 @@ public class ApproximateTime
         return almostNowNanos;
     }
 
+    public static long almostNowPrecision(TimeUnit units)
+    {
+        return units.convert(ALMOST_NOW_UPDATE_INTERVAL_MS, MILLISECONDS);
+    }
+
     public static long currentTimeMillisPrecision()
     {
-        return 2 * ALMOST_NOW_UPDATE_INTERVAL_MS;
+        return almostNowPrecision(MILLISECONDS);
     }
 
     public static long nanoTimePrecision()
     {
-        return 2 * TimeUnit.MILLISECONDS.toNanos(ALMOST_NOW_UPDATE_INTERVAL_MS);
+        return almostNowPrecision(NANOSECONDS);
     }
 
     /*
@@ -182,6 +191,16 @@ public class ApproximateTime
     public static long conversionErrorNanos()
     {
         return almostSameTime.error;
+    }
+
+    public static boolean atLeastElapsedSinceNanoTime(long approxNanoTime, long elapsed, TimeUnit elapsedUnits)
+    {
+        return nanoTime() - approxNanoTime > elapsedUnits.toNanos(elapsed) + nanoTimePrecision();
+    }
+
+    public static long minElapsedSinceNanoTime(long approxNanoTime)
+    {
+        return (nanoTime() - approxNanoTime) - nanoTimePrecision();
     }
 
 }
