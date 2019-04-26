@@ -241,9 +241,9 @@ public class ApproximateTime
         return (nanoTime() - approxInstantNanos) - nanoTimePrecision();
     }
 
-    public static boolean haveElapsedSinceNanoTime(long approxInstantNanos, long elapsed, TimeUnit elapsedUnits)
+    public static boolean isAfterNanoTime(long approxInstantNanos)
     {
-        return nanoTime() - approxInstantNanos > elapsedUnits.toNanos(elapsed) + nanoTimePrecision();
+        return isAfterNanoTime(nanoTime(), approxInstantNanos);
     }
 
     public static boolean isAfterNanoTime(long approxCurrentTimeNanos, long approxInstantNanos)

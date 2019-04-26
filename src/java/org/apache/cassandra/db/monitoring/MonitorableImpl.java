@@ -126,12 +126,12 @@ public abstract class MonitorableImpl implements Monitorable
         if (approxCreationTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
             return;
 
-        long minElapsed = ApproximateTime.minElapsedSinceNanoTime(approxCreationTimeNanos);
+        long minElapsedNanos = ApproximateTime.minElapsedSinceNanoTime(approxCreationTimeNanos);
 
-        if (minElapsed >= slowTimeoutNanos && !isSlow)
+        if (minElapsedNanos >= slowTimeoutNanos && !isSlow)
             isSlow = true;
 
-        if (minElapsed >= timeoutNanos)
+        if (minElapsedNanos >= timeoutNanos)
             abort();
     }
 }
