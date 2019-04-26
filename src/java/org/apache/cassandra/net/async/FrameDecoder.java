@@ -139,6 +139,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     private boolean isActive;
     private Channel channel;
+    private ChannelHandlerContext closed;
     private FrameProcessor processor = NO_PROCESSOR;
 
     abstract void decode(Collection<Frame> into, SharedBytes bytes);
@@ -170,7 +171,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         if (deliver(processor))
         {
             isActive = true;
-            channel.read();
+            onExhausted();
         }
     }
 
@@ -190,9 +191,18 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      * For use by InboundMessageHandler (or other upstream handlers) that want to permanently
      * stop receiving frames, e.g. because of an exception caught.
      */
-    void deactivate()
+    void discard()
     {
+        isActive = false;
         processor = CLOSED_PROCESSOR;
+        if (stash != null)
+        {
+            ByteBuffer bytes = stash;
+            stash = null;
+            BufferPool.put(bytes);
+        }
+        while (!frames.isEmpty())
+            frames.poll().release();
     }
 
     /**
@@ -224,9 +234,21 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         if (isActive)
         {
-            if (deliver(processor)) channel.read();
+            if (deliver(processor)) onExhausted();
             else isActive = false;
         }
+    }
+
+    /**
+     * Only to be invoked when frames.isEmpty().
+     *
+     * If we have been closed, we will now propagate up the channelInactive notification,
+     * and otherwise we will ask the channel for more data.
+     */
+    private void onExhausted()
+    {
+        if (isClosed()) close();
+        else channel.read();
     }
 
     /**
@@ -261,19 +283,6 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         stash = out;
     }
 
-    void discard()
-    {
-        channel = null;
-        if (stash != null)
-        {
-            ByteBuffer bytes = stash;
-            stash = null;
-            BufferPool.put(bytes);
-        }
-        while (!frames.isEmpty())
-            frames.poll().release();
-    }
-
     public void handlerAdded(ChannelHandlerContext ctx)
     {
         channel = ctx.channel();
@@ -282,14 +291,22 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     public void channelInactive(ChannelHandlerContext ctx)
     {
-        discard();
-
-        ctx.fireChannelInactive();
+        closed = ctx;
+        if (frames.isEmpty())
+            close();
     }
 
-    public void handlerRemoved(ChannelHandlerContext ctx)
+    private boolean isClosed()
+    {
+        return closed != null;
+    }
+
+    private void close()
     {
         discard();
+        channel = null;
+        closed.fireChannelInactive();
+        closed = null;
     }
 
     /**

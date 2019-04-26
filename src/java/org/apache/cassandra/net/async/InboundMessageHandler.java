@@ -628,7 +628,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void exceptionCaught(Throwable cause)
     {
-        decoder.deactivate();
+        decoder.discard();
 
         JVMStabilityInspector.inspectThrowable(cause);
 
