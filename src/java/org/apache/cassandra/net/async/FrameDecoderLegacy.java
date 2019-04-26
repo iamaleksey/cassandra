@@ -21,14 +21,12 @@ package org.apache.cassandra.net.async;
 import java.nio.ByteBuffer;
 import java.util.Collection;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.net.Message;
 
 import static java.lang.Math.max;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
-@ChannelHandler.Sharable
 class FrameDecoderLegacy extends FrameDecoder
 {
     private final int messagingVersion;
