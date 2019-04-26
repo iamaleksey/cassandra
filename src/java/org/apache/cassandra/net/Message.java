@@ -574,7 +574,7 @@ public class Message<T>
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
             out.writeInt((int) ApproximateTime.toCurrentTimeMillis(message.createdAtNanos));
-            out.writeUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
+            out.writeUnsignedVInt(1 + NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             out.writeUnsignedVInt(message.verb.id);
 
             out.writeUnsignedVInt(message.flags);
@@ -611,7 +611,7 @@ public class Message<T>
 
             size += TypeSizes.sizeofUnsignedVInt(message.id);
             size += CREATION_TIME_SIZE;
-            size += TypeSizes.sizeofUnsignedVInt(NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
+            size += TypeSizes.sizeofUnsignedVInt(1 + NANOSECONDS.toMillis(message.expiresAtNanos - message.createdAtNanos));
             size += TypeSizes.sizeofUnsignedVInt(message.verb.id);
 
             size += TypeSizes.sizeofUnsignedVInt(message.flags);

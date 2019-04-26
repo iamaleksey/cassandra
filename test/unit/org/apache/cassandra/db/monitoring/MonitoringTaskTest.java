@@ -250,7 +250,7 @@ public class MonitoringTaskTest
             assertFalse(operation2.isAborted());
             assertTrue(operation2.isCompleted());
 
-            Thread.sleep(ApproximateTime.currentTimeMillisPrecision() + 500);
+            Thread.sleep(2 * ApproximateTime.currentTimeMillisPrecision() + 500);
             assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
             assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
         }

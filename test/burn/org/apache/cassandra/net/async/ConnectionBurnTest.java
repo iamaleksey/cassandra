@@ -51,14 +51,22 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
 public class ConnectionBurnTest extends ConnectionTest
 {
+    static
+    {
+        // stop updating ALMOST_SAME_TIME so that we get consistent message expiration times
+        ApproximateTime.stop(ALMOST_SAME_TIME);
+    }
+
     static class Inbound
     {
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;

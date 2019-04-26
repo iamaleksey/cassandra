@@ -54,7 +54,7 @@ public class ProcessMessageTask implements Runnable
 
         MessagingService.instance().metrics.addQueueWaitTime(message.verb, approxTimeNanos - approxCreationTimeNanos, NANOSECONDS);
 
-        if (approxTimeNanos > message.expiresAtNanos)
+        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos))
         {
             callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
             return;

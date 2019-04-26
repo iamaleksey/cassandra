@@ -464,7 +464,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
         // double-check if the message is still unexpired at this point
         long approxTimeNanos = ApproximateTime.nanoTime();
-        if (approxTimeNanos > message.expiresAtNanos || !messageSink.allowInbound(message))
+        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos) || !messageSink.allowInbound(message))
         {
             callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
             return;

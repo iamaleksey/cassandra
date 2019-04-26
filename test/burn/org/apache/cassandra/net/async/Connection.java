@@ -138,22 +138,25 @@ class Connection implements MessageCallbacks, MessageProcessor
         throw new IllegalStateException();
     }
 
-    public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+    public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit timeUnit)
     {
-        onFailed(messageSize, id);
+        controller.fail(messageSize);
+        verifier.processExpired(id, messageSize, timeElapsed, timeUnit);
     }
 
-    public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+    public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit timeUnit)
     {
-        onFailed(messageSize, id);
+        controller.fail(messageSize);
+        verifier.expireOnArrival(id, messageSize, timeElapsed, timeUnit);
+    }
+
+    public void onSentExpired(int messageSize, long id, long timeElapsed, TimeUnit timeUnit)
+    {
+        controller.fail(messageSize);
+        verifier.expireOnSend(id, messageSize, timeElapsed, timeUnit);
     }
 
     public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
-    {
-        onFailed(messageSize, id);
-    }
-
-    private void onFailed(int messageSize, long id)
     {
         controller.fail(messageSize);
     }

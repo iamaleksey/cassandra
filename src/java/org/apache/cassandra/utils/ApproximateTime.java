@@ -18,6 +18,9 @@
 
 package org.apache.cassandra.utils;
 
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -30,6 +33,8 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_NOW;
+import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
 /**
  * This class provides approximate time utilities:
@@ -69,8 +74,14 @@ public class ApproximateTime
         }
     }
 
+    public enum Measurement { ALMOST_NOW, ALMOST_SAME_TIME }
+
+    private static volatile Future<?> almostNowUpdater;
+    private static volatile Future<?> almostSameTimeUpdater;
+
     private static volatile long almostNowMillis;
     private static volatile long almostNowNanos;
+
     private static volatile AlmostSameTime almostSameTime = new AlmostSameTime(0L, 0L, Long.MAX_VALUE);
     private static double failedAlmostSameTimeUpdateModifier = 1.0;
 
@@ -116,25 +127,57 @@ public class ApproximateTime
 
     static
     {
-        refreshAlmostNow.run();
-        refreshAlmostSameTime.run();
-
-        logger.info("Scheduling approximate time-check task with a precision of {} milliseconds", ALMOST_NOW_UPDATE_INTERVAL_MS);
-        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostNow, ALMOST_NOW_UPDATE_INTERVAL_MS, ALMOST_NOW_UPDATE_INTERVAL_MS, MILLISECONDS);
-
-        logger.info("Scheduling approximate time conversion task with an interval of {} milliseconds", ALMOST_SAME_TIME_UPDATE_INTERVAL_MS);
-        ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostSameTime, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, MILLISECONDS);
+        start(ALMOST_NOW);
+        start(ALMOST_SAME_TIME);
     }
+
+    public static synchronized void stop(Measurement measurement)
+    {
+        switch (measurement)
+        {
+            case ALMOST_NOW:
+                almostNowUpdater.cancel(true);
+                try { almostNowUpdater.get(); } catch (Throwable t) { }
+                almostNowUpdater = null;
+                break;
+            case ALMOST_SAME_TIME:
+                almostSameTimeUpdater.cancel(true);
+                try { almostSameTimeUpdater.get(); } catch (Throwable t) { }
+                almostSameTimeUpdater = null;
+                break;
+        }
+    }
+
+    public static synchronized void start(Measurement measurement)
+    {
+        switch (measurement)
+        {
+            case ALMOST_NOW:
+                if (almostNowUpdater != null)
+                    throw new IllegalStateException("Already running");
+                refreshAlmostNow.run();
+                logger.info("Scheduling approximate time-check task with a precision of {} milliseconds", ALMOST_NOW_UPDATE_INTERVAL_MS);
+                almostNowUpdater = ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostNow, ALMOST_NOW_UPDATE_INTERVAL_MS, ALMOST_NOW_UPDATE_INTERVAL_MS, MILLISECONDS);
+                break;
+            case ALMOST_SAME_TIME:
+                if (almostSameTimeUpdater != null)
+                    throw new IllegalStateException("Already running");
+                refreshAlmostSameTime.run();
+                logger.info("Scheduling approximate time conversion task with an interval of {} milliseconds", ALMOST_SAME_TIME_UPDATE_INTERVAL_MS);
+                almostSameTimeUpdater = ScheduledExecutors.scheduledFastTasks.scheduleWithFixedDelay(refreshAlmostSameTime, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, ALMOST_SAME_TIME_UPDATE_INTERVAL_MS, MILLISECONDS);
+                break;
+        }
+    }
+
 
     /**
      * Request an immediate refresh; this shouldn't generally be invoked, except perhaps by tests
-     * WARNING: this can break monotonicity of almostNowNanos if invoked directly, so don't do it.
      */
     @VisibleForTesting
-    public static void refresh()
+    public static synchronized void refresh(Measurement measurement)
     {
-        refreshAlmostNow.run();
-        refreshAlmostSameTime.run();
+        stop(measurement);
+        start(measurement);
     }
 
     /** no guarantees about relationship to nanoTime; non-monotonic (tracks currentTimeMillis as closely as possible) */
@@ -193,14 +236,18 @@ public class ApproximateTime
         return almostSameTime.error;
     }
 
-    public static boolean atLeastElapsedSinceNanoTime(long approxNanoTime, long elapsed, TimeUnit elapsedUnits)
+    public static long minElapsedSinceNanoTime(long approxInstantNanos)
     {
-        return nanoTime() - approxNanoTime > elapsedUnits.toNanos(elapsed) + nanoTimePrecision();
+        return (nanoTime() - approxInstantNanos) - nanoTimePrecision();
     }
 
-    public static long minElapsedSinceNanoTime(long approxNanoTime)
+    public static boolean haveElapsedSinceNanoTime(long approxInstantNanos, long elapsed, TimeUnit elapsedUnits)
     {
-        return (nanoTime() - approxNanoTime) - nanoTimePrecision();
+        return nanoTime() - approxInstantNanos > elapsedUnits.toNanos(elapsed) + nanoTimePrecision();
     }
 
+    public static boolean isAfterNanoTime(long approxCurrentTimeNanos, long approxInstantNanos)
+    {
+        return approxCurrentTimeNanos > approxInstantNanos + nanoTimePrecision();
+    }
 }
