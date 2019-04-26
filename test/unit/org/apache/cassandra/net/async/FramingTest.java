@@ -377,7 +377,7 @@ public class FramingTest
     {
         try
         {
-            return Message.serializer.messageSize(ByteBuffer.wrap(message), 0, limit, messagingVersion) >= 0;
+            return Message.serializer.inferMessageSize(ByteBuffer.wrap(message), 0, limit, messagingVersion) >= 0;
         }
         catch (Message.InvalidLegacyProtocolMagic e)
         {

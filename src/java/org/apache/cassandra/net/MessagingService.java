@@ -363,7 +363,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public void sendOneWay(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
         if (logger.isTraceEnabled())
-            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb, message.id, to);
+            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
 
         if (to.equals(FBUtilities.getBroadcastAddressAndPort()))
             logger.trace("Message-to-self {} going over MessagingService", message);
@@ -460,19 +460,19 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)
-            state.trace("{} message received from {}", message.verb, message.from);
+            state.trace("{} message received from {}", message.verb(), message.from());
 
         // double-check if the message is still unexpired at this point
         long approxTimeNanos = ApproximateTime.nanoTime();
-        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos) || !messageSink.allowInbound(message))
+        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos()) || !messageSink.allowInbound(message))
         {
-            callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.header, approxTimeNanos - message.createdAtNanos(), NANOSECONDS);
             return;
         }
 
         Runnable runnable = new ProcessMessageTask(message, messageSize, callbacks);
-        LocalAwareExecutorService stage = StageManager.getStage(message.verb.stage);
-        assert stage != null : "No stage for message type " + message.verb;
+        LocalAwareExecutorService stage = StageManager.getStage(message.verb().stage);
+        assert stage != null : "No stage for message type " + message.verb();
 
         stage.execute(runnable, ExecutorLocals.create(state));
     }

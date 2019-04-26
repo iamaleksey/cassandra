@@ -48,7 +48,7 @@ public class CounterMutationVerbHandler implements IVerbHandler<CounterMutation>
         // it's own in that case.
         StorageProxy.applyCounterMutationOnLeader(cm,
                                                   localDataCenter,
-                                                  () -> MessagingService.instance().sendResponse(message.emptyResponse(), message.from),
+                                                  () -> MessagingService.instance().sendResponse(message.emptyResponse(), message.from()),
                                                   queryStartNanoTime);
     }
 }

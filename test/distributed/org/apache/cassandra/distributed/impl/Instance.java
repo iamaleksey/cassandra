@@ -79,7 +79,6 @@ import org.apache.cassandra.service.PendingRangeCalculatorService;
 import org.apache.cassandra.service.QueryState;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.transport.messages.ResultMessage;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Throwables;
@@ -188,7 +187,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
     // unnecessary if registerMockMessaging used
     private void registerFilter(ICluster cluster)
     {
-        MessagingService.instance().messageSink.addOutbound((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb.id));
+        MessagingService.instance().messageSink.addOutbound((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb().id));
     }
 
     private class MessageDeliverySink implements MessageSink.OutboundSink
@@ -206,7 +205,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             {
                 InetAddressAndPort from = broadcastAddressAndPort();
                 Message.serializer.serialize(messageOut, out, MessagingService.current_version);
-                deliver.accept(to, new MessageImpl(messageOut.verb.id, out.toByteArray(), messageOut.id, MessagingService.current_version, from));
+                deliver.accept(to, new MessageImpl(messageOut.verb().id, out.toByteArray(), messageOut.id(), MessagingService.current_version, from));
             }
             catch (IOException e)
             {

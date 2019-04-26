@@ -26,7 +26,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -258,28 +257,28 @@ public class ConnectionBurnTest extends ConnectionTest
                 throw new IllegalStateException(); // only the wrapped Callbacks should be invoked
             }
 
-            public void onArrived(long id, long timeElapsed, TimeUnit unit)
+            public void onArrived(Message.Header header, long timeElapsed, TimeUnit unit)
             {
-                forId(id).onArrived(id, timeElapsed, unit);
-                wrapped.onArrived(id, timeElapsed, unit);
+                forId(header.id).onArrived(header, timeElapsed, unit);
+                wrapped.onArrived(header, timeElapsed, unit);
             }
 
-            public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
             {
-                forId(id).onExpired(messageSize, id, verb, timeElapsed, unit);
-                wrapped.onExpired(messageSize, id, verb, timeElapsed, unit);
+                forId(header.id).onExpired(messageSize, header, timeElapsed, unit);
+                wrapped.onExpired(messageSize, header, timeElapsed, unit);
             }
 
-            public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)
+            public void onArrivedExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
             {
-                forId(id).onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
-                wrapped.onArrivedExpired(messageSize, id, verb, timeElapsed, unit);
+                forId(header.id).onArrivedExpired(messageSize, header, timeElapsed, unit);
+                wrapped.onArrivedExpired(messageSize, header, timeElapsed, unit);
             }
 
-            public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+            public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
             {
-                forId(id).onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
-                wrapped.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
+                forId(header.id).onFailedDeserialize(messageSize, header, t);
+                wrapped.onFailedDeserialize(messageSize, header, t);
             }
         }
 
@@ -290,7 +289,7 @@ public class ConnectionBurnTest extends ConnectionTest
 
         public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
         {
-            forId(message.id).process(message, messageSize, ((WrappedCallbacks)callbacks).wrapped);
+            forId(message.id()).process(message, messageSize, ((WrappedCallbacks)callbacks).wrapped);
         }
     }
 

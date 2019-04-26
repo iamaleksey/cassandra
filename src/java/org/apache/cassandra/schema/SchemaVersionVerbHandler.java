@@ -35,8 +35,8 @@ public final class SchemaVersionVerbHandler implements IVerbHandler<NoPayload>
 
     public void doVerb(Message<NoPayload> message)
     {
-        logger.trace("Received schema version request from {}", message.from);
+        logger.trace("Received schema version request from {}", message.from());
         Message<UUID> response = message.responseWith(Schema.instance.getVersion());
-        MessagingService.instance().sendResponse(response, message.from);
+        MessagingService.instance().sendResponse(response, message.from());
     }
 }

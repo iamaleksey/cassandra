@@ -94,7 +94,7 @@ public class MockMessagingService
      */
     public static Matcher<Verb> verb(Verb verb)
     {
-        return (in, to) -> in.verb == verb;
+        return (in, to) -> in.verb() == verb;
     }
 
     /**

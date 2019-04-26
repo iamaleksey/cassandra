@@ -35,7 +35,7 @@ public class GossipDigestAck2VerbHandler extends GossipVerbHandler<GossipDigestA
     {
         if (logger.isTraceEnabled())
         {
-            InetAddressAndPort from = message.from;
+            InetAddressAndPort from = message.from();
             logger.trace("Received a GossipDigestAck2Message from {}", from);
         }
         if (!Gossiper.instance.isEnabled())

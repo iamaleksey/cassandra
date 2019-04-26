@@ -28,6 +28,6 @@ public final class BatchStoreVerbHandler implements IVerbHandler<Batch>
     public void doVerb(Message<Batch> message)
     {
         BatchlogManager.store(message.payload);
-        MessagingService.instance().sendResponse(message.emptyResponse(), message.from);
+        MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
     }
 }

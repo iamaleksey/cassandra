@@ -19,22 +19,22 @@ package org.apache.cassandra.net.async;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.Message.Header;
 
 public interface MessageCallbacks
 {
     public static final MessageCallbacks NOOP = new MessageCallbacks()
     {
-        public void onArrived(long id, long timeElapsed, TimeUnit unit) {}
+        public void onArrived(Header header, long timeElapsed, TimeUnit unit) {}
         public void onProcessed(int messageSize) {}
-        public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit) {}
-        public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit) {}
-        public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t) {}
+        public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onFailedDeserialize(int messageSize, Header header, Throwable t) {}
     };
 
-    void onArrived(long id, long timeElapsed, TimeUnit unit);
+    void onArrived(Header header, long timeElapsed, TimeUnit unit);
     void onProcessed(int messageSize);
-    void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit);
-    void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit);
-    void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t);
+    void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onFailedDeserialize(int messageSize, Header header, Throwable t);
 }

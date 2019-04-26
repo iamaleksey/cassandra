@@ -48,8 +48,8 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         ReadCommand command = message.payload;
         validateTransientStatus(message);
 
-        long timeout = message.expiresAtNanos - message.createdAtNanos;
-        command.setMonitoringTime(message.createdAtNanos, message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
+        long timeout = message.expiresAtNanos() - message.createdAtNanos();
+        command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
 
         if (message.trackRepairedData())
             command.trackRepairedStatus();
@@ -63,14 +63,14 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (!command.complete())
         {
-            Tracing.trace("Discarding partial response to {} (timed out)", message.from);
+            Tracing.trace("Discarding partial response to {} (timed out)", message.from());
             MessagingService.instance().droppedMessages.incrementWithLatency(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             return;
         }
 
-        Tracing.trace("Enqueuing response to {}", message.from);
+        Tracing.trace("Enqueuing response to {}", message.from());
         Message<ReadResponse> reply = message.responseWith(response);
-        MessagingService.instance().sendResponse(reply, message.from);
+        MessagingService.instance().sendResponse(reply, message.from());
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)
@@ -90,7 +90,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         if (replica == null)
         {
             logger.warn("Received a read request from {} for a range that is not owned by the current replica {}.",
-                        message.from,
+                        message.from(),
                         command);
             return;
         }

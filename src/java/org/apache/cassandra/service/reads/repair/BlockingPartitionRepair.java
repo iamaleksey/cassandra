@@ -47,9 +47,7 @@ import org.apache.cassandra.locator.InOurDcTester;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
 import org.apache.cassandra.net.IAsyncCallback;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.tracing.Tracing;
 
@@ -116,7 +114,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
     @Override
     public void response(Message<Object> msg)
     {
-        ack(msg.from);
+        ack(msg.from());
     }
 
     @Override

@@ -34,31 +34,31 @@ public class ResponseVerbHandler implements IVerbHandler
 
     public void doVerb(Message message)
     {
-        long latencyNanos = ApproximateTime.nanoTime() - MessagingService.instance().callbacks.getCreationTimeNanos(message.id);
-        CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id);
+        long latencyNanos = ApproximateTime.nanoTime() - MessagingService.instance().callbacks.getCreationTimeNanos(message.id());
+        CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id());
         if (callbackInfo == null)
         {
             String msg = "Callback already removed for {} (from {})";
-            logger.trace(msg, message.id, message.from);
-            Tracing.trace(msg, message.id, message.from);
+            logger.trace(msg, message.id(), message.from());
+            Tracing.trace(msg, message.id(), message.from());
             return;
         }
 
-        Tracing.trace("Processing response from {}", message.from);
+        Tracing.trace("Processing response from {}", message.from());
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((IAsyncCallbackWithFailure) cb).onFailure(message.from, (RequestFailureReason) message.payload);
+            ((IAsyncCallbackWithFailure) cb).onFailure(message.from(), (RequestFailureReason) message.payload);
         }
         else
         {
-            MessagingService.instance().latency.maybeAdd(cb, message.from, latencyNanos, NANOSECONDS);
+            MessagingService.instance().latency.maybeAdd(cb, message.from(), latencyNanos, NANOSECONDS);
             cb.response(message);
         }
 
         if (callbackInfo.callback.supportsBackPressure())
         {
-            MessagingService.instance().updateBackPressureOnReceive(message.from, cb, false);
+            MessagingService.instance().updateBackPressureOnReceive(message.from(), cb, false);
         }
     }
 }
