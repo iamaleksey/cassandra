@@ -26,7 +26,6 @@ import java.util.zip.CRC32;
 import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
-import org.apache.cassandra.io.compress.BufferType;
 
 import static org.apache.cassandra.net.async.Crc.*;
 

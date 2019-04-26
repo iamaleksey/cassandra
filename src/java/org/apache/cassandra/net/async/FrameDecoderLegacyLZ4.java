@@ -18,13 +18,11 @@
 
 package org.apache.cassandra.net.async;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.codec.compression.Lz4FrameDecoder;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHashFactory;
 
-@ChannelHandler.Sharable
 class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
 {
     private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
