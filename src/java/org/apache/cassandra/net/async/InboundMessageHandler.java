@@ -318,21 +318,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processSubsequentFrameOfLargeMessage(IntactFrame frame)
-    {
-        SharedBytes bytes = frame.contents;
-        int frameSize = bytes.readableBytes();
-
-        receivedBytes += frameSize;
-        if (largeMessage.supply(frame))
-        {
-            receivedCount++;
-            largeMessage = null;
-        }
-        return true;
-    }
-
-    private void processCorruptSubsequentFrameOfLargeMessage(CorruptFrame frame)
+    private boolean processSubsequentFrameOfLargeMessage(Frame frame)
     {
         receivedBytes += frame.frameSize;
         if (largeMessage.supply(frame))
@@ -340,6 +326,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             receivedCount++;
             largeMessage = null;
         }
+        return true;
     }
 
     private void processCorruptFrame(CorruptFrame frame) throws InvalidCrc
@@ -367,7 +354,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         else // subsequent frame of a large message
         {
-            processCorruptSubsequentFrameOfLargeMessage(frame);
+            processSubsequentFrameOfLargeMessage(frame);
             corruptFramesRecovered++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
         }
@@ -484,9 +471,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private boolean processSubsequentFrame(Frame frame) throws IOException
         {
             if (frame instanceof IntactFrame)
-                processSubsequentFrameOfLargeMessage((IntactFrame) frame);
+                processSubsequentFrameOfLargeMessage(frame);
             else
-                processCorruptFrame((CorruptFrame) frame);
+                processCorruptFrame((CorruptFrame) frame); // TODO: can almost be folded into ^
 
             return largeMessage != null; // continue until done with the large message
         }
@@ -637,14 +624,26 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             buffers = Collections.singletonList(bytes);
         }
 
-        /*
+        /**
          * Return true if this was the last frame of the large message.
+         * TODO: can be cleaned up further
+         *
          */
-        private boolean supply(IntactFrame frame)
+        private boolean supply(Frame frame)
         {
-            int frameSize = frame.contents.readableBytes();
-            bytesReceived += frameSize;
+            bytesReceived += frame.frameSize;
 
+            if (frame instanceof IntactFrame)
+                onIntactFrame((IntactFrame) frame);
+            else
+                onCorruptFrame((CorruptFrame) frame);
+
+            return size == bytesReceived;
+        }
+
+        // TODO: clean up further?
+        private void onIntactFrame(IntactFrame frame)
+        {
             /*
              * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
              * release capacity, and switch to skipping.
@@ -666,20 +665,17 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
 
             if (isSkipping)
-                frame.contents.skipBytes(frameSize);
+                frame.contents.skipBytes(frame.frameSize);
             else
-                add(frame.contents.sliceAndConsume(frameSize).atomic());
+                add(frame.contents.sliceAndConsume(frame.frameSize).atomic());
 
-            boolean isLastFrame = bytesReceived == size;
-            if (isLastFrame && !isSkipping)
+            if (bytesReceived == size && !isSkipping)
                 scheduleCoprocessor();
-            return isLastFrame;
         }
 
-        private boolean supply(CorruptFrame frame)
+        // TODO: clean up further?
+        private void onCorruptFrame(CorruptFrame frame)
         {
-            bytesReceived += frame.frameSize;
-
             if (!isSkipping)
             {
                 releaseBuffers();
@@ -694,8 +690,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     releaseCapacity(size);
                 }
             }
-
-            return bytesReceived == size;
         }
 
         private void releaseBuffers()

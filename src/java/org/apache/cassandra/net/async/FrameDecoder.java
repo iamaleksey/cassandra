@@ -56,6 +56,15 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     abstract static class Frame
     {
+        final boolean isSelfContained;
+        final int frameSize;
+
+        Frame(boolean isSelfContained, int frameSize)
+        {
+            this.isSelfContained = isSelfContained;
+            this.frameSize = frameSize;
+        }
+
         abstract void release();
         abstract boolean isConsumed();
     }
@@ -71,12 +80,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     final static class IntactFrame extends Frame
     {
-        final boolean isSelfContained;
         final SharedBytes contents;
 
         IntactFrame(boolean isSelfContained, SharedBytes contents)
         {
-            this.isSelfContained = isSelfContained;
+            super(isSelfContained, contents.readableBytes());
             this.contents = contents;
         }
 
@@ -97,13 +105,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     final static class CorruptFrame extends Frame
     {
-        final boolean isSelfContained;
-        final int frameSize, readCRC, computedCRC;
+        final int readCRC, computedCRC;
 
         CorruptFrame(boolean isSelfContained, int frameSize, int readCRC, int computedCRC)
         {
-            this.isSelfContained = isSelfContained;
-            this.frameSize = frameSize;
+            super(isSelfContained, frameSize);
             this.readCRC = readCRC;
             this.computedCRC = computedCRC;
         }
