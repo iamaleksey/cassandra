@@ -45,7 +45,6 @@ import org.apache.cassandra.utils.ApproximateTime.AlmostSameTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.MessagingService.ONE_BYTE;
@@ -332,7 +331,7 @@ public class Message<T>
     }
 
     /**
-     * Since how long (in milliseconds) the message has lived.
+     * For how long the message has lived.
      */
     public long elapsedSinceCreated(TimeUnit units)
     {
@@ -1078,7 +1077,9 @@ public class Message<T>
             {
                 highBits -= 0x0000000100000000L;
             }
-            return timeSnapshot.toNanoTime(highBits | sentLowBits);
+
+            long sentTimeMillis = (highBits | sentLowBits);
+            return timeSnapshot.toNanoTime(sentTimeMillis);
         }
     }
 

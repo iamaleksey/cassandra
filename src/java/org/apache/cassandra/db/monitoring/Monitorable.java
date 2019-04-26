@@ -21,7 +21,7 @@ package org.apache.cassandra.db.monitoring;
 public interface Monitorable
 {
     String name();
-    long constructionTimeNanos();
+    long creationTimeNanos();
     long timeoutNanos();
     long slowTimeoutNanos();
 

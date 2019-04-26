@@ -546,7 +546,7 @@ public class Keyspace
                     if (lock == null)
                     {
                         //throw WTE only if request is droppable
-                        if (isDroppable && (ApproximateTime.nanoTime() - mutation.createdAtNanos) > DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS))
+                        if (isDroppable && (ApproximateTime.atLeastElapsedSinceNanoTime(mutation.approxCreatedAtNanos, DatabaseDescriptor.getWriteRpcTimeout(NANOSECONDS), NANOSECONDS)))
                         {
                             for (int j = 0; j < i; j++)
                                 locks[j].unlock();

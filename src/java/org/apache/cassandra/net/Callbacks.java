@@ -78,12 +78,12 @@ public class Callbacks
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS), NANOSECONDS, timeoutReporter);
     }
 
-    public long addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to, long expiresAtNanos)
+    public long addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
     {
         assert message.verb != Verb.MUTATION_REQ; // mutations need to call the overload with a ConsistencyLevel
 
         long messageId = Message.nextId();
-        CallbackInfo previous = callbacks.putWithExpiration(messageId, new CallbackInfo(to, cb, message.verb), expiresAtNanos);
+        CallbackInfo previous = callbacks.put(messageId, new CallbackInfo(to, cb, message.verb), message.createdAtNanos, message.expiresAtNanos);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;
     }
@@ -91,7 +91,6 @@ public class Callbacks
     public long addWithExpiration(AbstractWriteResponseHandler<?> cb,
                                  Message<?> message,
                                  Replica to,
-                                 long expiresAtNanos,
                                  ConsistencyLevel consistencyLevel,
                                  boolean allowHints)
     {
@@ -100,14 +99,15 @@ public class Callbacks
                || message.verb == Verb.PAXOS_COMMIT_REQ;
 
         long messageId = Message.nextId();
-        CallbackInfo previous = callbacks.putWithExpiration(messageId,
+        CallbackInfo previous = callbacks.put(messageId,
                                               new WriteCallbackInfo(to,
                                                                     cb,
                                                                     message,
                                                                     consistencyLevel,
                                                                     allowHints,
                                                                     message.verb),
-                                                            expiresAtNanos);
+                                              message.createdAtNanos,
+                                              message.expiresAtNanos);
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;
     }

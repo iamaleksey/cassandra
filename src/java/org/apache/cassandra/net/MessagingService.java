@@ -300,7 +300,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     public long sendRR(Message message, InetAddressAndPort to, IAsyncCallback cb, ConnectionType specifyConnection)
     {
-        long id = callbacks.addWithExpiration(cb, message, to, message.expiresAtNanos);
+        long id = callbacks.addWithExpiration(cb, message, to);
         updateBackPressureOnSend(to, cb, message);
         sendOneWay(cb instanceof IAsyncCallbackWithFailure<?> ? message.withIdAndFlag(id, MessageFlag.CALL_BACK_ON_FAILURE)
                                                               : message.withId(id), to, specifyConnection);
@@ -333,7 +333,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                            boolean allowHints,
                            ConnectionType specifyConnection)
     {
-        long id = callbacks.addWithExpiration(handler, message, to, message.expiresAtNanos, handler.consistencyLevel(), allowHints);
+        long id = callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
         updateBackPressureOnSend(to.endpoint(), handler, message);
         sendOneWay(message.withIdAndFlag(id, MessageFlag.CALL_BACK_ON_FAILURE), to.endpoint(), specifyConnection);
         return id;
@@ -463,10 +463,10 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             state.trace("{} message received from {}", message.verb, message.from);
 
         // double-check if the message is still unexpired at this point
-        long nowNanos = ApproximateTime.nanoTime();
-        if (nowNanos > message.expiresAtNanos || !messageSink.allowInbound(message))
+        long approxTimeNanos = ApproximateTime.nanoTime();
+        if (approxTimeNanos > message.expiresAtNanos || !messageSink.allowInbound(message))
         {
-            callbacks.onExpired(messageSize, message.id, message.verb, nowNanos - message.createdAtNanos, NANOSECONDS);
+            callbacks.onExpired(messageSize, message.id, message.verb, approxTimeNanos - message.createdAtNanos, NANOSECONDS);
             return;
         }
 

@@ -40,7 +40,6 @@ import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.NoSpamLogger;
 
 import static java.lang.System.getProperty;
-import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 /**
@@ -71,7 +70,7 @@ class MonitoringTask
     private final ScheduledFuture<?> reportingTask;
     private final OperationsQueue failedOperationsQueue;
     private final OperationsQueue slowOperationsQueue;
-    private long lastLogTimeNanos;
+    private long approxLastLogTimeNanos;
 
 
     @VisibleForTesting
@@ -91,7 +90,7 @@ class MonitoringTask
         this.failedOperationsQueue = new OperationsQueue(maxOperations);
         this.slowOperationsQueue = new OperationsQueue(maxOperations);
 
-        this.lastLogTimeNanos = ApproximateTime.nanoTime();
+        this.approxLastLogTimeNanos = ApproximateTime.nanoTime();
 
         logger.info("Scheduling monitoring task with report interval of {} ms, max operations {}", reportIntervalMillis, maxOperations);
         this.reportingTask = ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(() -> logOperations(ApproximateTime.nanoTime()),
@@ -134,12 +133,12 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    private void logOperations(long nowNanos)
+    private void logOperations(long approxCurrentTimeNanos)
     {
-        logSlowOperations(nowNanos);
-        logFailedOperations(nowNanos);
+        logSlowOperations(approxCurrentTimeNanos);
+        logFailedOperations(approxCurrentTimeNanos);
 
-        lastLogTimeNanos = nowNanos;
+        approxLastLogTimeNanos = approxCurrentTimeNanos;
     }
 
     @VisibleForTesting
@@ -148,7 +147,7 @@ class MonitoringTask
         AggregatedOperations failedOperations = failedOperationsQueue.popOperations();
         if (!failedOperations.isEmpty())
         {
-            long elapsedNanos = nowNanos - lastLogTimeNanos;
+            long elapsedNanos = nowNanos - approxLastLogTimeNanos;
             noSpamLogger.warn("Some operations timed out, details available at debug level (debug.log)");
 
             if (logger.isDebugEnabled())
@@ -164,18 +163,18 @@ class MonitoringTask
     }
 
     @VisibleForTesting
-    boolean logSlowOperations(long nowNanos)
+    boolean logSlowOperations(long approxCurrentTimeNanos)
     {
         AggregatedOperations slowOperations = slowOperationsQueue.popOperations();
         if (!slowOperations.isEmpty())
         {
-            long elapsedNanos = nowNanos - lastLogTimeNanos;
+            long approxElapsedNanos = approxCurrentTimeNanos - approxLastLogTimeNanos;
             noSpamLogger.info("Some operations were slow, details available at debug level (debug.log)");
 
             if (logger.isDebugEnabled())
                 logger.debug("{} operations were slow in the last {} msecs:{}{}",
                              slowOperations.num(),
-                             NANOSECONDS.toMillis(elapsedNanos),
+                             NANOSECONDS.toMillis(approxElapsedNanos),
                              LINE_SEPARATOR,
                              slowOperations.getLogMessage());
             return true;
@@ -333,7 +332,7 @@ class MonitoringTask
         {
             this.operation = operation;
             numTimesReported = 1;
-            totalTimeNanos = failedAtNanos - operation.constructionTimeNanos();
+            totalTimeNanos = failedAtNanos - operation.creationTimeNanos();
             minTime = totalTimeNanos;
             maxTime = totalTimeNanos;
         }

@@ -34,7 +34,7 @@ public class Clock
     private static final Logger logger = LoggerFactory.getLogger(Clock.class);
 
     /**
-     * Static singleton object that will be instanciated by default with a system clock
+     * Static singleton object that will be instantiated by default with a system clock
      * implementation. Set <code>cassandra.clock</code> system property to a FQCN to use a
      * different implementation instead.
      */

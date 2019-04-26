@@ -34,7 +34,6 @@ public class ResponseVerbHandler implements IVerbHandler
 
     public void doVerb(Message message)
     {
-
         long latencyNanos = ApproximateTime.nanoTime() - MessagingService.instance().callbacks.getCreationTimeNanos(message.id);
         CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id);
         if (callbackInfo == null)
