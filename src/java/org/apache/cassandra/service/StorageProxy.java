@@ -1764,7 +1764,7 @@ public class StorageProxy implements StorageProxyMBean
         {
             try
             {
-                command.setMonitoringTime(this.approxCreationTimeNanos, false, verb.expiresAfterNanos(), DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
+                command.setMonitoringTime(approxCreationTimeNanos, false, verb.expiresAfterNanos(), DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
                 ReadResponse response;
                 try (ReadExecutionController executionController = command.executionController();
@@ -1779,7 +1779,7 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 else
                 {
-                    MessagingService.instance().droppedMessages.incrementWithLatency(verb, ApproximateTime.nanoTime() - this.approxCreationTimeNanos, NANOSECONDS);
+                    MessagingService.instance().droppedMessages.incrementWithLatency(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.UNKNOWN);
                 }
 
