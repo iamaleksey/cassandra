@@ -26,6 +26,7 @@ import java.util.function.Consumer;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.min;
@@ -349,7 +350,7 @@ public class OutboundMessageQueue
 
     private static boolean shouldSend(Message<?> m, long nowNanos)
     {
-        return nowNanos < m.expiresAtNanos;
+        return !ApproximateTime.isAfterNanoTime(nowNanos, m.expiresAtNanos);
     }
 
     @VisibleForTesting

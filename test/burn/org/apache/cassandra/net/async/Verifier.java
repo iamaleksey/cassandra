@@ -36,6 +36,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.OutboundConnection.LargeMessageDelivery.DEFAULT_BUFFER_SIZE;
@@ -43,6 +44,7 @@ import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_T
 import static org.apache.cassandra.net.async.Verifier.EventType.ARRIVE;
 import static org.apache.cassandra.net.async.Verifier.EventType.DESERIALIZE;
 import static org.apache.cassandra.net.async.Verifier.EventType.ENQUEUE;
+import static org.apache.cassandra.net.async.Verifier.EventType.FAIL_EXPIRED;
 import static org.apache.cassandra.net.async.Verifier.EventType.PROCESS;
 import static org.apache.cassandra.net.async.Verifier.EventType.SERIALIZE;
 
@@ -63,6 +65,7 @@ public class Verifier
         ARRIVE,
         DESERIALIZE,
         PROCESS,
+        FAIL_EXPIRED,
         CONTROLLER_UPDATE
     }
 
@@ -100,10 +103,10 @@ public class Verifier
     public static class SimpleEvent extends Event
     {
         final long at;
-        SimpleEvent(EventType type, Verifier verifier)
+        SimpleEvent(EventType type, long at)
         {
             super(type);
-            this.at = verifier.sequenceId.getAndIncrement();
+            this.at = at;
         }
     }
 
@@ -126,9 +129,9 @@ public class Verifier
     public static class SimpleMessageEvent extends SimpleEvent
     {
         final long messageId;
-        SimpleMessageEvent(EventType type, Verifier verifier, long messageId)
+        SimpleMessageEvent(EventType type, long at, long messageId)
         {
-            super(type, verifier);
+            super(type, at);
             this.messageId = messageId;
         }
     }
@@ -156,10 +159,26 @@ public class Verifier
     public static class SerializeMessageEvent extends SimpleMessageEvent
     {
         final int messagingVersion;
-        SerializeMessageEvent(EventType type, Verifier verifier, long messageId, int messagingVersion)
+        SerializeMessageEvent(EventType type, long at, long messageId, int messagingVersion)
         {
-            super(type, verifier, messageId);
+            super(type, at, messageId);
             this.messagingVersion = messagingVersion;
+        }
+    }
+
+    public static class ExpiredMessageEvent extends SimpleMessageEvent
+    {
+        final int size;
+        final long timeElapsed;
+        final TimeUnit timeUnit;
+        final EventType expectState;
+        ExpiredMessageEvent(long at, long messageId, int size, long timeElapsed, TimeUnit timeUnit, EventType expectState)
+        {
+            super(PROCESS, at, messageId);
+            this.size = size;
+            this.timeElapsed = timeElapsed;
+            this.timeUnit = timeUnit;
+            this.expectState = expectState;
         }
     }
 
@@ -167,9 +186,9 @@ public class Verifier
     {
         final int size;
         final Message<?> message;
-        ProcessMessageEvent(Verifier verifier, Message<?> message, int size)
+        ProcessMessageEvent(long at, Message<?> message, int size)
         {
-            super(PROCESS, verifier, message.id);
+            super(PROCESS, at, message.id);
             this.message = message;
             this.size = size;
         }
@@ -197,63 +216,59 @@ public class Verifier
 
     void serialize(long messageId, int messagingVersion) 
     {
-        SerializeMessageEvent serialize = new SerializeMessageEvent(SERIALIZE, this, messageId, messagingVersion);
-        try
-        {
-            sequence.put(serialize.at, serialize);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
+        long at = nextId();
+        sequence.put(at, new SerializeMessageEvent(SERIALIZE, at, messageId, messagingVersion));
     }
     private static SerializeMessageEvent serialize(Event e) { return (SerializeMessageEvent)e; }
 
     void arrive(long messageId)
     {
-        SimpleMessageEvent arrive = new SimpleMessageEvent(ARRIVE, this, messageId);
-        try
-        {
-            sequence.put(arrive.at, arrive);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
+        long at = nextId();
+        sequence.put(at, new SimpleMessageEvent(ARRIVE, at, messageId));
     }
     private static SimpleMessageEvent arrive(Event e) { return (SimpleMessageEvent)e; }
 
     void deserialize(long messageId, int messagingVersion) 
     {
-        SerializeMessageEvent deserialize = new SerializeMessageEvent(DESERIALIZE, this, messageId, messagingVersion);
-        try
-        {
-            sequence.put(deserialize.at, deserialize);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
+        long at = nextId();
+        sequence.put(at, new SerializeMessageEvent(DESERIALIZE, at, messageId, messagingVersion));
     }
     private static SimpleMessageEvent deserialize(Event e) { return (SimpleMessageEvent)e; }
 
     void process(Message<?> message, int size) 
     {
-        ProcessMessageEvent process = new ProcessMessageEvent(this, message, size);
-        try
-        {
-            sequence.put(process.at, process);
-        }
-        catch (InterruptedException e)
-        {
-            Thread.currentThread().interrupt();
-        }
+        long at = nextId();
+        sequence.put(at, new ProcessMessageEvent(at, message, size));
     }
     private static ProcessMessageEvent process(Event e) { return (ProcessMessageEvent)e; }
+
+    void expireOnSend(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
+    {
+        expired(messageId, size, timeElapsed, timeUnit, ENQUEUE);
+    }
+    void expireOnArrival(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
+    {
+        expired(messageId, size, timeElapsed, timeUnit, SERIALIZE);
+    }
+    void processExpired(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
+    {
+        expired(messageId, size, timeElapsed, timeUnit, DESERIALIZE);
+    }
+    private void expired(long messageId, int size, long timeElapsed, TimeUnit timeUnit, EventType expectState)
+    {
+        long at = nextId();
+        sequence.put(at, new ExpiredMessageEvent(at, messageId, size, timeElapsed, timeUnit, expectState));
+    }
+    private static ExpiredMessageEvent expired(Event e) { return (ExpiredMessageEvent)e; }
 
     final AtomicLong sequenceId = new AtomicLong();
     final Sequence sequence = new Sequence();
     final ConnectionType outboundType;
+
+    private long nextId()
+    {
+        return sequenceId.getAndIncrement();
+    }
 
     public Verifier(ConnectionType outboundType)
     {
@@ -269,6 +284,9 @@ public class Verifier
     {
         try
         {
+            // TODO: - verify timeliness of all messages, not just those arriving out of order
+            //         (integrate bytes in flight controller info into timeliness decisions)
+            //       - indicate a message is expected to fail serialization (or deserialization)
             final LongObjectOpenHashMap<MessageState> messages = new LongObjectOpenHashMap<>();
             final Messages enqueue = new Messages(m -> m.enqueueStart);
             final Messages serialize = new Messages(m -> m.serialize);
@@ -460,6 +478,35 @@ public class Verifier
                         // this message has been fully validated
                         break;
                     }
+                    case FAIL_EXPIRED:
+                    {
+                        // serialize happens serially, so we can compress the asynchronicity of the above enqueue
+                        // into a linear sequence of events we expect to occur on arrival
+                        ExpiredMessageEvent e = expired(next);
+                        assert nextId == e.at;
+                        MessageState m = messages.remove(e.messageId);
+                        if (m.state != e.expectState)
+                            fail("Invalid expiry of %d: expected message in %s, found %s", m.message.id, e.expectState, m.state);
+
+                        now = System.nanoTime();
+                        if (m.message.expiresAtNanos > now)
+                        {
+                            // TODO: even with new ApproximateTime comparison methods, there's no strict guarantees here given NTP
+                            //       we could fix the conversion AlmostSameTime for an entire run, which should suffice
+                            fail("Invalid expiry of %d: expiry should occur in %dms; event believes %dms have elapsed, and %dms have actually elapsed", m.message.id,
+                                 NANOSECONDS.toMillis(m.message.expiresAtNanos - m.message.createdAtNanos),
+                                 e.timeUnit.toMillis(e.timeElapsed),
+                                 NANOSECONDS.toMillis(now - m.message.createdAtNanos));
+                        }
+
+                        switch (m.state)
+                        {
+                            case ENQUEUE: enqueue.remove(m); break;
+                            case SERIALIZE: serialize.remove(m); break;
+                            case DESERIALIZE: (m.processOnEventLoop ? deserializeOnEventLoop : deserializeOffEventLoop).remove(m); break;
+                        }
+                        break;
+                    }
                     case CONTROLLER_UPDATE:
                     {
                         break;
@@ -515,12 +562,21 @@ public class Verifier
             chunkList.put(0L, writerChunk);
         }
 
-        public void put(long sequenceId, Event event) throws InterruptedException
+        public void put(long sequenceId, Event event)
         {
             long chunkSequenceId = sequenceId & -CHUNK_SIZE;
             Chunk chunk = writerChunk;
             if (chunk.sequenceId != chunkSequenceId)
-                chunk = ensureChunk(chunkSequenceId);
+            {
+                try
+                {
+                    chunk = ensureChunk(chunkSequenceId);
+                }
+                catch (InterruptedException e)
+                {
+                    throw new RuntimeException(e);
+                }
+            }
 
             chunk.set(sequenceId, event);
 

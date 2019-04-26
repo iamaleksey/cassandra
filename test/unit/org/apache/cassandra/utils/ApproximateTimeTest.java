@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.utils;
 
+import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_NOW;
 import static org.junit.Assert.*;
 
 import org.junit.Test;
@@ -34,7 +35,7 @@ public class ApproximateTimeTest
             now = Math.max(now, System.currentTimeMillis());
             if (ii % 10000 == 0)
             {
-                ApproximateTime.refresh();
+                ApproximateTime.refresh(ALMOST_NOW);
                 Thread.sleep(1);
             }
 
