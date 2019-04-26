@@ -329,6 +329,8 @@ public class Verifier
                     }
                     case SERIALIZE:
                     {
+                        // serialize happens serially, so we can compress the asynchronicity of the above enqueue
+                        // into a linear sequence of events we expect to occur on arrival
                         SerializeMessageEvent e = serialize(next);
                         assert nextId == e.at;
                         MessageState m = messages.get(e.messageId);
@@ -354,30 +356,24 @@ public class Verifier
                         SimpleMessageEvent e = arrive(next);
                         assert nextId == e.at;
                         MessageState m = messages.get(e.messageId);
-                        if (m.state == ARRIVE)
+                        assert m.state == SERIALIZE;
+                        m.arrive = e.at;
+                        int mi = serialize.indexOf(m);
+                        for (int i = 0 ; i < mi ; ++i)
                         {
-                            // we already arrived once, but presumably we did not have sufficient room to process
-                            // TODO: do something clever?
+                            MessageState pm = serialize.get(i);
+                            fail("Invalid order of events: %d (%d, %d) serialized strictly before %d (%d, %d), but arrived after",
+                                 pm.message.id, pm.serialize, pm.arrive, m.message.id, m.serialize, m.arrive);
                         }
-                        else
-                        {
-                            assert m.state == SERIALIZE;
-                            m.arrive = e.at;
-                            int mi = serialize.indexOf(m);
-                            for (int i = 0 ; i < mi ; ++i)
-                            {
-                                MessageState pm = serialize.get(i);
-                                fail("Invalid order of events: %d (%d, %d) serialized strictly before %d (%d, %d), but arrived after",
-                                     pm.message.id, pm.serialize, pm.arrive, m.message.id, m.serialize, m.arrive);
-                            }
-                            serialize.remove(mi);
-                            arrive.add(m);
-                            m.update(next.type);
-                        }
+                        serialize.remove(mi);
+                        arrive.add(m);
+                        m.update(next.type);
                         break;
                     }
                     case DESERIALIZE:
                     {
+                        // deserialize may happen in parallel for large messages, but in sequence for small messages
+                        // so we separate the two
                         SimpleMessageEvent e = deserialize(next);
                         assert nextId == e.at;
                         MessageState m = messages.get(e.messageId);
@@ -434,9 +430,11 @@ public class Verifier
                         }
                         else if (m.processOnEventLoop)
                         {
+                            // we can expect that processing happens sequentially in this case, more specifically
+                            // we can actually expect that this event will occur _immediately_ after the deserialize event
+                            // so that we have exactly one mess
+                            // c
                             int mi = deserializeOnEventLoop.indexOf(m);
-                            // process may be off-loaded, so we can only impose meaningful ordering constraints
-                            // on those messages we know to have been processed on the event loop
                             for (int i = 0 ; i < mi ; ++i)
                             {
                                 MessageState pm = deserializeOnEventLoop.get(i);

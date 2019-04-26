@@ -32,6 +32,7 @@ import io.netty.channel.Channel;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
+import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
@@ -200,11 +201,13 @@ public final class InboundMessageHandlers
 
     private static MessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
     {
+        final MessagingMetrics.Updater latencyUpdater = MessagingService.instance().metrics.getForPeer(peer);
         return new MessageCallbacks()
         {
             @Override
-            public void onArrived(long id)
+            public void onArrived(long id, long timeElapsed, TimeUnit unit)
             {
+                latencyUpdater.addTimeTaken(timeElapsed, unit);
             }
 
             @Override

@@ -41,6 +41,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.Tracing.TraceType;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.ApproximateTime.AlmostSameTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
@@ -513,7 +514,7 @@ public class Message<T>
 
         public <T> Message<T> deserialize(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
-            return version >= VERSION_40 ? deserializePost40(in, peer, version) : deserializePre40(in, peer, version);
+            return version >= VERSION_40 ? deserializePost40(in, peer, version) : deserializePre40(in, version);
         }
 
         private <T> int serializedSize(Message<T> message, int version)
@@ -534,14 +535,23 @@ public class Message<T>
             return version >= VERSION_40 ? VIntCoding.getUnsignedVInt(buf, buf.position()) : buf.getInt(buf.position() + 4);
         }
 
-        public long getCreatedAtNanos(ByteBuffer buf, InetAddressAndPort peer, int version)
+        public long getCreatedAtNanos(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos, int version)
         {
-            return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, peer) : getCreatedAtNanosPre40(buf, peer);
+            return version >= VERSION_40 ? getCreatedAtNanosPost40(buf, timeSnapshot, currentTimeNanos) : getCreatedAtNanosPre40(buf, timeSnapshot, currentTimeNanos);
         }
 
-        public long getExpiresAtNanos(ByteBuffer buf, long createdAtNanos, int version)
+        public long getExpiresAtNanos(ByteBuffer buf, long createdAtNanos, long currentTimeNanos, int version)
         {
+            if (!DatabaseDescriptor.hasCrossNodeTimeout() || createdAtNanos > currentTimeNanos)
+                createdAtNanos = currentTimeNanos;
             return version >= VERSION_40 ? getExpiresAtNanosPost40(buf, createdAtNanos) : getExpiresAtNanosPre40(buf, createdAtNanos);
+        }
+
+        public long getExpiresAtNanos(long createdAtNanos, long currentTimeNanos, long expirationPeriodNanos)
+        {
+            if (!DatabaseDescriptor.hasCrossNodeTimeout() || createdAtNanos > currentTimeNanos)
+                createdAtNanos = currentTimeNanos;
+            return createdAtNanos + expirationPeriodNanos;
         }
 
         public Verb getVerb(ByteBuffer buf, int version)
@@ -580,8 +590,11 @@ public class Message<T>
         {
             long id = in.readUnsignedVInt();
 
-            long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
-            long expiresAtNanos = creationTimeNanos + TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt());
+            long currentTimeNanos = ApproximateTime.nanoTime();
+            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
+            long expiresAtNanos = getExpiresAtNanos(creationTimeNanos, currentTimeNanos, TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt()));
+
             Verb verb = Verb.fromId(Ints.checkedCast(in.readUnsignedVInt()));
 
             int flags = Ints.checkedCast(in.readUnsignedVInt());
@@ -652,11 +665,11 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private long getCreatedAtNanosPost40(ByteBuffer buf, InetAddressAndPort peer)
+        private long getCreatedAtNanosPost40(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos)
         {
             int index = buf.position();
             index += VIntCoding.computeUnsignedVIntSize(buf, index); // id
-            return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
+            return calculateCreationTimeNanos(buf.getInt(index), timeSnapshot, currentTimeNanos);
         }
 
         private long getExpiresAtNanosPost40(ByteBuffer buf, long createdAtNanos)
@@ -718,11 +731,14 @@ public class Message<T>
             }
         }
 
-        private <T> Message<T> deserializePre40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
+        private <T> Message<T> deserializePre40(DataInputPlus in, int version) throws IOException
         {
             validateLegacyProtocolMagic(in.readInt());
             int messageId = in.readInt();
-            long creationTimeNanos = calculateCreationTimeNanos(peer, in.readInt(), ApproximateTime.currentTimeMillis());
+
+            long currentTimeNanos = ApproximateTime.nanoTime();
+            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
             InetAddressAndPort from = CompactEndpointSerializationHelper.instance.deserialize(in, version);
             Verb verb = Verb.fromId(in.readInt());
 
@@ -814,12 +830,12 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        private long getCreatedAtNanosPre40(ByteBuffer buf, InetAddressAndPort peer)
+        private long getCreatedAtNanosPre40(ByteBuffer buf, AlmostSameTime timeSnapshot, long currentTimeNanos)
         {
             int index = buf.position();
             index += 4; // protocol magic
             index += 4; // message id
-            return calculateCreationTimeNanos(peer, buf.getInt(index), ApproximateTime.currentTimeMillis());
+            return calculateCreationTimeNanos(buf.getInt(index), timeSnapshot, currentTimeNanos);
         }
 
         private long getExpiresAtNanosPre40(ByteBuffer buf, long createdAtNanos)
@@ -1042,37 +1058,27 @@ public class Message<T>
             return Ints.checkedCast(payloadSize);
         }
 
-        @VisibleForTesting
-        long calculateCreationTimeNanos(InetAddressAndPort from, int messageTimestampMillis, long currentTimeMillis)
+        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START  = 0xFFFFFFFFL - MINUTES.toMillis(15L);
+        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END    =               MINUTES.toMillis(15L);
+        long calculateCreationTimeNanos(int messageTimestampMillis, AlmostSameTime timeSnapshot, long currentTimeNanos)
         {
+            long currentTimeMillis = timeSnapshot.toCurrentTimeMillis(currentTimeNanos);
             // Reconstruct the message construction time sent by the remote host (we sent only the lower 4 bytes, assuming the
             // higher 4 bytes wouldn't change between the sender and receiver)
-            long currentHighBits = currentTimeMillis & 0xFFFFFFFF00000000L;
-            long reconstructedLowBits = messageTimestampMillis & 0xFFFFFFFFL;
-            long sentConstructionTime = currentHighBits | reconstructedLowBits;
+            long highBits = currentTimeMillis & 0xFFFFFFFF00000000L;
 
-            // if we wrap around our timer across the message delivery window, we will give ourselves a creationTime
-            // roughly two months in the future; so, if the current time and previous timestamp suggest wrap around
-            // (i.e. are each within one minute, on the correct side, of the wrap around point)
-            // then assume this is what has happened, and use the prior high bits
-            long elapsed = currentTimeMillis - sentConstructionTime;
-            if (elapsed <= 0)
+            long sentLowBits = messageTimestampMillis & 0x00000000FFFFFFFFL;
+            long currentLowBits =   currentTimeMillis & 0x00000000FFFFFFFFL;
+
+            // if our sent bits occur within a grace period of a wrap around event,
+            // and our current bits are no more than the same grace period after a wrap around event,
+            // assume a wrap around has occurred, and deduct one highBit
+            if (      sentLowBits > TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START
+                && currentLowBits < TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END)
             {
-                long currentLowBits = currentTimeMillis & 0xFFFFFFFFL;
-                long reconstructedTimeToWrapAround = 0xFFFFFFFFL - reconstructedLowBits;
-                if (currentLowBits < MINUTES.toNanos(1L) && reconstructedTimeToWrapAround < MINUTES.toNanos(1L))
-                    sentConstructionTime -= 0x0000000100000000L;
+                highBits -= 0x0000000100000000L;
             }
-
-            // Because nodes may not have their clock perfectly in sync, it's actually possible the sentConstructionTime is
-            // later than the currentTime (the received time). If that's the case, as we definitively know there is a lack
-            // of proper synchronziation of the clock, we ignore sentConstructionTime. We also ignore that
-            // sentConstructionTime if we're told to.
-            if (elapsed > 0)
-                instance().metrics.addTimeTaken(from, elapsed, MILLISECONDS);
-
-            boolean useSentTime = DatabaseDescriptor.hasCrossNodeTimeout() && elapsed > 0;
-            return ApproximateTime.toNanoTime(useSentTime ? sentConstructionTime : currentTimeMillis);
+            return timeSnapshot.toNanoTime(highBits | sentLowBits);
         }
     }
 

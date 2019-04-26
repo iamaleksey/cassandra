@@ -51,12 +51,14 @@ import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.net.async.ResourceLimits.Outcome;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.ApproximateTime.AlmostSameTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.async.Crc.*;
 
 /**
@@ -220,15 +222,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
 
         long currentTimeNanos = ApproximateTime.nanoTime();
+        AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
         long id = serializer.getId(buf, version);
-        long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
-        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
-
-        callbacks.onArrived(id);
+        long createdAtNanos = serializer.getCreatedAtNanos(buf, timeSnapshot, currentTimeNanos, version);
+        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, currentTimeNanos, version);
+        long elapsedNanos = currentTimeNanos - createdAtNanos;
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), elapsedNanos, NANOSECONDS);
             receivedCount++;
             receivedBytes += size;
             bytes.skipBytes(size);
@@ -245,6 +247,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 return false;
         }
 
+        callbacks.onArrived(id, elapsedNanos, NANOSECONDS);
         receivedCount++;
         receivedBytes += size;
 
@@ -317,15 +320,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
 
         long currentTimeNanos = ApproximateTime.nanoTime();
+        AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
         long id = serializer.getId(buf, version);
-        long createdAtNanos = serializer.getCreatedAtNanos(buf, peer, version);
-        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, version);
-
-        callbacks.onArrived(id);
+        long createdAtNanos = serializer.getCreatedAtNanos(buf, timeSnapshot, currentTimeNanos, version);
+        long expiresAtNanos = serializer.getExpiresAtNanos(buf, createdAtNanos, currentTimeNanos, version);
+        long elapsedNanos = currentTimeNanos - createdAtNanos;
 
         if (expiresAtNanos < currentTimeNanos)
         {
-            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), currentTimeNanos - createdAtNanos, TimeUnit.NANOSECONDS);
+            callbacks.onArrivedExpired(size, id, serializer.getVerb(buf, version), elapsedNanos, NANOSECONDS);
             int skipped = buf.remaining();
             receivedBytes += skipped;
             bytes.skipBytes(skipped);
@@ -344,6 +347,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 return false;
         }
 
+        callbacks.onArrived(id, elapsedNanos, NANOSECONDS);
         boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
 
         int readableBytes = buf.remaining();
@@ -431,9 +435,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         return new MessageCallbacks()
         {
-            public void onArrived(long id)
+            public void onArrived(long id, long timeElapsed, TimeUnit unit)
             {
-                callbacks.onArrived(id);
+                callbacks.onArrived(id, timeElapsed, unit);
             }
 
             @Override
