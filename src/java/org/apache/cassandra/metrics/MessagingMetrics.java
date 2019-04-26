@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.metrics;
 
+import java.util.EnumMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -35,29 +36,45 @@ import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
  */
 public class MessagingMetrics
 {
-    private static Logger logger = LoggerFactory.getLogger(MessagingMetrics.class);
     private static final MetricNameFactory factory = new DefaultNameFactory("Messaging");
-    public final Timer crossNodeLatency;
-    public final ConcurrentHashMap<String, Timer> dcLatency;
-    public final ConcurrentHashMap<Verb, Timer> queueWaitLatency;
+    private final Timer allLatency;
+    public final ConcurrentHashMap<String, Updater> dcUpdaters;
+    public final EnumMap<Verb, Timer> queueWaitLatency;
 
     public MessagingMetrics()
     {
-        crossNodeLatency = Metrics.timer(factory.createMetricName("CrossNodeLatency"));
-        dcLatency = new ConcurrentHashMap<>();
-        queueWaitLatency = new ConcurrentHashMap<>();
+        allLatency = Metrics.timer(factory.createMetricName("CrossNodeLatency"));
+        dcUpdaters = new ConcurrentHashMap<>();
+        queueWaitLatency = new EnumMap<>(Verb.class);
+        for (Verb verb : Verb.VERBS)
+            queueWaitLatency.put(verb, Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
     }
 
-    public void addTimeTaken(InetAddressAndPort from, long timeTaken, TimeUnit units)
+    public static class Updater
     {
-        String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
-        Timer timer = dcLatency.get(dc);
-        if (timer == null)
+        public final Timer dcLatency;
+        public final Timer allLatency;
+
+        public Updater(Timer dcLatency, Timer allLatency)
         {
-            timer = dcLatency.computeIfAbsent(dc, k -> Metrics.timer(factory.createMetricName(dc + "-Latency")));
+            this.dcLatency = dcLatency;
+            this.allLatency = allLatency;
         }
-        timer.update(timeTaken, units);
-        crossNodeLatency.update(timeTaken, units);
+
+        public void addTimeTaken(long timeTaken, TimeUnit units)
+        {
+            dcLatency.update(timeTaken, units);
+            allLatency.update(timeTaken, units);
+        }
+    }
+
+    public Updater getForPeer(InetAddressAndPort from)
+    {
+        String dcName = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
+        Updater dcUpdater = dcUpdaters.get(dcName);
+        if (dcUpdater == null)
+            dcUpdater = dcUpdaters.computeIfAbsent(dcName, k -> new Updater(Metrics.timer(factory.createMetricName(dcName + "-Latency")), allLatency));
+        return dcUpdater;
     }
 
     public void addQueueWaitTime(Verb verb, long timeTaken, TimeUnit units)
@@ -66,11 +83,6 @@ public class MessagingMetrics
             // the measurement is not accurate, ignore the negative timeTaken
             return;
 
-        Timer timer = queueWaitLatency.get(verb);
-        if (timer == null)
-        {
-            timer = queueWaitLatency.computeIfAbsent(verb, k -> Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
-        }
-        timer.update(timeTaken, units);
+        queueWaitLatency.get(verb).update(timeTaken, units);
     }
 }

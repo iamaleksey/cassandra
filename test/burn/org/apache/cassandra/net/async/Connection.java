@@ -128,7 +128,7 @@ class Connection implements MessageCallbacks, MessageProcessor
         verifier.process(message, messageSize);
     }
 
-    public void onArrived(long id)
+    public void onArrived(long id, long timeElapsed, TimeUnit units)
     {
         verifier.arrive(id);
     }

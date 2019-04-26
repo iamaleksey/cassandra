@@ -42,6 +42,7 @@ import com.codahale.metrics.Timer;
 import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
+import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.utils.ApproximateTime;
@@ -152,7 +153,7 @@ public class MessagingServiceTest
     public void testDCLatency() throws Exception
     {
         int latency = 100;
-        ConcurrentHashMap<String, Timer> dcLatency = MessagingService.instance().metrics.dcLatency;
+        ConcurrentHashMap<String, MessagingMetrics.Updater> dcLatency = MessagingService.instance().metrics.dcUpdaters;
         dcLatency.clear();
 
         long now = ApproximateTime.currentTimeMillis();
@@ -160,9 +161,9 @@ public class MessagingServiceTest
         assertNull(dcLatency.get("datacenter1"));
         addDCLatency(sentAt, now);
         assertNotNull(dcLatency.get("datacenter1"));
-        assertEquals(1, dcLatency.get("datacenter1").getCount());
+        assertEquals(1, dcLatency.get("datacenter1").dcLatency.getCount());
         long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, MILLISECONDS.toNanos(latency))) - 1];
-        assertEquals(expectedBucket, dcLatency.get("datacenter1").getSnapshot().getMax());
+        assertEquals(expectedBucket, dcLatency.get("datacenter1").dcLatency.getSnapshot().getMax());
     }
 
     @Test
@@ -171,7 +172,7 @@ public class MessagingServiceTest
         // if clocks are off should just not track anything
         int latency = -100;
 
-        ConcurrentHashMap<String, Timer> dcLatency = MessagingService.instance().metrics.dcLatency;
+        ConcurrentHashMap<String, MessagingMetrics.Updater> dcLatency = MessagingService.instance().metrics.dcUpdaters;
         dcLatency.clear();
 
         long now = ApproximateTime.currentTimeMillis();
@@ -188,7 +189,7 @@ public class MessagingServiceTest
         int latency = 100;
         Verb verb = Verb.MUTATION_REQ;
 
-        ConcurrentHashMap<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
+        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
         queueWaitLatency.clear();
 
         assertNull(queueWaitLatency.get(verb));
@@ -205,7 +206,7 @@ public class MessagingServiceTest
         int latency = -100;
         Verb verb = Verb.MUTATION_REQ;
 
-        ConcurrentHashMap<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
+        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
         queueWaitLatency.clear();
 
         assertNull(queueWaitLatency.get(verb));
@@ -304,7 +305,7 @@ public class MessagingServiceTest
 
     private static void addDCLatency(long sentAt, long nowTime) throws IOException
     {
-        Message.serializer.calculateCreationTimeNanos(InetAddressAndPort.getLocalHost(), (int) sentAt, nowTime);
+        MessagingService.instance().metrics.getForPeer(InetAddressAndPort.getLocalHost()).addTimeTaken(nowTime - sentAt, MILLISECONDS);
     }
 
     public static class MockBackPressureStrategy implements BackPressureStrategy<MockBackPressureStrategy.MockBackPressureState>

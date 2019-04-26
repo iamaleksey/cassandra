@@ -244,14 +244,15 @@ public class ConnectionBurnTest extends ConnectionTest
                 this.wrapped = wrapped;
             }
 
-            public void onArrived(long id)
-            {
-                forId(id).onArrived(id);
-            }
-
             public void onProcessed(int messageSize)
             {
                 throw new IllegalStateException(); // only the wrapped Callbacks should be invoked
+            }
+
+            public void onArrived(long id, long timeElapsed, TimeUnit unit)
+            {
+                forId(id).onArrived(id, timeElapsed, unit);
+                wrapped.onArrived(id, timeElapsed, unit);
             }
 
             public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit)

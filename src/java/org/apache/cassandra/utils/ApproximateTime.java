@@ -41,7 +41,7 @@ public class ApproximateTime
     private static final String CONVERSION_UPDATE_INTERVAL_PROPERTY = Config.PROPERTY_PREFIX + "NANOTIMETOMILLIS_TIMESTAMP_UPDATE_INTERVAL";
     private static final long ALMOST_SAME_TIME_UPDATE_INTERVAL_MS = Long.getLong(CONVERSION_UPDATE_INTERVAL_PROPERTY, 10000);
 
-    private static class AlmostSameTime
+    public static class AlmostSameTime
     {
         final long millis;
         final long nanos;
@@ -52,6 +52,16 @@ public class ApproximateTime
             this.millis = millis;
             this.nanos = nanos;
             this.error = error;
+        }
+
+        public long toCurrentTimeMillis(long nanoTime)
+        {
+            return millis + TimeUnit.NANOSECONDS.toMillis(nanoTime - nanos);
+        }
+
+        public long toNanoTime(long currentTimeMillis)
+        {
+            return nanos + TimeUnit.MILLISECONDS.toNanos(currentTimeMillis - millis);
         }
     }
 
@@ -156,14 +166,17 @@ public class ApproximateTime
      */
     public static long toCurrentTimeMillis(long nanoTime)
     {
-        final AlmostSameTime almostSameTime = ApproximateTime.almostSameTime;
-        return almostSameTime.millis + TimeUnit.NANOSECONDS.toMillis(nanoTime - almostSameTime.nanos);
+        return almostSameTime.toCurrentTimeMillis(nanoTime);
     }
 
     public static long toNanoTime(long currentTimeMillis)
     {
-        final AlmostSameTime almostSameTime = ApproximateTime.almostSameTime;
-        return almostSameTime.nanos + TimeUnit.MILLISECONDS.toNanos(currentTimeMillis - almostSameTime.millis);
+        return almostSameTime.toNanoTime(currentTimeMillis);
+    }
+
+    public static AlmostSameTime snapshot()
+    {
+        return almostSameTime;
     }
 
     public static long conversionErrorNanos()

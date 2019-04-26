@@ -19,11 +19,13 @@ package org.apache.cassandra.net;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableList;
 
 import org.apache.cassandra.batchlog.Batch;
 import org.apache.cassandra.batchlog.BatchRemoveVerbHandler;
@@ -152,6 +154,8 @@ public enum Verb
 
     // largest used ID: 99
     ;
+
+    public static final List<Verb> VERBS = ImmutableList.copyOf(Verb.values());
 
     public enum Priority
     {
