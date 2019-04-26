@@ -102,7 +102,7 @@ public class DroppedMessages
 
     public void incrementWithLatency(Message message, long timeTaken, TimeUnit units)
     {
-        incrementWithLatency(message.verb, timeTaken, units, message.isCrossNode());
+        incrementWithLatency(message.verb(), timeTaken, units, message.isCrossNode());
     }
 
     public void incrementWithLatency(Verb verb, long timeTaken, TimeUnit units, boolean isCrossNode)

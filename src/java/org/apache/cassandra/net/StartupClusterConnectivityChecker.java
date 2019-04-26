@@ -191,9 +191,9 @@ public class StartupClusterConnectivityChecker
 
             public void response(Message msg)
             {
-                if (acks.incrementAndCheck(msg.from))
+                if (acks.incrementAndCheck(msg.from()))
                 {
-                    String datacenter = getDatacenter.apply(msg.from);
+                    String datacenter = getDatacenter.apply(msg.from());
                     // We have to check because we might only have the local DC in the map
                     if (dcToRemainingPeers.containsKey(datacenter))
                         dcToRemainingPeers.get(datacenter).countDown();

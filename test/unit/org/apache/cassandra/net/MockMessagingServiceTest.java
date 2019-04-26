@@ -70,7 +70,7 @@ public class MockMessagingServiceTest
         {
             public void response(Message msg)
             {
-                assertEquals(ECHO_REQ, msg.verb);
+                assertEquals(ECHO_REQ, msg.verb());
                 assertEquals(echoMessage.payload, msg.payload);
             }
 

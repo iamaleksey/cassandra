@@ -19,6 +19,8 @@ package org.apache.cassandra.net.async;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.Verb;
 
 public interface MessageCallbacks
@@ -29,12 +31,12 @@ public interface MessageCallbacks
         public void onProcessed(int messageSize) {}
         public void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit) {}
         public void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit) {}
-        public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t) {}
+        public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t) {}
     };
 
     void onArrived(long id, long timeElapsed, TimeUnit unit);
     void onProcessed(int messageSize);
     void onExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit);
     void onArrivedExpired(int messageSize, long id, Verb verb, long timeElapsed, TimeUnit unit);
-    void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t);
+    void onFailedDeserialize(int messageSize, Header header, Throwable t);
 }

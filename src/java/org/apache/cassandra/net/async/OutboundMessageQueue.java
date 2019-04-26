@@ -59,7 +59,7 @@ public class OutboundMessageQueue
         maybePruneExpired(nowNanos);
 
         externalQueue.add(m);
-        maybeUpdateMinimumExpiryTime(m.expiresAtNanos);
+        maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
 
     private void maybeUpdateMinimumExpiryTime(long newTime)
@@ -206,7 +206,7 @@ public class OutboundMessageQueue
 
             public void onKept(Message<?> message)
             {
-                earliestExpiresAt = min(message.expiresAtNanos, earliestExpiresAt);
+                earliestExpiresAt = min(message.expiresAtNanos(), earliestExpiresAt);
             }
         }
 
@@ -244,7 +244,7 @@ public class OutboundMessageQueue
             @Override
             public void onKept(Message<?> message)
             {
-                earliestExpiresAt = min(message.expiresAtNanos, earliestExpiresAt);
+                earliestExpiresAt = min(message.expiresAtNanos(), earliestExpiresAt);
             }
         }
 
@@ -350,7 +350,7 @@ public class OutboundMessageQueue
 
     private static boolean shouldSend(Message<?> m, long nowNanos)
     {
-        return !ApproximateTime.isAfterNanoTime(nowNanos, m.expiresAtNanos);
+        return !ApproximateTime.isAfterNanoTime(nowNanos, m.expiresAtNanos());
     }
 
     @VisibleForTesting

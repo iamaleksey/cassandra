@@ -30,7 +30,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.async.MessageCallbacks;
-import org.apache.cassandra.utils.ApproximateTime;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -177,8 +176,8 @@ public class MatcherResponse
                     {
                         if (message.hasId())
                         {
-                            assert !sendResponses.contains(message.id) : "ID re-use for outgoing message";
-                            sendResponses.add(message.id);
+                            assert !sendResponses.contains(message.id()) : "ID re-use for outgoing message";
+                            sendResponses.add(message.id());
                         }
                     }
 
@@ -188,7 +187,7 @@ public class MatcherResponse
                         Message<?> response = fnResponse.apply(message, to);
                         if (response != null)
                         {
-                            CallbackInfo cb = MessagingService.instance().callbacks.get(message.id);
+                            CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
                             if (cb != null)
                                 cb.callback.response(response);
                             else

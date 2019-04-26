@@ -20,7 +20,6 @@ package org.apache.cassandra.net;
 
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
@@ -72,7 +71,7 @@ public class WriteCallbackInfo extends CallbackInfo
     private static Object shouldHint(boolean allowHints, Message sentMessage, ConsistencyLevel consistencyLevel)
     {
         return allowHints
-               && sentMessage.verb != Verb.COUNTER_MUTATION_REQ
+               && sentMessage.verb() != Verb.COUNTER_MUTATION_REQ
                && consistencyLevel != ConsistencyLevel.ANY
                ? sentMessage.payload : null;
     }

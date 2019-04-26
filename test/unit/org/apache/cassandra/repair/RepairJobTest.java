@@ -61,7 +61,6 @@ import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.service.ActiveRepairService;
 import org.apache.cassandra.streaming.PreviewKind;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTree;
@@ -831,7 +830,7 @@ public class RepairJobTest
 
             public boolean allowInbound(Message<?> message)
             {
-                return message.verb.isResponse();
+                return message.verb().isResponse();
             }
         });
     }

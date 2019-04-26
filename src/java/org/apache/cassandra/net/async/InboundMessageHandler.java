@@ -44,7 +44,6 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
-import org.apache.cassandra.net.Message.InvalidLegacyProtocolMagic;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
@@ -182,7 +181,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processIntactFrame(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         if (frame.isSelfContained)
             return processFrameOfContainedMessages(frame.contents, endpointReserve, globalReserve);
@@ -198,8 +197,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
      * off event-loop).
      */
 
-    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve)
-    throws InvalidLegacyProtocolMagic
+    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         while (bytes.isReadable())
             if (!processOneContainedMessage(bytes, endpointReserve, globalReserve))
@@ -207,14 +205,13 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         ByteBuffer buf = bytes.get();
 
         long currentTimeNanos = ApproximateTime.nanoTime();
-        Header header = serializer.getHeader(buf, currentTimeNanos, version);
-        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
-        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
+        Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
+        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
         if (header.expiresAtNanos < currentTimeNanos)
         {
@@ -233,14 +230,14 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         receivedBytes += size;
 
         if (size <= largeThreshold)
-            processContainedSmallMessage(bytes, size, header, callBackOnFailure);
+            processContainedSmallMessage(bytes, size, header);
         else
-            processContainedLargeMessage(bytes, size, header, callBackOnFailure);
+            processContainedLargeMessage(bytes, size, header);
 
         return true;
     }
 
-    private void processContainedSmallMessage(SharedBytes bytes, int size, Header header, boolean callBackOnFailure)
+    private void processContainedSmallMessage(SharedBytes bytes, int size, Header header)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -255,16 +252,16 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         catch (UnknownTableException | UnknownColumnException e)
         {
             noSpamLogger.info("{} {} caught while reading a small message", id(), e.getClass().getSimpleName(), e);
-            callbacks.onFailedDeserialize(size, header.id, header.expiresAtNanos, callBackOnFailure, e);
+            callbacks.onFailedDeserialize(size, header, e);
         }
         catch (IOException e)
         {
             logger.error("{} unexpected IOException caught while reading a small message", id(), e);
-            callbacks.onFailedDeserialize(size, header.id, header.expiresAtNanos, callBackOnFailure, e);
+            callbacks.onFailedDeserialize(size, header, e);
         }
         catch (Throwable t)
         {
-            callbacks.onFailedDeserialize(size, header.id, header.expiresAtNanos, callBackOnFailure, t);
+            callbacks.onFailedDeserialize(size, header, t);
             throw t;
         }
         finally
@@ -280,30 +277,29 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             processor.process(message, size, callbacks);
     }
 
-    private void processContainedLargeMessage(SharedBytes bytes, int size, Header header, boolean callBackOnFailure)
+    private void processContainedLargeMessage(SharedBytes bytes, int size, Header header)
     {
-        new LargeMessage(size, header, callBackOnFailure, bytes.sliceAndConsume(size).atomic()).scheduleCoprocessor();
+        new LargeMessage(size, header, bytes.sliceAndConsume(size).atomic()).scheduleCoprocessor();
     }
 
     /*
      * Handling of multi-frame large messages
      */
 
-    private boolean processFirstFrameOfLargeMessage(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws InvalidLegacyProtocolMagic
+    private boolean processFirstFrameOfLargeMessage(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         SharedBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
 
         long currentTimeNanos = ApproximateTime.nanoTime();
-        Header header = serializer.getHeader(buf, currentTimeNanos, version);
-        boolean callBackOnFailure = serializer.getCallBackOnFailure(buf, version);
-        int size = serializer.messageSize(buf, buf.position(), buf.limit(), version);
+        Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
+        int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
         if (header.expiresAtNanos < currentTimeNanos)
         {
             callbacks.onArrivedExpired(size, header.id, header.verb, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
             receivedBytes += buf.remaining();
-            largeMessage = new LargeMessage(size, header, callBackOnFailure, true);
+            largeMessage = new LargeMessage(size, header, true);
             largeMessage.supply(frame);
             return true;
         }
@@ -313,7 +309,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         callbacks.onArrived(header.id, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
         receivedBytes += buf.remaining();
-        largeMessage = new LargeMessage(size, header, callBackOnFailure, false);
+        largeMessage = new LargeMessage(size, header, false);
         largeMessage.supply(frame);
         return true;
     }
@@ -393,9 +389,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
 
             @Override
-            public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+            public void onFailedDeserialize(int messageSize, Header header, Throwable t)
             {
-                callbacks.onFailedDeserialize(messageSize, id, expiresAtNanos, callBackOnFailure, t);
+                callbacks.onFailedDeserialize(messageSize, header, t);
             }
         };
     }
@@ -604,23 +600,21 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         private final int size;
         private final Header header;
-        private final boolean callBackOnFailure;
 
         private List<SharedBytes> buffers;
         private int bytesReceived;
         private boolean isSkipping;
 
-        private LargeMessage(int size, Header header, boolean callBackOnFailure, boolean isSkipping)
+        private LargeMessage(int size, Header header, boolean isSkipping)
         {
             this.size = size;
             this.header = header;
-            this.callBackOnFailure = callBackOnFailure;
             this.isSkipping = isSkipping;
         }
 
-        private LargeMessage(int size, Header header, boolean callBackOnFailure, SharedBytes bytes)
+        private LargeMessage(int size, Header header, SharedBytes bytes)
         {
-            this(size, header, callBackOnFailure, false);
+            this(size, header, false);
             buffers = Collections.singletonList(bytes);
         }
 
@@ -656,7 +650,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                 try
                 {
-                    callbacks.onArrivedExpired(size, header.id, header.verb, currentTimeNanos - header.createdAtNanos, TimeUnit.NANOSECONDS);
+                    callbacks.onArrivedExpired(size, header.id, header.verb, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
                 }
                 finally
                 {
@@ -683,7 +677,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                 try
                 {
-                    callbacks.onFailedDeserialize(size, header.id, header.expiresAtNanos, callBackOnFailure, new InvalidCrc(frame.readCRC, frame.computedCRC));
+                    callbacks.onFailedDeserialize(size, header, new InvalidCrc(frame.readCRC, frame.computedCRC));
                 }
                 finally
                 {
@@ -766,23 +760,23 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (header.expiresAtNanos >= currentTimeNanos)
                     message = serializer.deserialize(input, peer, version);
                 else
-                    callbacks.onArrivedExpired(msg.size, header.id, header.verb, currentTimeNanos - header.createdAtNanos, TimeUnit.NANOSECONDS);
+                    callbacks.onArrivedExpired(msg.size, header.id, header.verb, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
                 noSpamLogger.info("{} {} caught while reading a large message", e.getClass().getSimpleName(), id(), e);
-                callbacks.onFailedDeserialize(msg.size, header.id, header.expiresAtNanos, msg.callBackOnFailure, e);
+                callbacks.onFailedDeserialize(msg.size, header, e);
             }
             catch (IOException e)
             {
                 logger.error("{} unexpected IOException caught while reading a large message", id(), e);
-                callbacks.onFailedDeserialize(msg.size, header.id, header.expiresAtNanos, msg.callBackOnFailure, e);
+                callbacks.onFailedDeserialize(msg.size, header, e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t);
                 logger.error("{} unexpected exception caught while reading a large message", id(), t);
-                callbacks.onFailedDeserialize(msg.size, header.id, header.expiresAtNanos, msg.callBackOnFailure, t);
+                callbacks.onFailedDeserialize(msg.size, header, t);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
             }
             finally

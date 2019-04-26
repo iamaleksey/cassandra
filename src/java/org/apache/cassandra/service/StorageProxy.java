@@ -2171,7 +2171,7 @@ public class StorageProxy implements StorageProxyMBean
             public void response(Message<UUID> message)
             {
                 // record the response from the remote node.
-                versions.put(message.from, message.payload);
+                versions.put(message.from(), message.payload);
                 latch.countDown();
             }
 

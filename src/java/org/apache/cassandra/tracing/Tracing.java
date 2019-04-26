@@ -257,14 +257,14 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
 
         TraceType traceType = message.traceType();
 
-        if (message.verb.isResponse())
+        if (message.verb().isResponse())
         {
             // received a message for a session we've already closed out.  see CASSANDRA-5668
-            return new ExpiredTraceState(newTraceState(message.from, sessionId, traceType));
+            return new ExpiredTraceState(newTraceState(message.from(), sessionId, traceType));
         }
         else
         {
-            ts = newTraceState(message.from, sessionId, traceType);
+            ts = newTraceState(message.from(), sessionId, traceType);
             sessions.put(sessionId, ts);
             return ts;
         }
@@ -281,7 +281,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
             if (sessionId == null)
                 return;
 
-            String logMessage = String.format("Sending %s message to %s", message.verb, sendTo);
+            String logMessage = String.format("Sending %s message to %s", message.verb(), sendTo);
 
             TraceState state = get(sessionId);
             if (state == null) // session may have already finished; see CASSANDRA-5668
@@ -292,7 +292,7 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
             else
             {
                 state.trace(logMessage);
-                if (message.verb.isResponse())
+                if (message.verb().isResponse())
                     doneWithNonLocalSession(state);
             }
         }

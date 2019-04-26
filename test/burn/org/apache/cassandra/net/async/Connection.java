@@ -156,7 +156,7 @@ class Connection implements MessageCallbacks, MessageProcessor
         verifier.expireOnSend(id, messageSize, timeElapsed, timeUnit);
     }
 
-    public void onFailedDeserialize(int messageSize, long id, long expiresAtNanos, boolean callBackOnFailure, Throwable t)
+    public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
     {
         controller.fail(messageSize);
     }

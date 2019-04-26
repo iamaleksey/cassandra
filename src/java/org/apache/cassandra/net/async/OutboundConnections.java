@@ -203,7 +203,7 @@ public class OutboundConnections
         if (specifyConnection != null)
             return specifyConnection;
 
-        if (msg.verb.priority == Verb.Priority.P0)
+        if (msg.verb().priority == Verb.Priority.P0)
             return URGENT_MESSAGES;
 
         return msg.serializedSize(current_version) <= LARGE_MESSAGE_THRESHOLD
