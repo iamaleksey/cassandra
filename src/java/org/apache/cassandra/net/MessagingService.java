@@ -49,7 +49,7 @@ import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.MessageCallbacks;
+import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.net.async.SocketFactory;
@@ -456,7 +456,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    public void process(Message message, int messageSize, MessageCallbacks callbacks)
+    public void process(Message message, int messageSize, InboundMessageCallbacks callbacks)
     {
         TraceState state = Tracing.instance.initializeFromMessage(message);
         if (state != null)

@@ -35,7 +35,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
-class Connection implements MessageCallbacks, MessageProcessor
+class Connection implements InboundMessageCallbacks, MessageProcessor, OutboundMessageCallbacks
 {
     private static final Logger logger = LoggerFactory.getLogger(Connection.class);
 
@@ -52,19 +52,27 @@ class Connection implements MessageCallbacks, MessageProcessor
 
     private final AtomicLong nextSendId = new AtomicLong();
 
-    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, InboundMessageHandlers inboundHandlers, OutboundConnection outbound, MessageGenerator generator, long minId, long maxId)
+    Connection(InetAddressAndPort sender, InetAddressAndPort recipient, ConnectionType type,
+               InboundMessageHandlers inboundHandlers,
+               OutboundConnectionSettings outboundTemplate, ResourceLimits.EndpointAndGlobal reserveCapacityInBytes,
+               MessageGenerator generator,
+               long minId, long maxId)
     {
         this.sender = sender;
         this.recipient = recipient;
-        this.outbound = outbound;
         this.controller = new BytesInFlightController(1 << 20);
         this.sendGenerator = generator.copy();
         this.minId = minId;
         this.maxId = maxId;
         this.inboundHandlers = inboundHandlers;
         this.nextSendId.set(minId);
-        this.linkId = sender.toString(false) + "->" + recipient.toString(false) + "-" + outbound.type();
-        this.verifier = new Verifier(outbound.type());
+        this.linkId = sender.toString(false) + "->" + recipient.toString(false) + "-" + type;
+        this.verifier = new Verifier(controller, type);
+        this.outbound = new OutboundConnection(type,
+                                               outboundTemplate.toEndpoint(recipient)
+                                                               .withFrom(sender)
+                                                               .withCallbacks(this),
+                                               reserveCapacityInBytes);
     }
 
     void start(Runnable onFailure, Executor executor, long deadlineNanos)
@@ -101,7 +109,7 @@ class Connection implements MessageCallbacks, MessageProcessor
             }
 
             controller.send(msg.serializedSize(current_version));
-            Verifier.EnqueueMessageEvent e = verifier.enqueue(msg);
+            Verifier.EnqueueMessageEvent e = verifier.onEnqueue(msg);
             outbound.enqueue(msg);
             e.complete(verifier);
         }
@@ -114,23 +122,23 @@ class Connection implements MessageCallbacks, MessageProcessor
 
     public void onSerialize(long id, int messagingVersion)
     {
-        verifier.serialize(id, messagingVersion);
+        verifier.onSerialize(id, messagingVersion);
     }
 
     public void onDeserialize(long id, int messagingVersion)
     {
-        verifier.deserialize(id, messagingVersion);
+        verifier.onDeserialize(id, messagingVersion);
     }
 
-    public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
+    public void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks)
     {
         controller.process(messageSize, callbacks);
-        verifier.process(message, messageSize);
+        verifier.onProcessed(message, messageSize);
     }
 
     public void onArrived(Message.Header header, long timeElapsed, TimeUnit units)
     {
-        verifier.arrive(header.id);
+        verifier.onArrived(header.id);
     }
 
     public void onProcessed(int messageSize)
@@ -141,24 +149,19 @@ class Connection implements MessageCallbacks, MessageProcessor
     public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
     {
         controller.fail(messageSize);
-        verifier.processExpired(header.id, messageSize, timeElapsed, timeUnit);
+        verifier.onProcessedExpired(header.id, messageSize, timeElapsed, timeUnit);
     }
 
     public void onArrivedExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
     {
         controller.fail(messageSize);
-        verifier.expireOnArrival(header.id, messageSize, timeElapsed, timeUnit);
-    }
-
-    public void onSentExpired(int messageSize, long id, long timeElapsed, TimeUnit timeUnit)
-    {
-        controller.fail(messageSize);
-        verifier.expireOnSend(id, messageSize, timeElapsed, timeUnit);
+        verifier.onArrivedExpired(header.id, messageSize, timeElapsed, timeUnit);
     }
 
     public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
     {
         controller.fail(messageSize);
+        verifier.onFailedDeserialize(header.id);
     }
 
     InboundCounters inboundCounters()
@@ -166,5 +169,44 @@ class Connection implements MessageCallbacks, MessageProcessor
         return inboundHandlers.countersFor(outbound.type());
     }
 
+    public void onSendFrame(int messageCount, int payloadSizeInBytes)
+    {
+        verifier.onSendFrame(messageCount, payloadSizeInBytes);
+    }
+
+    public void onSentFrame(int messageCount, int payloadSizeInBytes)
+    {
+        verifier.onSentFrame(messageCount, payloadSizeInBytes);
+    }
+
+    public void onFailedFrame(int messageCount, int payloadSizeInBytes)
+    {
+        controller.fail(payloadSizeInBytes);
+        verifier.onFailedFrame(messageCount, payloadSizeInBytes);
+    }
+
+    public void onOverloaded(Message<?> message)
+    {
+        controller.fail(message.serializedSize(current_version));
+        verifier.onOverloaded(message.id());
+    }
+
+    public void onExpired(Message<?> message)
+    {
+        controller.fail(message.serializedSize(current_version));
+        verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
+    }
+
+    public void onFailedSerialize(Message<?> message)
+    {
+        controller.fail(message.serializedSize(current_version));
+        verifier.onFailedSerialize(message.id());
+    }
+
+    public void onClosed(Message<?> message)
+    {
+        controller.fail(message.serializedSize(current_version));
+        verifier.onFailedClosing(message.id());
+    }
 }
 

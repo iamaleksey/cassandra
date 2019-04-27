@@ -119,8 +119,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                .column(EXPIRED_BYTES, sum(connections, OutboundConnection::expiredBytes))
                .column(ERROR_COUNT, sum(connections, OutboundConnection::errorCount))
                .column(ERROR_BYTES, sum(connections, OutboundConnection::errorBytes))
-               .column(OVERLOAD_COUNT, sum(connections, OutboundConnection::overloadCount))
-               .column(OVERLOAD_BYTES, sum(connections, OutboundConnection::overloadBytes))
+               .column(OVERLOAD_COUNT, sum(connections, OutboundConnection::overloadedCount))
+               .column(OVERLOAD_BYTES, sum(connections, OutboundConnection::overloadedBytes))
                .column(ACTIVE_CONNECTION_COUNT, sum(connections, c -> c.isConnected() ? 1 : 0))
                .column(CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::connectionAttempts))
                .column(SUCCESSFUL_CONNECTION_ATTEMPTS, sum(connections, OutboundConnection::successfulConnections));

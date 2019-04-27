@@ -70,7 +70,7 @@ import org.apache.cassandra.net.ProcessMessageTask;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.MessageCallbacks;
+import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -222,7 +222,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             try (DataInputBuffer in = new DataInputBuffer(message.bytes()))
             {
                 Message<?> messageIn = Message.serializer.deserialize(in, message.from(), message.version());
-                Runnable deliver = new ProcessMessageTask(messageIn, 0, MessageCallbacks.NOOP);
+                Runnable deliver = new ProcessMessageTask(messageIn, 0, InboundMessageCallbacks.NOOP);
                 deliver.run();
             }
             catch (Throwable t)

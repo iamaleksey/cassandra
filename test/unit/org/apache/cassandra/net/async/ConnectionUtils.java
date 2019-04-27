@@ -107,8 +107,8 @@ public class ConnectionUtils
             }
             if (checkOverload)
             {
-                Assert.assertEquals(overload, connection.overloadCount());
-                Assert.assertEquals(overloadBytes, connection.overloadBytes());
+                Assert.assertEquals(overload, connection.overloadedCount());
+                Assert.assertEquals(overloadBytes, connection.overloadedBytes());
             }
             if (checkExpired)
             {
