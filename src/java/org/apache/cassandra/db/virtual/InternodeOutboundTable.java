@@ -21,11 +21,13 @@ import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.util.function.ToLongFunction;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
@@ -37,6 +39,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
 {
     private static final String ADDRESS = "address";
     private static final String PORT = "port";
+    private static final String DC = "dc";
+    private static final String RACK = "rack";
 
     private static final String SENT_COUNT = "sent_count";
     private static final String SENT_BYTES = "sent_bytes";
@@ -59,6 +63,8 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                            .partitioner(new LocalPartitioner(CompositeType.getInstance(InetAddressType.instance, Int32Type.instance)))
                            .addPartitionKeyColumn(ADDRESS, InetAddressType.instance)
                            .addPartitionKeyColumn(PORT, Int32Type.instance)
+                           .addClusteringColumn(DC, UTF8Type.instance)
+                           .addClusteringColumn(RACK, UTF8Type.instance)
                            .addRegularColumn(SENT_COUNT, LongType.instance)
                            .addRegularColumn(SENT_BYTES, LongType.instance)
                            .addRegularColumn(PENDING_COUNT, LongType.instance)
@@ -102,7 +108,9 @@ final class InternodeOutboundTable extends AbstractVirtualTable
 
     private void addRow(SimpleDataSet dataSet, InetAddressAndPort addressAndPort, OutboundConnections connections)
     {
-        dataSet.row(addressAndPort.address, addressAndPort.port)
+        String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(addressAndPort);
+        String rack = DatabaseDescriptor.getEndpointSnitch().getRack(addressAndPort);
+        dataSet.row(addressAndPort.address, addressAndPort.port, dc, rack)
                .column(SENT_COUNT, sum(connections, OutboundConnection::sentCount))
                .column(SENT_BYTES, sum(connections, OutboundConnection::sentBytes))
                .column(PENDING_COUNT, sum(connections, OutboundConnection::pendingCount))
