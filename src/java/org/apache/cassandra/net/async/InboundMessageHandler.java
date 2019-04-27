@@ -232,7 +232,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         receivedCount++;
         receivedBytes += size;
 
-        if (size < largeThreshold)
+        if (size <= largeThreshold)
             processContainedSmallMessage(bytes, size, header, callBackOnFailure);
         else
             processContainedLargeMessage(bytes, size, header, callBackOnFailure);

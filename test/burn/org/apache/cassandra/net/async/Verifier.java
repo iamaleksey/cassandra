@@ -174,7 +174,7 @@ public class Verifier
         final EventType expectState;
         ExpiredMessageEvent(long at, long messageId, int size, long timeElapsed, TimeUnit timeUnit, EventType expectState)
         {
-            super(PROCESS, at, messageId);
+            super(FAIL_EXPIRED, at, messageId);
             this.size = size;
             this.timeElapsed = timeElapsed;
             this.timeUnit = timeUnit;

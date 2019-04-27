@@ -56,6 +56,7 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
@@ -347,6 +348,7 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
         test(inboundSettings, new OutboundConnectionSettings(null)
+                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
                               .withTcpUserTimeoutInMS(0));
         MessagingService.instance().socketFactory.shutdownNow();
     }
