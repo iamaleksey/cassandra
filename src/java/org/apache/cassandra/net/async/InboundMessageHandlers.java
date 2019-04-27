@@ -53,18 +53,18 @@ public final class InboundMessageHandlers
 
     private final InternodeInboundMetrics metrics;
 
-    // allow tests to wrap or replace MessageCallbacks used by individual handlers
-    private final Function<MessageCallbacks, MessageCallbacks> callbacksTransformer;
+    // allow tests to wrap or replace InboundMessageCallbacks used by individual handlers
+    private final Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer;
 
     private final InboundCounters urgentCounters = new InboundCounters();
     private final InboundCounters smallCounters  = new InboundCounters();
     private final InboundCounters largeCounters  = new InboundCounters();
     private final InboundCounters legacyCounters = new InboundCounters();
 
-    private final MessageCallbacks urgentCallbacks;
-    private final MessageCallbacks smallCallbacks;
-    private final MessageCallbacks largeCallbacks;
-    private final MessageCallbacks legacyCallbacks;
+    private final InboundMessageCallbacks urgentCallbacks;
+    private final InboundMessageCallbacks smallCallbacks;
+    private final InboundMessageCallbacks largeCallbacks;
+    private final InboundMessageCallbacks legacyCallbacks;
 
     private final MessageProcessor urgentProcessor;
     private final MessageProcessor smallProcessor;
@@ -91,7 +91,7 @@ public final class InboundMessageHandlers
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
                                   MessageProcessor messageProcessor,
-                                  Function<MessageCallbacks, MessageCallbacks> callbacksTransformer)
+                                  Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer)
     {
         this.self = self;
         this.peer = peer;
@@ -187,7 +187,7 @@ public final class InboundMessageHandlers
      * Message callbacks
      */
 
-    private MessageCallbacks callbacksFor(ConnectionType type)
+    private InboundMessageCallbacks callbacksFor(ConnectionType type)
     {
         switch (type)
         {
@@ -200,11 +200,10 @@ public final class InboundMessageHandlers
         throw new IllegalArgumentException();
     }
 
-    private static MessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
+    private static InboundMessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
     {
         final MessagingMetrics.Updater latencyUpdater = MessagingService.instance().metrics.getForPeer(peer);
-
-        return new MessageCallbacks()
+        return new InboundMessageCallbacks()
         {
             @Override
             public void onArrived(Header header, long timeElapsed, TimeUnit unit)

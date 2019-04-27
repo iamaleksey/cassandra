@@ -67,7 +67,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 {
     public interface MessageProcessor
     {
-        void process(Message<?> message, int messageSize, MessageCallbacks callbacks);
+        void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks);
     }
 
     public interface OnHandlerClosed
@@ -107,7 +107,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final WaitQueue globalWaitQueue;
 
     private final OnHandlerClosed onClosed;
-    private final MessageCallbacks callbacks;
+    private final InboundMessageCallbacks callbacks;
     private final MessageProcessor processor;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
@@ -134,8 +134,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           WaitQueue globalWaitQueue,
 
                           OnHandlerClosed onClosed,
-                          MessageCallbacks callbacks,
-                          Function<MessageCallbacks, MessageCallbacks> callbacksTransformer, // for testing purposes only
+                          InboundMessageCallbacks callbacks,
+                          Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer, // for testing purposes only
                           MessageProcessor processor)
     {
         this.decoder = decoder;
@@ -256,6 +256,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         catch (IOException e)
         {
+            // TODO: is there really anything particularly special about an IOException vs other kind of exception?
             logger.error("{} unexpected IOException caught while reading a small message", id(), e);
             callbacks.onFailedDeserialize(size, header, e);
         }
@@ -359,9 +360,9 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     /*
      * Wrap parent message callbacks to ensure capacity is released onProcessed() and onExpired()
      */
-    private MessageCallbacks wrapToReleaseCapacity(MessageCallbacks callbacks)
+    private InboundMessageCallbacks wrapToReleaseCapacity(InboundMessageCallbacks callbacks)
     {
-        return new MessageCallbacks()
+        return new InboundMessageCallbacks()
         {
             public void onArrived(Header header, long timeElapsed, TimeUnit unit)
             {
@@ -773,7 +774,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             catch (Throwable t)
             {
-                JVMStabilityInspector.inspectThrowable(t);
+                JVMStabilityInspector.inspectThrowable(t, false);
                 logger.error("{} unexpected exception caught while reading a large message", id(), t);
                 callbacks.onFailedDeserialize(msg.size, header, t);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);

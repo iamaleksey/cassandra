@@ -21,6 +21,7 @@ package org.apache.cassandra.net.async;
 import java.io.IOException;
 import java.net.ConnectException;
 import java.nio.channels.ClosedChannelException;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -48,6 +49,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -92,14 +94,15 @@ public class OutboundConnection
 
     private static final AtomicLongFieldUpdater<OutboundConnection> submittedUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "submittedCount");
     private static final AtomicLongFieldUpdater<OutboundConnection> pendingCountAndBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "pendingCountAndBytes");
-    private static final AtomicLongFieldUpdater<OutboundConnection> droppedDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadCount");
-    private static final AtomicLongFieldUpdater<OutboundConnection> droppedBytesDueToOverloadUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadBytes");
+    private static final AtomicLongFieldUpdater<OutboundConnection> overloadedCountUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadedCount");
+    private static final AtomicLongFieldUpdater<OutboundConnection> overloadedBytesUpdater = AtomicLongFieldUpdater.newUpdater(OutboundConnection.class, "overloadedBytes");
     private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> closingUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "closing");
     private static final AtomicReferenceFieldUpdater<OutboundConnection, Future> scheduledCloseUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundConnection.class, Future.class, "scheduledClose");
 
     private final EventLoop eventLoop;
     private final Delivery delivery;
 
+    private final OutboundMessageCallbacks callbacks;
     private final OutboundMessageQueue queue;
     /** the number of bytes we permit to queue to the network without acquiring any shared resource permits */
     private final long pendingCapacityInBytes;
@@ -112,13 +115,13 @@ public class OutboundConnection
     private final EndpointAndGlobal reserveCapacityInBytes;
 
     private volatile long submittedCount = 0;   // updated with cas
-    private volatile long overloadCount = 0;    // updated with cas
-    private volatile long overloadBytes = 0;    // updated with cas
+    private volatile long overloadedCount = 0;  // updated with cas
+    private volatile long overloadedBytes = 0;  // updated with cas
     private long expiredCount = 0;              // updated with queue lock held
     private long expiredBytes = 0;              // updated with queue lock held
     private long errorCount = 0;                // updated only by delivery thread
     private long errorBytes = 0;                // updated by delivery thread only
-    private long sent;                          // updated by delivery thread only
+    private long sentCount;                     // updated by delivery thread only
     private long sentBytes;                     // updated by delivery thread only
     private long successfulConnections;         // updated by event loop only
     private long connectionAttempts;            // updated by event loop only
@@ -209,7 +212,8 @@ public class OutboundConnection
         this.eventLoop = settings.socketFactory.defaultGroup().next();
         this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
-        this.queue = new OutboundMessageQueue(this::onTimeout);
+        this.callbacks = settings.callbacks;
+        this.queue = new OutboundMessageQueue(this::onExpired);
         this.delivery = type == ConnectionType.LARGE_MESSAGES
                         ? new LargeMessageDelivery()
                         : new EventLoopDelivery();
@@ -235,7 +239,7 @@ public class OutboundConnection
                     SUCCESS == acquireCapacity(canonicalSize(message)))
                     break;
             case INSUFFICIENT_GLOBAL:
-                onOverload(message);
+                onOverloaded(message);
                 return;
         }
 
@@ -347,20 +351,17 @@ public class OutboundConnection
         }
     }
 
-    /**
-     * Take any necessary cleanup action after a message has been rejected before reaching the queue
-     */
-    private void onOverload(Message<?> msg)
+    private void onOverloaded(Message<?> message)
     {
-        droppedDueToOverloadUpdater.incrementAndGet(this);
-        droppedBytesDueToOverloadUpdater.addAndGet(this, canonicalSize(msg));
+        overloadedCountUpdater.incrementAndGet(this);
+        overloadedBytesUpdater.addAndGet(this, canonicalSize(message));
         noSpamLogger.warn("{} overloaded; dropping {} message (queue: {} local, {} endpoint, {} global)",
                           id(),
-                          FBUtilities.prettyPrintMemory(canonicalSize(msg)),
+                          FBUtilities.prettyPrintMemory(canonicalSize(message)),
                           FBUtilities.prettyPrintMemory(pendingBytes()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
-        MessagingService.instance().callbacks.removeAndExpire(msg.id());
+        callbacks.onOverloaded(message);
     }
 
     /**
@@ -368,13 +369,13 @@ public class OutboundConnection
      *
      * Only to be invoked while holding OutboundMessageQueue.WithLock
      */
-    private boolean onTimeout(Message<?> msg)
+    private boolean onExpired(Message<?> message)
     {
-        releaseCapacity(1, canonicalSize(msg));
+        releaseCapacity(1, canonicalSize(message));
         expiredCount += 1;
-        expiredBytes += canonicalSize(msg);
-        noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), msg.verb());
-        MessagingService.instance().callbacks.removeAndExpire(msg.id());
+        expiredBytes += canonicalSize(message);
+        noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), message.verb());
+        callbacks.onExpired(message);
         return true;
     }
 
@@ -383,14 +384,14 @@ public class OutboundConnection
      *
      * Only to be invoked by the delivery thread
      */
-    private void onError(Message<?> msg, Throwable t)
+    private void onFailedSerialize(Message<?> message, Throwable t)
     {
-        JVMStabilityInspector.inspectThrowable(t);
-        releaseCapacity(1, canonicalSize(msg));
+        JVMStabilityInspector.inspectThrowable(t, false);
+        releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
-        errorBytes += canonicalSize(msg);
-        logger.warn("{} dropping message of type {} due to error", id(), msg.verb(), t);
-        MessagingService.instance().callbacks.removeAndExpire(msg.id());
+        errorBytes += canonicalSize(message);
+        logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
+        callbacks.onFailedSerialize(message);
     }
 
     /**
@@ -398,10 +399,11 @@ public class OutboundConnection
      * Note that this is only for messages that were queued prior to closing without graceful flush, OR
      * for those that are unceremoniously dropped when we decide close has been trying to complete for too long.
      */
-    private void onDiscardOnClosing(Message<?> msg)
+    private void onClosed(Message<?> message)
     {
-        releaseCapacity(1, canonicalSize(msg));
-        MessagingService.instance().callbacks.removeAndExpire(msg.id());
+        releaseCapacity(1, canonicalSize(message));
+        callbacks.onClosed(message);
+        MessagingService.instance().callbacks.removeAndExpire(message.id());
     }
 
     /**
@@ -485,10 +487,8 @@ public class OutboundConnection
          */
         void executeAgain()
         {
-            /**
-             * if we are already executing, set EXECUTING_AGAIN and leaves scheduling to the currently running one
-             * otherwise, set ourselves unconditionally to EXECUTING and schedule ourselves immediately
-             */
+             // if we are already executing, set EXECUTING_AGAIN and leave scheduling to the currently running one.
+             // otherwise, set ourselves unconditionally to EXECUTING and schedule ourselves immediately
             if (!isExecuting(getAndUpdate(i -> isExecuting(i) ? EXECUTING : EXECUTING_AGAIN)))
                 executor.execute(this);
         }
@@ -512,9 +512,6 @@ public class OutboundConnection
          */
         private void maybeExecuteAgain()
         {
-            /**
-             * If we are
-             */
             if (EXECUTING_AGAIN == getAndUpdate(i -> i == EXECUTING_AGAIN ? EXECUTING : (i & ~EXECUTING)))
                 executor.execute(this);
         }
@@ -548,27 +545,11 @@ public class OutboundConnection
         }
 
         /**
-         * Invalidate the channel if the exception indicates the channel is in a bad state
-         */
-        boolean invalidateChannelIfConnectionReset(Channel channel, Throwable cause)
-        {
-            // TODO: should we just invalidate the channel whatever happens?
-            if (isCausedBy(cause, t ->    isConnectionReset(t)
-                                       || t instanceof Errors.NativeIoException
-                                       || t instanceof AsyncChannelOutputPlus.FlushException))
-            {
-                invalidateChannel(channel, cause);
-                return false;
-            }
-            return true;
-        }
-
-        /**
          * Handle a failure during delivery that invalidates the channel
          */
         void invalidateChannel(Channel channel, Throwable cause)
         {
-            JVMStabilityInspector.inspectThrowable(cause);
+            JVMStabilityInspector.inspectThrowable(cause, false);
             if (isCausedByConnectionReset(cause))
                 logger.debug("{} channel closed by provider", id(), cause);
             else
@@ -584,7 +565,7 @@ public class OutboundConnection
          */
         public void run()
         {
-            /** do/while handling setup for {@link #doRun()}, and repeat invocations thereof */
+            /* do/while handling setup for {@link #doRun()}, and repeat invocations thereof */
             do
             {
                 if (terminated)
@@ -700,7 +681,7 @@ public class OutboundConnection
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
             int sendingBytes = 0;
             int sendingCount = 0;
-            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(System.nanoTime(), this::execute))
+            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(ApproximateTime.nanoTime(), this::execute))
             {
                 if (withLock == null)
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
@@ -744,7 +725,8 @@ public class OutboundConnection
                     }
                     catch (Throwable t)
                     {
-                        onError(next, t);
+                        onFailedSerialize(next, t);
+
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
                         sending.trim(sendingBytes);
@@ -755,13 +737,15 @@ public class OutboundConnection
                     return false;
 
                 sending.finish();
+                callbacks.onSendFrame(sendingCount, sendingBytes);
                 ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(channel, sending);
                 sending = null;
 
                 if (flushResult.isSuccess())
                 {
-                    sent += sendingCount;
+                    sentCount += sendingCount;
                     sentBytes += sendingBytes;
+                    callbacks.onSentFrame(sendingCount, sendingBytes);
                 }
                 else
                 {
@@ -794,14 +778,16 @@ public class OutboundConnection
 
                         if (future.isSuccess())
                         {
-                            sent += sendingCountFinal;
+                            sentCount += sendingCountFinal;
                             sentBytes += sendingBytesFinal;
+                            callbacks.onSentFrame(sendingCountFinal, sendingBytesFinal);
                         }
                         else
                         {
                             errorCount += sendingCountFinal;
                             errorBytes += sendingBytesFinal;
                             invalidateChannel(closeChannelOnFailure, future.cause());
+                            callbacks.onFailedFrame(sendingCountFinal, sendingBytesFinal);
                         }
                     });
                     canonicalSize = 0;
@@ -883,7 +869,7 @@ public class OutboundConnection
         @SuppressWarnings("resource") // this suppression is for the ecj compiler
         boolean doRun()
         {
-            Message<?> send = queue.tryPoll(System.nanoTime(), this::execute);
+            Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
             if (send == null)
                 return false;
 
@@ -898,14 +884,15 @@ public class OutboundConnection
                     throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + out.position());
 
                 out.close();
-                sent += 1;
+                sentCount += 1;
                 sentBytes += messageSize;
                 releaseCapacity(1, canonicalSize(send));
                 return hasPending();
             }
             catch (Throwable t)
             {
-                onError(send, t);
+                onFailedSerialize(send, t);
+
                 out.discard();
                 if (out.flushed() > 0 ||
                     isCausedBy(t, cause ->    isConnectionReset(cause)
@@ -969,7 +956,7 @@ public class OutboundConnection
             else
                 noSpamLogger.error("{} failed to connect", id(), cause);
 
-            JVMStabilityInspector.inspectThrowable(cause);
+            JVMStabilityInspector.inspectThrowable(cause, false);
             isFailingToConnect = true;
             if (hasPending())
                 connecting = eventLoop.schedule(this::attempt, max(100, retryRateMillis), MILLISECONDS);
@@ -1130,6 +1117,12 @@ public class OutboundConnection
      */
     Future<Void> reconnectWithNewTemplate(OutboundConnectionSettings newTemplate)
     {
+        if (newTemplate.socketFactory != template.socketFactory) throw new IllegalArgumentException();
+        if (newTemplate.callbacks != template.callbacks) throw new IllegalArgumentException();
+        if (!Objects.equals(newTemplate.applicationSendQueueCapacityInBytes, template.applicationSendQueueCapacityInBytes)) throw new IllegalArgumentException();
+        if (!Objects.equals(newTemplate.applicationReserveSendQueueEndpointCapacityInBytes, template.applicationReserveSendQueueEndpointCapacityInBytes)) throw new IllegalArgumentException();
+        if (newTemplate.applicationReserveSendQueueGlobalCapacityInBytes != template.applicationReserveSendQueueGlobalCapacityInBytes) throw new IllegalArgumentException();
+
         Promise<Void> done;
         done = AsyncPromise.uncancellable(eventLoop);
         runOnEventLoop(() -> {
@@ -1338,7 +1331,7 @@ public class OutboundConnection
          *  is between messages, that checks if the queue is empty; if it is, it schedules cleanup on the eventLoop.
          */
 
-        Runnable clearQueue = () -> queue.runEventually(System.nanoTime(), withLock -> withLock.consume(this::onDiscardOnClosing));
+        Runnable clearQueue = () -> queue.runEventually(ApproximateTime.nanoTime(), withLock -> withLock.consume(this::onClosed));
 
         if (flushQueue)
         {
@@ -1432,7 +1425,7 @@ public class OutboundConnection
     public long sentCount()
     {
         // not volatile, but shouldn't matter
-        return sent;
+        return sentCount;
     }
 
     public long sentBytes()
@@ -1449,17 +1442,17 @@ public class OutboundConnection
 
     public long dropped()
     {
-        return overloadCount + expiredCount;
+        return overloadedCount + expiredCount;
     }
 
-    public long overloadBytes()
+    public long overloadedBytes()
     {
-        return overloadBytes;
+        return overloadedBytes;
     }
 
-    public long overloadCount()
+    public long overloadedCount()
     {
-        return overloadCount;
+        return overloadedCount;
     }
 
     public long expiredCount()

@@ -24,7 +24,6 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
-import java.util.function.IntConsumer;
 
 import org.apache.cassandra.utils.Pair;
 
@@ -36,7 +35,7 @@ public class BytesInFlightController
     private volatile long minimumInFlightBytes, maximumInFlightBytes;
     private volatile long sentBytes;
     private volatile long receivedBytes;
-    private final ConcurrentLinkedQueue<Pair<Integer, MessageCallbacks>> deferredBytes = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Pair<Integer, InboundMessageCallbacks>> deferredBytes = new ConcurrentLinkedQueue<>();
     private final ConcurrentSkipListMap<Long, Thread> waitingToSend = new ConcurrentSkipListMap<>();
 
     public BytesInFlightController(long maximumInFlightBytes)
@@ -58,7 +57,8 @@ public class BytesInFlightController
 
             boolean isInterrupted;
             while (!(isInterrupted = Thread.currentThread().isInterrupted())
-                   && waitUntilReceived - receivedBytes >= 0)
+                   && waitUntilReceived - receivedBytes >= 0
+                   && waitingToSend.get(waitUntilReceived) != null)
                 LockSupport.park();
             waitingToSend.remove(waitUntilReceived);
 
@@ -67,13 +67,20 @@ public class BytesInFlightController
         }
     }
 
+    public void adjust(int predictedSentBytes, int actualSentBytes)
+    {
+        receivedBytesUpdater.addAndGet(this, predictedSentBytes - actualSentBytes);
+        if (predictedSentBytes > actualSentBytes)
+            wakeupSenders();
+    }
+
     public void fail(int bytes)
     {
         receivedBytesUpdater.addAndGet(this, bytes);
         wakeupSenders();
     }
 
-    public void process(int bytes, MessageCallbacks callbacks)
+    public void process(int bytes, InboundMessageCallbacks callbacks)
     {
         while (true)
         {
@@ -129,12 +136,12 @@ public class BytesInFlightController
             if (sent - received > untilMinimumInFlightBytes && ThreadLocalRandom.current().nextFloat() > 0.5f)
                 break;
 
-            Pair<Integer, MessageCallbacks> next = deferredBytes.poll();
+            Pair<Integer, InboundMessageCallbacks> next = deferredBytes.poll();
             if (next == null)
                 break;
 
             int receive = next.left;
-            MessageCallbacks callbacks = next.right;
+            InboundMessageCallbacks callbacks = next.right;
             while (true)
             {
                 long newReceived = received + receive;

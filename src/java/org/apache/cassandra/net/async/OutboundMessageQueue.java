@@ -35,7 +35,7 @@ public class OutboundMessageQueue
 {
     public interface MessageConsumer<Produces extends Throwable>
     {
-        public boolean accept(Message<?> message) throws Produces;
+        boolean accept(Message<?> message) throws Produces;
     }
 
     private final MessageConsumer<RuntimeException> onExpired;
@@ -54,10 +54,7 @@ public class OutboundMessageQueue
 
     public void add(Message<?> m)
     {
-        long nowNanos = System.nanoTime();
-
-        maybePruneExpired(nowNanos);
-
+        maybePruneExpired();
         externalQueue.add(m);
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
@@ -125,8 +122,8 @@ public class OutboundMessageQueue
 
         public void removeHead(Message<?> expectHead)
         {
-            if (expectHead == internalQueue.peek())
-                internalQueue.poll();
+            assert expectHead == internalQueue.peek();
+            internalQueue.poll();
         }
 
         public Message<?> peek()
@@ -163,7 +160,7 @@ public class OutboundMessageQueue
      */
     boolean maybePruneExpired()
     {
-        return maybePruneExpired(System.nanoTime());
+        return maybePruneExpired(ApproximateTime.nanoTime());
     }
 
     private boolean maybePruneExpired(long nowNanos)

@@ -31,6 +31,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
+import org.apache.cassandra.net.async.OutboundMessageCallbacks;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.utils.ExpiringMap;
@@ -42,6 +43,7 @@ public class Callbacks
 {
     /* This records all the results mapped by message Id */
     private final ExpiringMap<Long, CallbackInfo> callbacks;
+    private final OutboundMessageCallbacks onDrop;
 
     public Callbacks(MessagingService messagingService)
     {
@@ -76,6 +78,7 @@ public class Callbacks
         };
 
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS), NANOSECONDS, timeoutReporter);
+        onDrop = OutboundMessageCallbacks.invokeOnDrop(message -> callbacks.removeAndExpire(message.id()));
     }
 
     public long addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
@@ -110,6 +113,11 @@ public class Callbacks
                                               message.expiresAtNanos());
         assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
         return messageId;
+    }
+
+    public OutboundMessageCallbacks expireDroppedMessages()
+    {
+        return onDrop;
     }
 
     public void removeAndExpire(long id)

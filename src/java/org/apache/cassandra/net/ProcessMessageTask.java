@@ -25,7 +25,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.IndexNotAvailableException;
-import org.apache.cassandra.net.async.MessageCallbacks;
+import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.*;
@@ -38,9 +38,9 @@ public class ProcessMessageTask implements Runnable
     private final int messageSize;
     private final long approxCreationTimeNanos = ApproximateTime.nanoTime();
 
-    private final MessageCallbacks callbacks;
+    private final InboundMessageCallbacks callbacks;
 
-    public ProcessMessageTask(Message message, int messageSize, MessageCallbacks callbacks)
+    public ProcessMessageTask(Message message, int messageSize, InboundMessageCallbacks callbacks)
     {
         assert message != null;
         this.message = message;

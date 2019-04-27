@@ -21,9 +21,9 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.net.Message.Header;
 
-public interface MessageCallbacks
+public interface InboundMessageCallbacks
 {
-    public static final MessageCallbacks NOOP = new MessageCallbacks()
+    InboundMessageCallbacks NOOP = new InboundMessageCallbacks()
     {
         public void onArrived(Header header, long timeElapsed, TimeUnit unit) {}
         public void onProcessed(int messageSize) {}

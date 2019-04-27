@@ -72,7 +72,7 @@ public class ConnectionBurnTest extends ConnectionTest
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;
         final InboundSockets sockets;
 
-        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<MessageCallbacks, MessageCallbacks> callbacks)
+        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacks)
         {
             ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
             InboundMessageHandler.WaitQueue globalWaitQueue = InboundMessageHandler.WaitQueue.global(globalLimit);
@@ -165,10 +165,12 @@ public class ConnectionBurnTest extends ConnectionTest
                 for (InetAddressAndPort sender : endpoints)
                 {
                     InboundMessageHandlers inboundHandlers = inbound.handlersByRecipientThenSender.get(recipient).get(sender);
-                    OutboundConnections connections = OutboundConnections.unsafeCreate(outboundTemplate.toEndpoint(recipient).withFrom(sender), null);
+                    OutboundConnectionSettings template = outboundTemplate.withDefaultReserveLimits();
+                    ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
+                    ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
                     for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
-                        this.connections[i] = new Connection(sender, recipient, inboundHandlers, connections.connectionFor(type), messageGenerators.get(type), minId, maxId);
+                        this.connections[i] = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
                         this.connectionMessageIds[i] = minId;
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
@@ -244,10 +246,10 @@ public class ConnectionBurnTest extends ConnectionTest
             }
         }
 
-        class WrappedCallbacks implements MessageCallbacks
+        class WrappedInboundCallbacks implements InboundMessageCallbacks
         {
-            final MessageCallbacks wrapped;
-            WrappedCallbacks(MessageCallbacks wrapped)
+            final InboundMessageCallbacks wrapped;
+            WrappedInboundCallbacks(InboundMessageCallbacks wrapped)
             {
                 this.wrapped = wrapped;
             }
@@ -282,14 +284,14 @@ public class ConnectionBurnTest extends ConnectionTest
             }
         }
 
-        public MessageCallbacks wrap(MessageCallbacks wrap)
+        public InboundMessageCallbacks wrap(InboundMessageCallbacks wrap)
         {
-            return new WrappedCallbacks(wrap);
+            return new WrappedInboundCallbacks(wrap);
         }
 
-        public void process(Message<?> message, int messageSize, MessageCallbacks callbacks)
+        public void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks)
         {
-            forId(message.id()).process(message, messageSize, ((WrappedCallbacks)callbacks).wrapped);
+            forId(message.id()).process(message, messageSize, ((WrappedInboundCallbacks)callbacks).wrapped);
         }
     }
 
@@ -347,7 +349,7 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withGlobalReserveLimit(1 << 21)
                                                 .withTemplate(new InboundConnectionSettings());
         test(inboundSettings, new OutboundConnectionSettings(null)
-                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
+//                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
                               .withTcpUserTimeoutInMS(0));
         MessagingService.instance().socketFactory.shutdownNow();
     }

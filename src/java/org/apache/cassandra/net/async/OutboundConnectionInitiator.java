@@ -341,7 +341,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
         {
-            JVMStabilityInspector.inspectThrowable(cause);
+            JVMStabilityInspector.inspectThrowable(cause, false);
             resultPromise.tryFailure(cause);
             if (isCausedByConnectionReset(cause))
                 logger.info("Failed to connect to peer {}", settings.endpoint, cause);
