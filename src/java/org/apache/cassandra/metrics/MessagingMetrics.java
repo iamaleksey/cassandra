@@ -26,7 +26,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
