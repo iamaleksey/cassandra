@@ -20,11 +20,13 @@ package org.apache.cassandra.db.virtual;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.marshal.CompositeType;
 import org.apache.cassandra.db.marshal.InetAddressType;
 import org.apache.cassandra.db.marshal.Int32Type;
 import org.apache.cassandra.db.marshal.LongType;
+import org.apache.cassandra.db.marshal.UTF8Type;
 import org.apache.cassandra.dht.LocalPartitioner;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
@@ -35,6 +37,8 @@ final class InternodeInboundTable extends AbstractVirtualTable
 {
     private static final String ADDRESS = "address";
     private static final String PORT = "port";
+    private static final String DC = "dc";
+    private static final String RACK = "rack";
 
     private static final String CORRUPT_FRAMES_RECOVERED = "corrupt_frames_recovered";
     private static final String CORRUPT_FRAMES_UNRECOVERED = "corrupt_frames_unrecovered";
@@ -56,6 +60,8 @@ final class InternodeInboundTable extends AbstractVirtualTable
                            .partitioner(new LocalPartitioner(CompositeType.getInstance(InetAddressType.instance, Int32Type.instance)))
                            .addPartitionKeyColumn(ADDRESS, InetAddressType.instance)
                            .addPartitionKeyColumn(PORT, Int32Type.instance)
+                           .addClusteringColumn(DC, UTF8Type.instance)
+                           .addClusteringColumn(RACK, UTF8Type.instance)
                            .addRegularColumn(CORRUPT_FRAMES_RECOVERED, Int32Type.instance)
                            .addRegularColumn(CORRUPT_FRAMES_UNRECOVERED, Int32Type.instance)
                            .addRegularColumn(ERROR_BYTES, LongType.instance)
@@ -98,7 +104,9 @@ final class InternodeInboundTable extends AbstractVirtualTable
 
     private void addRow(SimpleDataSet dataSet, InetAddressAndPort addressAndPort, InboundMessageHandlers handlers)
     {
-        dataSet.row(addressAndPort.address, addressAndPort.port)
+        String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(addressAndPort);
+        String rack = DatabaseDescriptor.getEndpointSnitch().getRack(addressAndPort);
+        dataSet.row(addressAndPort.address, addressAndPort.port, dc, rack)
                .column(CORRUPT_FRAMES_RECOVERED, handlers.corruptFramesRecovered())
                .column(CORRUPT_FRAMES_UNRECOVERED, handlers.corruptFramesUnrecovered())
                .column(ERROR_BYTES, handlers.errorBytes())
