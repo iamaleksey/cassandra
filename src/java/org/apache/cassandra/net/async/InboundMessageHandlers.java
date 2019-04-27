@@ -37,6 +37,7 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
+import org.apache.cassandra.utils.ApproximateTime;
 
 public final class InboundMessageHandlers
 {
@@ -208,7 +209,9 @@ public final class InboundMessageHandlers
             @Override
             public void onArrived(Header header, long timeElapsed, TimeUnit unit)
             {
-                latencyUpdater.addTimeTaken(timeElapsed, unit);
+                // do not log latency if we are within error bars of zero
+                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
+                    latencyUpdater.addTimeTaken(timeElapsed, unit);
             }
 
             @Override
