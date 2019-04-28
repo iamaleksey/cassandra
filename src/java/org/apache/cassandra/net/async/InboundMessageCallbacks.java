@@ -25,15 +25,19 @@ public interface InboundMessageCallbacks
 {
     InboundMessageCallbacks NOOP = new InboundMessageCallbacks()
     {
-        public void onArrived(Header header, long timeElapsed, TimeUnit unit) {}
-        public void onProcessed(int messageSize) {}
+        public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onDispatched(int messageSize, Header header) {}
+        public void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onProcessed(int messageSize, Header header) {}
         public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
         public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
         public void onFailedDeserialize(int messageSize, Header header, Throwable t) {}
     };
 
-    void onArrived(Header header, long timeElapsed, TimeUnit unit);
-    void onProcessed(int messageSize);
+    void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onDispatched(int messageSize, Header header);
+    void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onProcessed(int messageSize, Header header);
     void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onFailedDeserialize(int messageSize, Header header, Throwable t);

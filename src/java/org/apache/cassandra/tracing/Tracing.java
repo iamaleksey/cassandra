@@ -243,11 +243,11 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
     /**
      * Determines the tracing context from a message.  Does NOT set the threadlocal state.
      *
-     * @param message The internode message
+     * @param header The internode message header
      */
-    public TraceState initializeFromMessage(final Message<?> message)
+    public TraceState initializeFromMessage(final Message.Header header)
     {
-        final UUID sessionId = message.traceSession();
+        final UUID sessionId = header.traceSession();
         if (sessionId == null)
             return null;
 
@@ -255,16 +255,16 @@ public abstract class Tracing implements ExecutorLocal<TraceState>
         if (ts != null && ts.acquireReference())
             return ts;
 
-        TraceType traceType = message.traceType();
+        TraceType traceType = header.traceType();
 
-        if (message.verb().isResponse())
+        if (header.verb.isResponse())
         {
             // received a message for a session we've already closed out.  see CASSANDRA-5668
-            return new ExpiredTraceState(newTraceState(message.from(), sessionId, traceType));
+            return new ExpiredTraceState(newTraceState(header.from, sessionId, traceType));
         }
         else
         {
-            ts = newTraceState(message.from(), sessionId, traceType);
+            ts = newTraceState(header.from, sessionId, traceType);
             sessions.put(sessionId, ts);
             return ts;
         }

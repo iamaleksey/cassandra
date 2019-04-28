@@ -19,14 +19,10 @@ package org.apache.cassandra.net.async;
 
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
-import java.util.function.Function;
 import java.util.function.ToLongFunction;
-
-import com.google.common.base.Functions;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.exceptions.RequestFailureReason;
@@ -36,7 +32,6 @@ import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.utils.ApproximateTime;
 
 public final class InboundMessageHandlers
@@ -51,11 +46,6 @@ public final class InboundMessageHandlers
     private final InboundMessageHandler.WaitQueue endpointWaitQueue;
     private final InboundMessageHandler.WaitQueue globalWaitQueue;
 
-    private final InternodeInboundMetrics metrics;
-
-    // allow tests to wrap or replace InboundMessageCallbacks used by individual handlers
-    private final Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer;
-
     private final InboundCounters urgentCounters = new InboundCounters();
     private final InboundCounters smallCounters  = new InboundCounters();
     private final InboundCounters largeCounters  = new InboundCounters();
@@ -66,11 +56,9 @@ public final class InboundMessageHandlers
     private final InboundMessageCallbacks largeCallbacks;
     private final InboundMessageCallbacks legacyCallbacks;
 
-    private final MessageProcessor urgentProcessor;
-    private final MessageProcessor smallProcessor;
-    private final MessageProcessor largeProcessor;
-    private final MessageProcessor legacyProcessor;
+    private final InternodeInboundMetrics metrics;
 
+    private final HandlerProvider handlerProvider;
     private final Collection<InboundMessageHandler> handlers = new CopyOnWriteArrayList<>();
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -78,10 +66,9 @@ public final class InboundMessageHandlers
                                   int queueCapacity,
                                   long endpointReserveCapacity,
                                   ResourceLimits.Limit globalReserveCapacity,
-                                  InboundMessageHandler.WaitQueue globalWaitQueue,
-                                  MessageProcessor messageProcessor)
+                                  InboundMessageHandler.WaitQueue globalWaitQueue)
     {
-        this(self, peer, queueCapacity, endpointReserveCapacity, globalReserveCapacity, globalWaitQueue, messageProcessor, Functions.identity());
+        this(self, peer, queueCapacity, endpointReserveCapacity, globalReserveCapacity, globalWaitQueue, InboundMessageHandler::new);
     }
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -90,8 +77,7 @@ public final class InboundMessageHandlers
                                   long endpointReserveCapacity,
                                   ResourceLimits.Limit globalReserveCapacity,
                                   InboundMessageHandler.WaitQueue globalWaitQueue,
-                                  MessageProcessor messageProcessor,
-                                  Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer)
+                                  HandlerProvider handlerProvider)
     {
         this.self = self;
         this.peer = peer;
@@ -99,49 +85,39 @@ public final class InboundMessageHandlers
         this.queueCapacity = queueCapacity;
         this.endpointReserveCapacity = new ResourceLimits.Concurrent(endpointReserveCapacity);
         this.globalReserveCapacity = globalReserveCapacity;
-
         this.endpointWaitQueue = InboundMessageHandler.WaitQueue.endpoint(this.endpointReserveCapacity);
         this.globalWaitQueue = globalWaitQueue;
 
-        this.callbacksTransformer = callbacksTransformer;
+        this.handlerProvider = handlerProvider;
 
         urgentCallbacks = makeMessageCallbacks(peer, urgentCounters);
         smallCallbacks  = makeMessageCallbacks(peer, smallCounters);
         largeCallbacks  = makeMessageCallbacks(peer, largeCounters);
         legacyCallbacks = makeMessageCallbacks(peer, legacyCounters);
 
-        urgentProcessor = wrapProcessorForMetrics(messageProcessor, urgentCounters);
-        smallProcessor  = wrapProcessorForMetrics(messageProcessor, smallCounters);
-        largeProcessor  = wrapProcessorForMetrics(messageProcessor, largeCounters);
-        legacyProcessor = wrapProcessorForMetrics(messageProcessor, legacyCounters);
-
         metrics = new InternodeInboundMetrics(peer, this);
     }
 
-    InboundMessageHandler createHandler(FrameDecoder frameDecoder, ExecutorService synchronousWorkExecutor, ConnectionType type, Channel channel, int version)
+    InboundMessageHandler createHandler(FrameDecoder frameDecoder, ConnectionType type, Channel channel, int version)
     {
         InboundMessageHandler handler =
-            new InboundMessageHandler(frameDecoder,
+            handlerProvider.provide(frameDecoder,
 
-                                      type,
-                                      channel,
-                                      self,
-                                      peer,
-                                      version,
+                                    type,
+                                    channel,
+                                    self,
+                                    peer,
+                                    version,
+                                    OutboundConnections.LARGE_MESSAGE_THRESHOLD,
 
-                                      OutboundConnections.LARGE_MESSAGE_THRESHOLD,
-                                      synchronousWorkExecutor,
+                                    queueCapacity,
+                                    endpointReserveCapacity,
+                                    globalReserveCapacity,
+                                    endpointWaitQueue,
+                                    globalWaitQueue,
 
-                                      queueCapacity,
-                                      endpointReserveCapacity,
-                                      globalReserveCapacity,
-                                      endpointWaitQueue,
-                                      globalWaitQueue,
-
-                                      this::onHandlerClosed,
-                                      callbacksFor(type),
-                                      callbacksTransformer,
-                                      processorFor(type));
+                                    this::onHandlerClosed,
+                                    callbacksFor(type));
         handlers.add(handler);
         return handler;
     }
@@ -155,32 +131,6 @@ public final class InboundMessageHandlers
     {
         handlers.remove(handler);
         absorbCounters(handler);
-    }
-
-    /*
-     * Wrap provided MessageProcessor to allow pending message metrics to be maintained.
-     */
-
-    private MessageProcessor processorFor(ConnectionType type)
-    {
-        switch (type)
-        {
-            case URGENT_MESSAGES: return urgentProcessor;
-            case  SMALL_MESSAGES: return smallProcessor;
-            case  LARGE_MESSAGES: return largeProcessor;
-            case LEGACY_MESSAGES: return legacyProcessor;
-        }
-
-        throw new IllegalArgumentException();
-    }
-
-    private static MessageProcessor wrapProcessorForMetrics(MessageProcessor processor, InboundCounters counters)
-    {
-        return (message, messageSize, callbacks) ->
-        {
-            counters.addPending(messageSize);
-            processor.process(message, messageSize, callbacks);
-        };
     }
 
     /*
@@ -202,33 +152,10 @@ public final class InboundMessageHandlers
 
     private static InboundMessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters)
     {
-        final MessagingMetrics.Updater latencyUpdater = MessagingService.instance().metrics.getForPeer(peer);
+        MessagingMetrics.Updater latencyUpdater = MessagingService.instance().metrics.getForPeer(peer);
+
         return new InboundMessageCallbacks()
         {
-            @Override
-            public void onArrived(Header header, long timeElapsed, TimeUnit unit)
-            {
-                // do not log latency if we are within error bars of zero
-                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
-                    latencyUpdater.addTimeTaken(timeElapsed, unit);
-            }
-
-            @Override
-            public void onProcessed(int messageSize)
-            {
-                counters.removePending(messageSize);
-                counters.addProcessed(messageSize);
-            }
-
-            @Override
-            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
-            {
-                counters.removePending(messageSize);
-                counters.addExpired(messageSize);
-
-                MessagingService.instance().droppedMessages.incrementWithLatency(header.verb, timeElapsed, unit);
-            }
-
             @Override
             public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
@@ -251,6 +178,42 @@ public final class InboundMessageHandlers
                     Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(t));
                     MessagingService.instance().sendOneWay(response, peer);
                 }
+            }
+
+            @Override
+            public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                // do not log latency if we are within error bars of zero
+                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
+                    latencyUpdater.addTimeTaken(timeElapsed, unit);
+            }
+
+            @Override
+            public void onDispatched(int messageSize, Header header)
+            {
+                counters.addPending(messageSize);
+            }
+
+            @Override
+            public void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                MessagingService.instance().metrics.addQueueWaitTime(header.verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onProcessed(int messageSize, Header header)
+            {
+                counters.removePending(messageSize);
+                counters.addProcessed(messageSize);
+            }
+
+            @Override
+            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                counters.removePending(messageSize);
+                counters.addExpired(messageSize);
+
+                MessagingService.instance().droppedMessages.incrementWithLatency(header.verb, timeElapsed, unit);
             }
         };
     }
@@ -371,5 +334,26 @@ public final class InboundMessageHandlers
              + mapping.applyAsLong(smallCounters)
              + mapping.applyAsLong(largeCounters)
              + mapping.applyAsLong(legacyCounters);
+    }
+
+    interface HandlerProvider
+    {
+        InboundMessageHandler provide(FrameDecoder decoder,
+
+                                      ConnectionType type,
+                                      Channel channel,
+                                      InetAddressAndPort self,
+                                      InetAddressAndPort peer,
+                                      int version,
+                                      int largeMessageThreshold,
+
+                                      int queueCapacity,
+                                      ResourceLimits.Limit endpointReserveCapacity,
+                                      ResourceLimits.Limit globalReserveCapacity,
+                                      InboundMessageHandler.WaitQueue endpointWaitQueue,
+                                      InboundMessageHandler.WaitQueue globalWaitQueue,
+
+                                      InboundMessageHandler.OnHandlerClosed onClosed,
+                                      InboundMessageCallbacks callbacks);
     }
 }

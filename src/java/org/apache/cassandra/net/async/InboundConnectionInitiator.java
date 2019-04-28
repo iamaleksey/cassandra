@@ -413,11 +413,7 @@ public class InboundConnectionInitiator
             frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =
-                settings.handlers.apply(from).createHandler(frameDecoder,
-                                                            settings.socketFactory.synchronousWorkExecutor,
-                                                            initiate.type,
-                                                            pipeline.channel(),
-                                                            useMessagingVersion);
+                settings.handlers.apply(from).createHandler(frameDecoder, initiate.type, pipeline.channel(), useMessagingVersion);
 
             logger.info("{} connection established, version = {}, compress = {}, encryption = {}",
                         handler.id(),
