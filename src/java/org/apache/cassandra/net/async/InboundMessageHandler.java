@@ -20,15 +20,12 @@ package org.apache.cassandra.net.async;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
-import java.util.function.Function;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -38,18 +35,25 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
+import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.StageManager;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
-import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
 import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
+import org.apache.cassandra.tracing.TraceState;
+import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -63,13 +67,8 @@ import static org.apache.cassandra.net.async.Crc.*;
 /**
  * Parses incoming messages as per the 3.0/3.11/4.0 internode messaging protocols.
  */
-public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
+public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 {
-    public interface MessageProcessor
-    {
-        void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks);
-    }
-
     public interface OnHandlerClosed
     {
         void call(InboundMessageHandler handler);
@@ -91,7 +90,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private final int version;
 
     private final int largeThreshold;
-    private final ExecutorService largeExecutor;
     private LargeMessage largeMessage;
 
     private final long queueCapacity;
@@ -108,7 +106,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final OnHandlerClosed onClosed;
     private final InboundMessageCallbacks callbacks;
-    private final MessageProcessor processor;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -123,9 +120,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           InetAddressAndPort self,
                           InetAddressAndPort peer,
                           int version,
-
                           int largeThreshold,
-                          ExecutorService largeExecutor,
 
                           long queueCapacity,
                           Limit endpointReserveCapacity,
@@ -134,9 +129,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           WaitQueue globalWaitQueue,
 
                           OnHandlerClosed onClosed,
-                          InboundMessageCallbacks callbacks,
-                          Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacksTransformer, // for testing purposes only
-                          MessageProcessor processor)
+                          InboundMessageCallbacks callbacks)
     {
         this.decoder = decoder;
 
@@ -145,9 +138,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.self = self;
         this.peer = peer;
         this.version = version;
-
         this.largeThreshold = largeThreshold;
-        this.largeExecutor = largeExecutor;
 
         this.queueCapacity = queueCapacity;
         this.endpointReserveCapacity = endpointReserveCapacity;
@@ -156,8 +147,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         this.globalWaitQueue = globalWaitQueue;
 
         this.onClosed = onClosed;
-        this.callbacks = callbacksTransformer.apply(wrapToReleaseCapacity(callbacks));
-        this.processor = processor;
+        this.callbacks = callbacks;
     }
 
     @Override
@@ -225,19 +215,19 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (!acquireCapacity(endpointReserve, globalReserve, size, header.expiresAtNanos))
             return false;
 
-        callbacks.onArrived(header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+        callbacks.onArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
         receivedCount++;
         receivedBytes += size;
 
         if (size <= largeThreshold)
-            processContainedSmallMessage(bytes, size, header);
+            processSmallMessage(bytes, size, header);
         else
-            processContainedLargeMessage(bytes, size, header);
+            processLargeMessage(bytes, size, header);
 
         return true;
     }
 
-    private void processContainedSmallMessage(SharedBytes bytes, int size, Header header)
+    private void processSmallMessage(SharedBytes bytes, int size, Header header) throws IOException
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -254,12 +244,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             noSpamLogger.info("{} {} caught while reading a small message", id(), e.getClass().getSimpleName(), e);
             callbacks.onFailedDeserialize(size, header, e);
         }
-        catch (IOException e)
-        {
-            // TODO: is there really anything particularly special about an IOException vs other kind of exception?
-            logger.error("{} unexpected IOException caught while reading a small message", id(), e);
-            callbacks.onFailedDeserialize(size, header, e);
-        }
         catch (Throwable t)
         {
             callbacks.onFailedDeserialize(size, header, t);
@@ -267,20 +251,20 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         finally
         {
-            buf.position(begin + size);
-            buf.limit(end);
-
             if (null == message)
                 releaseCapacity(size);
+
+            buf.position(begin + size);
+            buf.limit(end);
         }
 
         if (null != message)
-            processor.process(message, size, callbacks);
+            dispatch(new ProcessSmallMessage(message, size));
     }
 
-    private void processContainedLargeMessage(SharedBytes bytes, int size, Header header)
+    private void processLargeMessage(SharedBytes bytes, int size, Header header)
     {
-        new LargeMessage(size, header, bytes.sliceAndConsume(size).atomic()).scheduleCoprocessor();
+        new LargeMessage(size, header, bytes.sliceAndConsume(size).atomic()).schedule();
     }
 
     /*
@@ -296,21 +280,18 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
-        if (ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
-        {
-            callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-            receivedBytes += buf.remaining();
-            largeMessage = new LargeMessage(size, header, true);
-            largeMessage.supply(frame);
-            return true;
-        }
+        boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
 
-        if (!acquireCapacity(endpointReserve, globalReserve, size, header.expiresAtNanos))
+        if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, header.expiresAtNanos))
             return false;
 
-        callbacks.onArrived(header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+        if (expired)
+            callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+        else
+            callbacks.onArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+
         receivedBytes += buf.remaining();
-        largeMessage = new LargeMessage(size, header, false);
+        largeMessage = new LargeMessage(size, header, expired);
         largeMessage.supply(frame);
         return true;
     }
@@ -333,18 +314,15 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             corruptFramesUnrecovered++;
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
         }
-
-        int frameSize = frame.frameSize;
-
-        if (frame.isSelfContained)
+        else if (frame.isSelfContained)
         {
-            receivedBytes += frameSize;
+            receivedBytes += frame.frameSize;
             corruptFramesRecovered++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading messages (corrupted self-contained frame)", id());
         }
         else if (null == largeMessage) // first frame of a large message
         {
-            receivedBytes += frameSize;
+            receivedBytes += frame.frameSize;
             corruptFramesUnrecovered++;
             noSpamLogger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages (corrupted first frame of a large message)", id());
             throw new InvalidCrc(frame.readCRC, frame.computedCRC);
@@ -355,46 +333,6 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             corruptFramesRecovered++;
             noSpamLogger.warn("{} invalid, recoverable CRC mismatch detected while reading a large message", id());
         }
-    }
-
-    /*
-     * Wrap parent message callbacks to ensure capacity is released onProcessed() and onExpired()
-     */
-    private InboundMessageCallbacks wrapToReleaseCapacity(InboundMessageCallbacks callbacks)
-    {
-        return new InboundMessageCallbacks()
-        {
-            public void onArrived(Header header, long timeElapsed, TimeUnit unit)
-            {
-                callbacks.onArrived(header, timeElapsed, unit);
-            }
-
-            @Override
-            public void onProcessed(int messageSize)
-            {
-                releaseCapacity(messageSize);
-                callbacks.onProcessed(messageSize);
-            }
-
-            @Override
-            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
-            {
-                releaseCapacity(messageSize);
-                callbacks.onExpired(messageSize, header, timeElapsed, unit);
-            }
-
-            @Override
-            public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
-            {
-                callbacks.onArrivedExpired(messageSize, header, timeElapsed, unit);
-            }
-
-            @Override
-            public void onFailedDeserialize(int messageSize, Header header, Throwable t)
-            {
-                callbacks.onFailedDeserialize(messageSize, header, t);
-            }
-        };
     }
 
     private boolean onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
@@ -525,7 +463,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private void releaseCapacity(int bytes)
+    @VisibleForTesting
+    protected void releaseCapacity(int bytes)
     {
         long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
         if (oldQueueSize > queueCapacity)
@@ -548,7 +487,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
     {
         decoder.discard();
 
-        JVMStabilityInspector.inspectThrowable(cause);
+        JVMStabilityInspector.inspectThrowable(cause, false);
 
         if (cause instanceof Message.InvalidLegacyProtocolMagic)
             logger.error("{} invalid, unrecoverable CRC mismatch detected while reading messages - closing the connection", id());
@@ -602,8 +541,8 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private final int size;
         private final Header header;
 
-        private List<SharedBytes> buffers;
-        private int bytesReceived;
+        private final List<SharedBytes> buffers = new ArrayList<>();
+        private int received;
         private boolean isSkipping;
 
         private LargeMessage(int size, Header header, boolean isSkipping)
@@ -616,84 +555,12 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private LargeMessage(int size, Header header, SharedBytes bytes)
         {
             this(size, header, false);
-            buffers = Collections.singletonList(bytes);
+            buffers.add(bytes);
         }
 
-        /**
-         * Return true if this was the last frame of the large message.
-         * TODO: can be cleaned up further
-         *
-         */
-        private boolean supply(Frame frame)
+        private void schedule()
         {
-            bytesReceived += frame.frameSize;
-
-            if (frame instanceof IntactFrame)
-                onIntactFrame((IntactFrame) frame);
-            else
-                onCorruptFrame((CorruptFrame) frame);
-
-            return size == bytesReceived;
-        }
-
-        // TODO: clean up further?
-        private void onIntactFrame(IntactFrame frame)
-        {
-            /*
-             * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
-             * release capacity, and switch to skipping.
-             */
-            long currentTimeNanos = ApproximateTime.nanoTime();
-            if (!isSkipping && ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
-            {
-                releaseBuffers();
-                isSkipping = true;
-
-                try
-                {
-                    callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-                }
-                finally
-                {
-                    releaseCapacity(size);
-                }
-            }
-
-            if (isSkipping)
-                frame.contents.skipBytes(frame.frameSize);
-            else
-                add(frame.contents.sliceAndConsume(frame.frameSize).atomic());
-
-            if (bytesReceived == size && !isSkipping)
-                scheduleCoprocessor();
-        }
-
-        // TODO: clean up further?
-        private void onCorruptFrame(CorruptFrame frame)
-        {
-            if (!isSkipping)
-            {
-                releaseBuffers();
-                isSkipping = true;
-
-                try
-                {
-                    callbacks.onFailedDeserialize(size, header, new InvalidCrc(frame.readCRC, frame.computedCRC));
-                }
-                finally
-                {
-                    releaseCapacity(size);
-                }
-            }
-        }
-
-        private void releaseBuffers()
-        {
-            if (buffers != null)
-            {
-                buffers.forEach(SharedBytes::release);
-                buffers = null;
-            }
+            dispatch(new ProcessLargeMessage(this));
         }
 
         private void abort()
@@ -706,89 +573,262 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
         }
 
-        private void add(SharedBytes buffer)
+        /**
+         * Return true if this was the last frame of the large message.
+         */
+        private boolean supply(Frame frame)
         {
-            if (null == buffers)
-                buffers = new ArrayList<>();
-            buffers.add(buffer);
+            received += frame.frameSize;
+
+            if (frame instanceof IntactFrame)
+                onIntactFrame((IntactFrame) frame);
+            else
+                onCorruptFrame((CorruptFrame) frame);
+
+            return size == received;
         }
 
-        private void scheduleCoprocessor()
+        private void onIntactFrame(IntactFrame frame)
         {
-            largeExecutor.execute(new LargeCoprocessor(this));
+            /*
+             * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
+             * release capacity, and switch to skipping.
+             */
+            long currentTimeNanos = ApproximateTime.nanoTime();
+            if (!isSkipping && ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+            {
+                try
+                {
+                    callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                }
+                finally
+                {
+                    releaseCapacity(size);
+                    releaseBuffers();
+                }
+                isSkipping = true;
+            }
+
+            if (isSkipping)
+            {
+                frame.contents.skipBytes(frame.frameSize);
+            }
+            else
+            {
+                buffers.add(frame.contents.sliceAndConsume(frame.frameSize).atomic());
+                if (received == size)
+                    schedule();
+            }
         }
-    }
 
-    /**
-     * This will execute on a thread that isn't a netty event loop.
-     */
-    private final class LargeCoprocessor implements Runnable
-    {
-        private final LargeMessage msg;
-
-        private LargeCoprocessor(LargeMessage msg)
+        private void onCorruptFrame(CorruptFrame frame)
         {
-            this.msg = msg;
-        }
+            if (isSkipping)
+                return;
 
-        public void run()
-        {
-            String threadName, priorThreadName = null;
             try
             {
-                priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-IN-" + peer + "->" + self + '-' + type + '-' + msg.header.id;
-                Thread.currentThread().setName(threadName);
-
-                processLargeMessage();
+                callbacks.onFailedDeserialize(size, header, new InvalidCrc(frame.readCRC, frame.computedCRC));
             }
             finally
             {
-                if (null != priorThreadName)
-                    Thread.currentThread().setName(priorThreadName);
+                releaseCapacity(size);
+                releaseBuffers();
             }
+            isSkipping = true;
         }
 
-        private void processLargeMessage()
+        private Message deserialize()
         {
-            Message<?> message = null;
-            Header header = msg.header;
-            long currentTimeNanos = ApproximateTime.nanoTime();
-
-            try (ChunkedInputPlus input = ChunkedInputPlus.of(msg.buffers))
+            try (ChunkedInputPlus input = ChunkedInputPlus.of(buffers))
             {
-                if (ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
-                    callbacks.onArrivedExpired(msg.size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-                else
-                    message = serializer.deserialize(input, header, version);
+                return serializer.deserialize(input, header, version);
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
                 noSpamLogger.info("{} {} caught while reading a large message", e.getClass().getSimpleName(), id(), e);
-                callbacks.onFailedDeserialize(msg.size, header, e);
-            }
-            catch (IOException e)
-            {
-                logger.error("{} unexpected IOException caught while reading a large message", id(), e);
-                callbacks.onFailedDeserialize(msg.size, header, e);
+                callbacks.onFailedDeserialize(size, header, e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t, false);
                 logger.error("{} unexpected exception caught while reading a large message", id(), t);
-                callbacks.onFailedDeserialize(msg.size, header, t);
+                callbacks.onFailedDeserialize(size, header, t);
                 channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
             }
             finally
             {
-                if (null == message)
-                    releaseCapacity(msg.size);
+                buffers.clear(); // closing the input will have ensured that the buffers were released no matter what
             }
 
-            if (null != message)
-                processor.process(message, msg.size, callbacks);
+            return null;
+        }
+
+        private void releaseBuffers()
+        {
+            buffers.forEach(SharedBytes::release);
+            buffers.clear();
         }
     }
+
+    /*
+     * Submit a {@link ProcessMessage} task to the appropriate Stage for the Verb.
+     */
+    private void dispatch(ProcessMessage task)
+    {
+        Header header = task.header();
+
+        TraceState state = Tracing.instance.initializeFromMessage(header);
+        if (state != null) state.trace("{} message received from {}", header.verb, header.from);
+
+        StageManager.getStage(header.verb.stage).execute(task, ExecutorLocals.create(state));
+        callbacks.onDispatched(task.size, header);
+    }
+
+    /*
+     * Actually handle the message. Executes on the appropriate Stage for the Verb.
+     */
+    private abstract class ProcessMessage implements Runnable
+    {
+        protected final int size;
+
+        ProcessMessage(int size)
+        {
+            this.size = size;
+        }
+
+        @Override
+        public void run()
+        {
+            Header header = header();
+            long currentTimeNanos = ApproximateTime.nanoTime();
+            boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
+
+            try
+            {
+                callbacks.onStartedProcessing(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+
+                if (!expired)
+                {
+                    Message message = provideMessage();
+                    if (null != message && MessagingService.instance().messageSink.allowInbound(message))
+                        process(message);
+                }
+            }
+            finally
+            {
+                releaseResources();
+
+                if (expired)
+                    callbacks.onExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                else
+                    callbacks.onProcessed(size, header);
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        private void process(Message message)
+        {
+            try
+            {
+                header().verb.handler().doVerb(message);
+            }
+            catch (TombstoneOverwhelmingException | IndexNotAvailableException e)
+            {
+                maybeSendFailureResponse(e);
+                noSpamLogger.error(e.getMessage());
+            }
+            catch (IOException e)
+            {
+                maybeSendFailureResponse(e);
+                throw new RuntimeException(e);
+            }
+            catch (Throwable t)
+            {
+                maybeSendFailureResponse(t);
+                throw t;
+            }
+        }
+
+        private void maybeSendFailureResponse(Throwable t)
+        {
+            Header header = header();
+
+            if (header.callBackOnFailure())
+            {
+                RequestFailureReason reason = RequestFailureReason.forException(t);
+                Message response = Message.failureResponse(header.id, header.expiresAtNanos, reason);
+                MessagingService.instance().sendResponse(response, header.from);
+            }
+        }
+
+        abstract Header header();
+        abstract Message provideMessage();
+        abstract void releaseResources();
+    }
+
+    private class ProcessSmallMessage extends ProcessMessage
+    {
+        private final Message message;
+
+        ProcessSmallMessage(Message message, int size)
+        {
+            super(size);
+            this.message = message;
+        }
+
+        @Override
+        Header header()
+        {
+            return message.header;
+        }
+
+        @Override
+        Message provideMessage()
+        {
+            return message;
+        }
+
+        @Override
+        void releaseResources()
+        {
+            releaseCapacity(size);
+        }
+    }
+
+    private class ProcessLargeMessage extends ProcessMessage
+    {
+        private final LargeMessage message;
+
+        ProcessLargeMessage(LargeMessage message)
+        {
+            super(message.size);
+            this.message = message;
+        }
+
+        @Override
+        Header header()
+        {
+            return message.header;
+        }
+
+        @Override
+        Message provideMessage()
+        {
+            return message.deserialize();
+        }
+
+        @Override
+        void releaseResources()
+        {
+            releaseCapacity(size);
+            message.releaseBuffers(); // releases buffers if they haven't been yet (by deserialize() call)
+        }
+    }
+
+    /*
+     * Backpressure handling
+     */
 
     public static final class WaitQueue
     {
@@ -831,6 +871,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
             queue.add(ticket);
+            signal(); // TODO: *conditionally* signal upon registering
             return ticket;
         }
 
@@ -856,7 +897,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             Map<EventLoop, ResumeProcessing> tasks = null;
 
-            long nanoTime = ApproximateTime.nanoTime();
+            long currentTimeNanos = ApproximateTime.nanoTime();
 
             Ticket t;
             while ((t = queue.peek()) != null)
@@ -867,7 +908,7 @@ public final class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     continue;
                 }
 
-                boolean isLive = t.isLive(nanoTime);
+                boolean isLive = t.isLive(currentTimeNanos);
                 if (isLive && !reserveCapacity.tryAllocate(t.bytesRequested))
                 {
                     t.reset();

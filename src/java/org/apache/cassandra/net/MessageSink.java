@@ -47,7 +47,7 @@ public class MessageSink
     private static final AtomicReferenceFieldUpdater<MessageSink, OutboundSink> outboundUpdater
     = AtomicReferenceFieldUpdater.newUpdater(MessageSink.class, OutboundSink.class, "outbound");
 
-    boolean allowInbound(Message<?> message)
+    public boolean allowInbound(Message<?> message)
     {
         InboundSink sink = inbound;
         if (sink == null)
@@ -55,7 +55,7 @@ public class MessageSink
         return sink.allowInbound(message);
     }
 
-    boolean allowOutbound(Message<?> message, InetAddressAndPort to)
+    public boolean allowOutbound(Message<?> message, InetAddressAndPort to)
     {
         OutboundSink sink = outbound;
         if (sink == null)

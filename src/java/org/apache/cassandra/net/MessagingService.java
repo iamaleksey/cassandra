@@ -32,8 +32,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.util.concurrent.Future;
-import org.apache.cassandra.concurrent.ExecutorLocals;
-import org.apache.cassandra.concurrent.LocalAwareExecutorService;
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -49,16 +47,12 @@ import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.net.async.SocketFactory;
 import org.apache.cassandra.net.async.ResourceLimits;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.tracing.TraceState;
-import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MBeanWrapper;
 
@@ -456,27 +450,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    public void process(Message message, int messageSize, InboundMessageCallbacks callbacks)
-    {
-        TraceState state = Tracing.instance.initializeFromMessage(message);
-        if (state != null)
-            state.trace("{} message received from {}", message.verb(), message.from());
-
-        // double-check if the message is still unexpired at this point
-        long approxTimeNanos = ApproximateTime.nanoTime();
-        if (ApproximateTime.isAfterNanoTime(approxTimeNanos, message.expiresAtNanos()) || !messageSink.allowInbound(message))
-        {
-            callbacks.onExpired(messageSize, message.header, approxTimeNanos - message.createdAtNanos(), NANOSECONDS);
-            return;
-        }
-
-        Runnable runnable = new ProcessMessageTask(message, messageSize, callbacks);
-        LocalAwareExecutorService stage = StageManager.getStage(message.verb().stage);
-        assert stage != null : "No stage for message type " + message.verb();
-
-        stage.execute(runnable, ExecutorLocals.create(state));
-    }
-
     public static int getBits(int packed, int start, int count)
     {
         return (packed >>> start) & ~(-1 << count);
@@ -522,8 +495,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                                        DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes(),
                                        DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes(),
                                        reserveReceiveQueueGlobalLimitInBytes,
-                                       inboundHandlerWaitQueue,
-                                       this::process)
+                                       inboundHandlerWaitQueue)
         );
     }
 
