@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Queue;
 import java.util.Set;
@@ -28,6 +29,7 @@ import java.util.function.Function;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.async.InboundMessageCallbacks;
 
@@ -189,9 +191,20 @@ public class MatcherResponse
                         {
                             CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
                             if (cb != null)
+                            {
                                 cb.callback.response(response);
+                            }
                             else
-                                MessagingService.instance().process(response, 0, InboundMessageCallbacks.NOOP);
+                            {
+                                try
+                                {
+                                    response.verb().handler().doVerb((Message<Object>) message);
+                                }
+                                catch (IOException e)
+                                {
+                                    throw new RuntimeException(e);
+                                }
+                            }
 
                             spy.matchingResponse(response);
                         }
@@ -205,6 +218,23 @@ public class MatcherResponse
         MessagingService.instance().messageSink.addOutbound(sink);
 
         return spy;
+    }
+
+    void process(Message<?> message)
+    {
+        if (!MessagingService.instance().messageSink.allowInbound(message))
+            return;
+
+        StageManager.getStage(message.verb().stage).execute(() -> {
+            try
+            {
+                message.verb().handler().doVerb((Message<Object>)message);
+            }
+            catch (IOException e)
+            {
+                //
+            }
+        });
     }
 
     /**

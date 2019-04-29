@@ -69,6 +69,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
@@ -221,8 +222,17 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             try (DataInputBuffer in = new DataInputBuffer(message.bytes()))
             {
                 Message<?> messageIn = Message.serializer.deserialize(in, message.from(), message.version());
-                Runnable deliver = new ProcessMessageTask(messageIn, 0, InboundMessageCallbacks.NOOP);
-                deliver.run();
+                StageManager.getStage(messageIn.verb().stage).execute(() ->
+                {
+                    try
+                    {
+                        messageIn.verb().handler().doVerb((Message<Object>) messageIn);
+                    }
+                    catch (IOException e)
+                    {
+                        // no-op
+                    }
+                });
             }
             catch (Throwable t)
             {
