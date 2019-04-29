@@ -804,6 +804,15 @@ public class DatabaseDescriptor
         if (conf.otc_coalescing_enough_coalesced_messages <= 0)
             throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be positive", false);
 
+        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes)
+            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_endpoint_capacity_in_bytes", false);
+        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_receive_queue_global_capacity_in_bytes)
+            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_global_capacity_in_bytes", false);
+        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes)
+            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_endpoint_capacity_in_bytes", false);
+        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_send_queue_global_capacity_in_bytes)
+            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_global_capacity_in_bytes", false);
+
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
     }
 
@@ -1847,9 +1856,9 @@ public class DatabaseDescriptor
         return conf.internode_application_send_queue_capacity_in_bytes;
     }
 
-    public static int getInternodeApplicationReserveSendQueueCapacityInBytes()
+    public static int getInternodeApplicationReserveSendQueueEndpointCapacityInBytes()
     {
-        return conf.internode_application_reserve_send_queue_capacity_in_bytes;
+        return conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes;
     }
 
     public static int getInternodeApplicationReserveSendQueueGlobalCapacityInBytes()
@@ -1895,6 +1904,11 @@ public class DatabaseDescriptor
     public static void setInternodeTcpUserTimeoutInMS(int value)
     {
         conf.internode_tcp_user_timeout_in_ms = value;
+    }
+
+    public static int getInternodeMaxMessageSizeInBytes()
+    {
+        return conf.internode_max_message_size_in_bytes;
     }
 
     public static boolean startNativeTransport()
