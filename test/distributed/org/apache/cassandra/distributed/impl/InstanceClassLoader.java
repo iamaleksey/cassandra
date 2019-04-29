@@ -61,7 +61,6 @@ public class InstanceClassLoader extends URLClassLoader
         InstanceClassLoader create(int id, URL[] urls, ClassLoader sharedClassLoader);
     }
 
-    private final int id;
     private final URL[] urls;
     private final int generation; // used to help debug class loader leaks, by helping determine which classloaders should have been collected
     private final ClassLoader sharedClassLoader;
@@ -69,7 +68,6 @@ public class InstanceClassLoader extends URLClassLoader
     InstanceClassLoader(int generation, URL[] urls, ClassLoader sharedClassLoader)
     {
         super(urls, null);
-        this.id = id;
         this.urls = urls;
         this.sharedClassLoader = sharedClassLoader;
         this.generation = generation;
@@ -109,7 +107,7 @@ public class InstanceClassLoader extends URLClassLoader
     public String toString()
     {
         return "InstanceClassLoader{" +
-               "id=" + id +
+               "generation=" + generation +
                ", urls=" + Arrays.toString(urls) +
                '}';
     }
