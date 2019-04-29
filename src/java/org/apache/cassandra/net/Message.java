@@ -621,7 +621,10 @@ public class Message<T>
          */
         public int inferMessageSize(ByteBuffer buf, int index, int limit, int version) throws InvalidLegacyProtocolMagic
         {
-            return version >= VERSION_40 ? inferMessageSizePost40(buf, index, limit) : inferMessageSizePre40(buf, index, limit);
+            int size = version >= VERSION_40 ? inferMessageSizePost40(buf, index, limit) : inferMessageSizePre40(buf, index, limit);
+            if (size > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+                throw new OversizedMessageException(size);
+            return size;
         }
 
         public Header extractHeader(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
@@ -1313,5 +1316,13 @@ public class Message<T>
     boolean hasId()
     {
         return id() != NO_ID;
+    }
+
+    public static class OversizedMessageException extends RuntimeException
+    {
+        public OversizedMessageException(int size)
+        {
+            super("Message of size " + size + " bytes exceeds allowed maximum of " + DatabaseDescriptor.getInternodeMaxMessageSizeInBytes() + " bytes");
+        }
     }
 }
