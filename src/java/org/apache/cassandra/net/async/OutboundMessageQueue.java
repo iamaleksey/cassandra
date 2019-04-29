@@ -77,6 +77,9 @@ public class OutboundMessageQueue
     {
         try (WithLock withLock = lockOrCallback(nowNanos, () -> runEventually(nowNanos, runEventually)))
         {
+            if (withLock == null)
+                return;
+
             runEventually.accept(withLock);
         }
     }
