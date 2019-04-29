@@ -463,8 +463,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    @VisibleForTesting
-    protected void releaseCapacity(int bytes)
+    private void releaseCapacity(int bytes)
     {
         long oldQueueSize = queueSizeUpdater.getAndAdd(this, -bytes);
         if (oldQueueSize > queueCapacity)
@@ -475,6 +474,18 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             endpointWaitQueue.signal();
             globalWaitQueue.signal();
         }
+    }
+
+    /**
+     * Invoked to release capacity for a message that has been fully, successfully processed.
+     *
+     * Normally no different from invoking {@link #releaseCapacity(int)}, but is necessary for the verifier
+     * to be able to delay capacity release for backpressure testing.
+     */
+    @VisibleForTesting
+    protected void releaseProcessedCapacity(int size, Header header)
+    {
+        releaseCapacity(size);
     }
 
     @Override
@@ -704,6 +715,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             long currentTimeNanos = ApproximateTime.nanoTime();
             boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
 
+            boolean processed = false;
             try
             {
                 callbacks.onExecuting(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
@@ -715,11 +727,17 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     {
                         callbacks.onProcessing(size, message);
                         process(message);
+                        processed = true;
                     }
                 }
             }
             finally
             {
+                if (processed)
+                    releaseProcessedCapacity(size, header);
+                else
+                    releaseCapacity(size);
+
                 releaseResources();
 
                 if (expired)
@@ -795,7 +813,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         @Override
         void releaseResources()
         {
-            releaseCapacity(size);
         }
     }
 
@@ -824,7 +841,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         @Override
         void releaseResources()
         {
-            releaseCapacity(size);
             message.releaseBuffers(); // releases buffers if they haven't been yet (by deserialize() call)
         }
     }
