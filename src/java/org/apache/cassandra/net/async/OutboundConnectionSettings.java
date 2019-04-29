@@ -325,7 +325,7 @@ public class OutboundConnectionSettings
         ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes = this.applicationReserveSendQueueGlobalCapacityInBytes;
 
         if (applicationReserveSendQueueEndpointCapacityInBytes == null)
-            applicationReserveSendQueueEndpointCapacityInBytes = DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes();
+            applicationReserveSendQueueEndpointCapacityInBytes = DatabaseDescriptor.getInternodeApplicationReserveSendQueueEndpointCapacityInBytes();
         if (applicationReserveSendQueueGlobalCapacityInBytes == null)
             applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().reserveSendQueueGlobalLimitInBytes;
 

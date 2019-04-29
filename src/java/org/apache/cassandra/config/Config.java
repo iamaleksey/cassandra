@@ -149,10 +149,13 @@ public class Config
     public boolean rpc_interface_prefer_ipv6 = false;
     public String broadcast_rpc_address;
     public boolean rpc_keepalive = true;
+
+    public int internode_max_message_size_in_bytes = 1 << 25; // 32MiB
+
     public int internode_send_buff_size_in_bytes = 0;
 
     public int internode_application_send_queue_capacity_in_bytes = 1 << 22; // 4MiB
-    public int internode_application_reserve_send_queue_capacity_in_bytes = 1 << 27; // 128MiB
+    public int internode_application_reserve_send_queue_endpoint_capacity_in_bytes = 1 << 27; // 128MiB
     public int internode_application_reserve_send_queue_global_capacity_in_bytes = 1 << 30; // 1GiB
 
     public int internode_application_receive_queue_capacity_in_bytes = 1 << 22; // 4MiB
@@ -179,6 +182,7 @@ public class Config
     public boolean native_transport_flush_in_batches_legacy = false;
     public volatile boolean native_transport_allow_older_protocols = true;
     public int native_transport_frame_block_size_in_kb = 32;
+
 
     /**
      * Max size of values in SSTables, in MegaBytes.
