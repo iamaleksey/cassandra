@@ -61,6 +61,7 @@ import static org.apache.cassandra.net.async.Verifier.EventType.SERIALIZE;
  * By making verification single threaded, it is easier to reason about (and complex enough as is), but also permits
  * a dedicated thread to monitor timeliness of events, e.g. elapsed time between a given SEND and its corresponding RECEIVE
  */
+@SuppressWarnings("WeakerAccess")
 public class Verifier
 {
     private static final Logger logger = LoggerFactory.getLogger(Verifier.class);
@@ -334,44 +335,45 @@ public class Verifier
         logger.error("{}", String.format(message, params));
     }
 
+    // TODO: - verify timeliness of all messages, not just those arriving out of order
+    //         (integrate bytes in flight controller info into timeliness decisions)
+    //       - indicate a message is expected to fail serialization (or deserialization)
+    final LongObjectOpenHashMap<MessageState> messages = new LongObjectOpenHashMap<>();
+
+    // messages start here, but may enter in a haphazard (non-sequential) fashion;
+    // ENQUEUE_START, ENQUEUE_END both take place here, with the latter imposing bounds on the out-of-order appearance of messages.
+    // note that ENQUEUE_END - being concurrent - may not appear before the message's lifespan has completely ended.
+    final Queue<MessageState> enqueueing = new Queue<>();
+
+    // Strict message order will then be determined at serialization time, since this happens on a single thread.
+    // The order in which messages arrive here determines the order they will arrive on the other node.
+    // must follow either ENQUEUE_START or ENQUEUE_END
+    final Queue<MessageState> serializing = new Queue<>();
+
+    // Messages sent on the small connection will all be sent in frames; this is a concurrent operation,
+    // so only the sendingFrame MUST be encountered before any future events -
+    // large connections skip this step and goes straight to arriving
+    // we consult the queues in reverse order in arriving, as it is acceptable to find our frame in any of these queues
+    final FramesInFlight framesInFlight = new FramesInFlight(); // unknown if the messages will arrive, accept either
+    final Queue<Frame> reuseFrames = new Queue<>();
+
+    // for large messages OR < VERSION_40, arriving can occur BEFORE serializing completes successfully
+    // OR a frame is fully serialized
+    final Queue<MessageState> arriving = new Queue<>();
+
+    final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
+                              deserializingOffEventLoop = new Queue<>();
+
+    final Queue<MessageState> processingOutOfOrder = new Queue<>();
+
+    long canonicalBytesInFlight = 0;
+    long nextId = 0;
+    long now;
+
     public void run(Runnable onFailure, long deadlineNanos)
     {
         try
         {
-            // TODO: - verify timeliness of all messages, not just those arriving out of order
-            //         (integrate bytes in flight controller info into timeliness decisions)
-            //       - indicate a message is expected to fail serialization (or deserialization)
-            final LongObjectOpenHashMap<MessageState> messages = new LongObjectOpenHashMap<>();
-
-            // messages start here, but may enter in a haphazard (non-sequential) fashion;
-            // ENQUEUE_START, ENQUEUE_END both take place here, with the latter imposing bounds on the out-of-order appearance of messages.
-            // note that ENQUEUE_END - being concurrent - may not appear before the message's lifespan has completely ended.
-            final Queue<MessageState> enqueueing = new Queue<>();
-
-            // Strict message order will then be determined at serialization time, since this happens on a single thread.
-            // The order in which messages arrive here determines the order they will arrive on the other node.
-            // must follow either ENQUEUE_START or ENQUEUE_END
-            final Queue<MessageState> serializing = new Queue<>();
-
-            // Messages sent on the small connection will all be sent in frames; this is a concurrent operation,
-            // so only the sendingFrame MUST be encountered before any future events -
-            // large connections skip this step and goes straight to arriving
-            // we consult the queues in reverse order in arriving, as it is acceptable to find our frame in any of these queues
-            final FramesInFlight framesInFlight = new FramesInFlight(); // unknown if the messages will arrive, accept either
-            final Queue<Frame> reuseFrames = new Queue<>();
-
-            // for large messages OR < VERSION_40, arriving can occur BEFORE serializing completes successfully
-            // OR a frame is fully serialized
-            final Queue<MessageState> arriving = new Queue<>();
-
-            final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
-                                      deserializingOffEventLoop = new Queue<>();
-
-            final Queue<MessageState> processingOutOfOrder = new Queue<>();
-
-            long canonicalBytesInFlight = 0;
-            long nextId = 0;
-            long now;
             while ((now = ApproximateTime.nanoTime()) < deadlineNanos)
             {
                 Event next = events.await(nextId, 100L, TimeUnit.MILLISECONDS);
@@ -552,10 +554,9 @@ public class Verifier
                                 break;
                             }
 
-
                             int fi = 0, mi = -1;
                             while (fi < framesInFlight.size() && mi < 0)
-                                mi = framesInFlight.get(fi).indexOf(m);
+                                mi = framesInFlight.get(++fi).indexOf(m);
 
                             if (fi == framesInFlight.size())
                             {
@@ -643,10 +644,10 @@ public class Verifier
                         ProcessMessageEvent e = onProcessed(next);
                         assert nextId == e.at;
                         MessageState m = messages.remove(e.messageId);
-                        assert m.state == DESERIALIZE;
                         if (m == null)
                             break;
 
+                        assert m.state == DESERIALIZE;
                         canonicalBytesInFlight -= m.message.serializedSize(m.messagingVersion);
                         if (!Arrays.equals((byte[]) e.message.payload, (byte[]) m.message.payload))
                         {

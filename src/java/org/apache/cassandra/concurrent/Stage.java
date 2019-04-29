@@ -29,7 +29,8 @@ public enum Stage
     MIGRATION,
     MISC,
     TRACING,
-    INTERNAL_RESPONSE;
+    INTERNAL_RESPONSE,
+    IMMEDIATE;
 
     public String getJmxType()
     {
@@ -41,6 +42,7 @@ public enum Stage
             case MISC:
             case TRACING:
             case INTERNAL_RESPONSE:
+            case IMMEDIATE:
                 return "internal";
             case MUTATION:
             case COUNTER_MUTATION:

@@ -34,12 +34,14 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
+import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
+import io.netty.channel.Channel;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -48,7 +50,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
@@ -72,7 +73,7 @@ public class ConnectionBurnTest extends ConnectionTest
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;
         final InboundSockets sockets;
 
-        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, MessageProcessor process, Function<InboundMessageCallbacks, InboundMessageCallbacks> callbacks)
+        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, InboundMessageHandlers.HandlerProvider handlerProvider)
         {
             ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
             InboundMessageHandler.WaitQueue globalWaitQueue = InboundMessageHandler.WaitQueue.global(globalLimit);
@@ -82,7 +83,7 @@ public class ConnectionBurnTest extends ConnectionTest
             {
                 Map<InetAddressAndPort, InboundMessageHandlers> handlersBySender = new HashMap<>();
                 for (InetAddressAndPort sender : endpoints)
-                    handlersBySender.put(sender, new InboundMessageHandlers(recipient, sender, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, process, callbacks));
+                    handlersBySender.put(sender, new InboundMessageHandlers(recipient, sender, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, handlerProvider));
 
                 handlersByRecipientThenSender.put(recipient, handlersBySender);
                 bind.add(settings.template.withHandlers(handlersBySender::get).withBindAddress(recipient));
@@ -93,7 +94,7 @@ public class ConnectionBurnTest extends ConnectionTest
     }
 
 
-    private static class Test implements MessageProcessor
+    private static class Test implements InboundMessageHandlers.HandlerProvider
     {
         private final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
         {
@@ -152,7 +153,7 @@ public class ConnectionBurnTest extends ConnectionTest
         private Test(int simulateEndpoints, MessageGenerators messageGenerators, GlobalInboundSettings inboundSettings, OutboundConnectionSettings outboundTemplate, long runForNanos)
         {
             this.endpoints = endpoints(simulateEndpoints);
-            this.inbound = new Inbound(endpoints, inboundSettings, this, this::wrap);
+            this.inbound = new Inbound(endpoints, inboundSettings, this);
             this.connections = new Connection[endpoints.size() * endpoints.size() * 3];
             this.connectionMessageIds = new long[connections.length];
             this.version = outboundTemplate.acceptVersions == null ? current_version : outboundTemplate.acceptVersions.max;
@@ -254,15 +255,34 @@ public class ConnectionBurnTest extends ConnectionTest
                 this.wrapped = wrapped;
             }
 
-            public void onProcessed(int messageSize)
+            public void onArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
             {
-                throw new IllegalStateException(); // only the wrapped Callbacks should be invoked
+                forId(header.id).onArrived(messageSize, header, timeElapsed, unit);
+                wrapped.onArrived(messageSize, header, timeElapsed, unit);
             }
 
-            public void onArrived(Message.Header header, long timeElapsed, TimeUnit unit)
+            public void onDispatched(int messageSize, Message.Header header)
             {
-                forId(header.id).onArrived(header, timeElapsed, unit);
-                wrapped.onArrived(header, timeElapsed, unit);
+                forId(header.id).onDispatched(messageSize, header);
+                wrapped.onDispatched(messageSize, header);
+            }
+
+            public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+            {
+                forId(header.id).onExecuting(messageSize, header, timeElapsed, unit);
+                wrapped.onExecuting(messageSize, header, timeElapsed, unit);
+            }
+
+            public boolean shouldProcess(int messageSize, Message message)
+            {
+                forId(message.id()).shouldProcess(messageSize, message);
+                return wrapped.shouldProcess(messageSize, message);
+            }
+
+            public void onProcessed(int messageSize, Message.Header header)
+            {
+                forId(header.id).onProcessed(messageSize, header);
+                wrapped.onProcessed(messageSize, header);
             }
 
             public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
@@ -289,10 +309,32 @@ public class ConnectionBurnTest extends ConnectionTest
             return new WrappedInboundCallbacks(wrap);
         }
 
-        public void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks)
+        public InboundMessageHandler provide(
+            FrameDecoder decoder,
+            ConnectionType type,
+            Channel channel,
+            InetAddressAndPort self,
+            InetAddressAndPort peer,
+            int version,
+            int largeMessageThreshold,
+            int queueCapacity,
+            ResourceLimits.Limit endpointReserveCapacity,
+            ResourceLimits.Limit globalReserveCapacity,
+            InboundMessageHandler.WaitQueue endpointWaitQueue,
+            InboundMessageHandler.WaitQueue globalWaitQueue,
+            InboundMessageHandler.OnHandlerClosed onClosed,
+            InboundMessageCallbacks callbacks)
         {
-            forId(message.id()).process(message, messageSize, ((WrappedInboundCallbacks)callbacks).wrapped);
+            return new InboundMessageHandler(decoder, type, channel, self, peer, version, largeMessageThreshold, queueCapacity, endpointReserveCapacity, globalReserveCapacity, endpointWaitQueue, globalWaitQueue, onClosed, wrap(callbacks))
+            {
+                final IntConsumer releaseCapacity = size -> super.releaseProcessedCapacity(size, null);
+                protected void releaseProcessedCapacity(int bytes, Message.Header header)
+                {
+                    forId(header.id).controller.process(bytes, releaseCapacity);
+                }
+            };
         }
+
     }
 
     public static String prettyPrintMemory(long size)
