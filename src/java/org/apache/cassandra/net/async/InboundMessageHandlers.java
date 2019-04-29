@@ -201,6 +201,12 @@ public final class InboundMessageHandlers
             }
 
             @Override
+            public boolean shouldProcess(int messageSize, Message message)
+            {
+                return MessagingService.instance().messageSink.allowInbound(message);
+            }
+
+            @Override
             public void onProcessing(int messageSize, Message message)
             {
             }

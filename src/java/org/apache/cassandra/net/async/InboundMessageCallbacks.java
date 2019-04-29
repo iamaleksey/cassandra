@@ -29,6 +29,7 @@ public interface InboundMessageCallbacks
         public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
         public void onDispatched(int messageSize, Header header) {}
         public void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public boolean shouldProcess(int messageSize, Message message) { return true; }
         public void onProcessing(int messageSize, Message message) {}
         public void onProcessed(int messageSize, Header header) {}
         public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
@@ -39,6 +40,7 @@ public interface InboundMessageCallbacks
     void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onDispatched(int messageSize, Header header);
     void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    boolean shouldProcess(int messageSize, Message message);
     void onProcessing(int messageSize, Message message);
     void onProcessed(int messageSize, Header header);
     void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);

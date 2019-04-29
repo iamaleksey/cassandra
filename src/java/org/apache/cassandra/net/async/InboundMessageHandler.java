@@ -711,7 +711,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (!expired)
                 {
                     Message message = provideMessage();
-                    if (null != message && MessagingService.instance().messageSink.allowInbound(message))
+                    if (null != message && callbacks.shouldProcess(size, message))
                     {
                         callbacks.onProcessing(size, message);
                         process(message);
