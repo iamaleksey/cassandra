@@ -19,6 +19,7 @@ package org.apache.cassandra.net.async;
 
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
 
 public interface InboundMessageCallbacks
@@ -27,7 +28,8 @@ public interface InboundMessageCallbacks
     {
         public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
         public void onDispatched(int messageSize, Header header) {}
-        public void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
+        public void onProcessing(int messageSize, Message message) {}
         public void onProcessed(int messageSize, Header header) {}
         public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
         public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit) {}
@@ -36,7 +38,8 @@ public interface InboundMessageCallbacks
 
     void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onDispatched(int messageSize, Header header);
-    void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onProcessing(int messageSize, Message message);
     void onProcessed(int messageSize, Header header);
     void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
