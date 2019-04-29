@@ -228,15 +228,19 @@ public class OutboundConnection
         if (isClosed())
             throw new ClosedChannelException();
 
+        final int canonicalSize = canonicalSize(message);
+        if (canonicalSize > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+            throw new Message.OversizedMessageException(canonicalSize);
+
         submittedUpdater.incrementAndGet(this);
-        switch (acquireCapacity(canonicalSize(message)))
+        switch (acquireCapacity(canonicalSize))
         {
             case INSUFFICIENT_ENDPOINT:
                 // if we're overloaded to one endpoint, we may be accumulating expirable messages, so
                 // attempt an expiry to see if this makes room for our newer message.
                 // this is an optimisation only; messages will be expired on ~100ms cycle, and by Delivery when it runs
                 if (queue.maybePruneExpired() &&
-                    SUCCESS == acquireCapacity(canonicalSize(message)))
+                    SUCCESS == acquireCapacity(canonicalSize))
                     break;
             case INSUFFICIENT_GLOBAL:
                 onOverloaded(message);
@@ -251,7 +255,7 @@ public class OutboundConnection
         // can be opened in our place to try and send on.
         if (isClosed() && queue.undoAdd(message))
         {
-            releaseCapacity(1, canonicalSize(message));
+            releaseCapacity(1, canonicalSize);
             throw new ClosedChannelException();
         }
     }
@@ -695,6 +699,11 @@ public class OutboundConnection
                     try
                     {
                         int messageSize = next.serializedSize(messagingVersion);
+
+                        // actual message size for this version is larger than permitted maximum
+                        if (messageSize > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+                            throw new Message.OversizedMessageException(messageSize);
+
                         if (messageSize > sending.remaining())
                         {
                             // if we don't have enough room to serialize the next message, we have either
@@ -876,10 +885,15 @@ public class OutboundConnection
             AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, DEFAULT_BUFFER_SIZE, payloadAllocator);
             try
             {
+                int messageSize = send.serializedSize(messagingVersion);
+
+                // actual message size for this version is larger than permitted maximum
+                if (messageSize > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
+                    throw new Message.OversizedMessageException(messageSize);
+
                 Tracing.instance.traceOutgoingMessage(send, settings.connectTo);
                 Message.serializer.serialize(send, out, messagingVersion);
 
-                int messageSize = send.serializedSize(messagingVersion);
                 if (out.position() != messageSize)
                     throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + out.position());
 
