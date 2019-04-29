@@ -725,7 +725,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     Message message = provideMessage();
                     if (null != message && callbacks.shouldProcess(size, message))
                     {
-                        callbacks.onProcessing(size, message);
                         process(message);
                         processed = true;
                     }

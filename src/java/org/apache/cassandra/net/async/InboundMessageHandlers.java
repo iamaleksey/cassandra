@@ -207,11 +207,6 @@ public final class InboundMessageHandlers
             }
 
             @Override
-            public void onProcessing(int messageSize, Message message)
-            {
-            }
-
-            @Override
             public void onProcessed(int messageSize, Header header)
             {
                 counters.removePending(messageSize);
