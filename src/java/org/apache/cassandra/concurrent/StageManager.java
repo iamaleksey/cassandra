@@ -17,7 +17,9 @@
  */
 package org.apache.cassandra.concurrent;
 
+import java.util.Collections;
 import java.util.EnumMap;
+import java.util.List;
 import java.util.concurrent.*;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -26,7 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.DatabaseDescriptor.*;
@@ -60,6 +61,7 @@ public class StageManager
         stages.put(Stage.MIGRATION, new JMXEnabledThreadPoolExecutor(Stage.MIGRATION));
         stages.put(Stage.MISC, new JMXEnabledThreadPoolExecutor(Stage.MISC));
         stages.put(Stage.TRACING, tracingExecutor());
+        stages.put(Stage.IMMEDIATE, ImmediateExecutor.INSTANCE);
     }
 
     private static LocalAwareExecutorService tracingExecutor()
@@ -149,4 +151,5 @@ public class StageManager
             return getQueue().size();
         }
     }
+
 }
