@@ -195,9 +195,14 @@ public final class InboundMessageHandlers
             }
 
             @Override
-            public void onStartedProcessing(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            public void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 MessagingService.instance().metrics.addQueueWaitTime(header.verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onProcessing(int messageSize, Message message)
+            {
             }
 
             @Override

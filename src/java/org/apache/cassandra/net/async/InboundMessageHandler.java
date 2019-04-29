@@ -681,8 +681,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         TraceState state = Tracing.instance.initializeFromMessage(header);
         if (state != null) state.trace("{} message received from {}", header.verb, header.from);
 
-        StageManager.getStage(header.verb.stage).execute(task, ExecutorLocals.create(state));
         callbacks.onDispatched(task.size, header);
+        StageManager.getStage(header.verb.stage).execute(task, ExecutorLocals.create(state));
     }
 
     /*
@@ -706,13 +706,16 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             try
             {
-                callbacks.onStartedProcessing(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                callbacks.onExecuting(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
 
                 if (!expired)
                 {
                     Message message = provideMessage();
                     if (null != message && MessagingService.instance().messageSink.allowInbound(message))
+                    {
+                        callbacks.onProcessing(size, message);
                         process(message);
+                    }
                 }
             }
             finally
