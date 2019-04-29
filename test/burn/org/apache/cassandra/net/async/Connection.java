@@ -28,14 +28,12 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundMessageHandler.MessageProcessor;
 import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
-class Connection implements InboundMessageCallbacks, MessageProcessor, OutboundMessageCallbacks
+class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
 {
     private static final Logger logger = LoggerFactory.getLogger(Connection.class);
 
@@ -130,20 +128,27 @@ class Connection implements InboundMessageCallbacks, MessageProcessor, OutboundM
         verifier.onDeserialize(id, messagingVersion);
     }
 
-    public void process(Message<?> message, int messageSize, InboundMessageCallbacks callbacks)
-    {
-        controller.process(messageSize, callbacks);
-        verifier.onProcessed(message, messageSize);
-    }
-
-    public void onArrived(Message.Header header, long timeElapsed, TimeUnit units)
+    public void onArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
     {
         verifier.onArrived(header.id);
     }
 
-    public void onProcessed(int messageSize)
+    public void onDispatched(int messageSize, Message.Header header)
     {
-        throw new IllegalStateException();
+    }
+
+    public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+    }
+
+    public boolean shouldProcess(int messageSize, Message message)
+    {
+        verifier.onProcessed(message, messageSize);
+        return false;
+    }
+
+    public void onProcessed(int messageSize, Message.Header header)
+    {
     }
 
     public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)

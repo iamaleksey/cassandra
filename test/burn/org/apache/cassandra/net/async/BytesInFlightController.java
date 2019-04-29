@@ -24,6 +24,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.IntConsumer;
 
 import org.apache.cassandra.utils.Pair;
 
@@ -35,10 +36,10 @@ public class BytesInFlightController
     private volatile long minimumInFlightBytes, maximumInFlightBytes;
     private volatile long sentBytes;
     private volatile long receivedBytes;
-    private final ConcurrentLinkedQueue<Pair<Integer, InboundMessageCallbacks>> deferredBytes = new ConcurrentLinkedQueue<>();
+    private final ConcurrentLinkedQueue<Pair<Integer, IntConsumer>> deferredBytes = new ConcurrentLinkedQueue<>();
     private final ConcurrentSkipListMap<Long, Thread> waitingToSend = new ConcurrentSkipListMap<>();
 
-    public BytesInFlightController(long maximumInFlightBytes)
+    BytesInFlightController(long maximumInFlightBytes)
     {
         this.maximumInFlightBytes = maximumInFlightBytes;
     }
@@ -67,7 +68,7 @@ public class BytesInFlightController
         }
     }
 
-    public void adjust(int predictedSentBytes, int actualSentBytes)
+    void adjust(int predictedSentBytes, int actualSentBytes)
     {
         receivedBytesUpdater.addAndGet(this, predictedSentBytes - actualSentBytes);
         if (predictedSentBytes > actualSentBytes)
@@ -80,7 +81,7 @@ public class BytesInFlightController
         wakeupSenders();
     }
 
-    public void process(int bytes, InboundMessageCallbacks callbacks)
+    public void process(int bytes, IntConsumer releaseBytes)
     {
         while (true)
         {
@@ -89,19 +90,19 @@ public class BytesInFlightController
             long newReceived = received + bytes;
             if (sent - newReceived <= minimumInFlightBytes)
             {
-                deferredBytes.add(Pair.create(bytes, callbacks));
+                deferredBytes.add(Pair.create(bytes, releaseBytes));
                 break;
             }
             if (receivedBytesUpdater.compareAndSet(this, received, newReceived))
             {
-                callbacks.onProcessed(bytes);
+                releaseBytes.accept(bytes);
                 wakeupSenders();
                 break;
             }
         }
     }
 
-    public void setInFlightByteBounds(long minimumInFlightBytes, long maximumInFlightBytes)
+    void setInFlightByteBounds(long minimumInFlightBytes, long maximumInFlightBytes)
     {
         this.minimumInFlightBytes = minimumInFlightBytes;
         this.maximumInFlightBytes = maximumInFlightBytes;
@@ -136,18 +137,18 @@ public class BytesInFlightController
             if (sent - received > untilMinimumInFlightBytes && ThreadLocalRandom.current().nextFloat() > 0.5f)
                 break;
 
-            Pair<Integer, InboundMessageCallbacks> next = deferredBytes.poll();
+            Pair<Integer, IntConsumer> next = deferredBytes.poll();
             if (next == null)
                 break;
 
             int receive = next.left;
-            InboundMessageCallbacks callbacks = next.right;
+            IntConsumer callbacks = next.right;
             while (true)
             {
                 long newReceived = received + receive;
                 if (receivedBytesUpdater.compareAndSet(this, received, newReceived))
                 {
-                    callbacks.onProcessed(receive);
+                    callbacks.accept(receive);
                     wakeupSenders();
                     break;
                 }

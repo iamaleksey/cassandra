@@ -144,7 +144,7 @@ public enum Verb
     // dummy verbs
     _TRACE               (30, P1, rpcTimeout,      TRACING,           () -> NoPayload.serializer,            () -> null                                                     ),
     _SAMPLE              (42, P1, rpcTimeout,      INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
-    _TEST_1              (10, P0, writeTimeout,    INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
+    _TEST_1              (10, P0, writeTimeout,    IMMEDIATE,         () -> NoPayload.serializer,            () -> null                                                     ),
     _TEST_2              (11, P1, rpcTimeout,      INTERNAL_RESPONSE, () -> NoPayload.serializer,            () -> null                                                     ),
 
     @Deprecated
