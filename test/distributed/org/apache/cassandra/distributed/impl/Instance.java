@@ -222,17 +222,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             try (DataInputBuffer in = new DataInputBuffer(message.bytes()))
             {
                 Message<?> messageIn = Message.serializer.deserialize(in, message.from(), message.version());
-                StageManager.getStage(messageIn.verb().stage).execute(() ->
-                {
-                    try
-                    {
-                        messageIn.verb().handler().doVerb((Message<Object>) messageIn);
-                    }
-                    catch (IOException e)
-                    {
-                        // no-op
-                    }
-                });
+                messageIn.verb().handler().doVerb((Message<Object>) messageIn);
             }
             catch (Throwable t)
             {
