@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.repair;
 
+import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -55,6 +56,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.ResponseVerbHandler;
 import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
@@ -811,8 +813,7 @@ public class RepairJobTest
                 switch (rm.messageType)
                 {
                     case SNAPSHOT:
-                        Message<?> messageIn = message.emptyResponse();
-                        MessagingService.instance().process(messageIn, 0, InboundMessageCallbacks.NOOP);
+                        ResponseVerbHandler.instance.doVerb(message.emptyResponse());
                         break;
                     case VALIDATION_REQUEST:
                         session.validationComplete(sessionJobDesc, to, mockTrees.get(to));

@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net;
 
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Queue;
 import java.util.Set;
@@ -189,9 +190,20 @@ public class MatcherResponse
                         {
                             CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
                             if (cb != null)
+                            {
                                 cb.callback.response(response);
+                            }
                             else
-                                MessagingService.instance().process(response, 0, InboundMessageCallbacks.NOOP);
+                            {
+                                try
+                                {
+                                    response.verb().handler().doVerb((Message<Object>) message);
+                                }
+                                catch (IOException e)
+                                {
+                                    throw new RuntimeException(e);
+                                }
+                            }
 
                             spy.matchingResponse(response);
                         }

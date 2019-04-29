@@ -221,8 +221,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
             try (DataInputBuffer in = new DataInputBuffer(message.bytes()))
             {
                 Message<?> messageIn = Message.serializer.deserialize(in, message.from(), message.version());
-                Runnable deliver = new ProcessMessageTask(messageIn, 0, InboundMessageCallbacks.NOOP);
-                deliver.run();
+                messageIn.verb().handler().doVerb((Message<Object>) messageIn);
             }
             catch (Throwable t)
             {
