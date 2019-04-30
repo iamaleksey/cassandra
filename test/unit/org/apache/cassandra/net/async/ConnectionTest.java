@@ -525,17 +525,7 @@ public class ConnectionTest
 
         try
         {
-            test(new Settings(null).outbound(outbound -> outbound
-                                                         .withDefaults(SMALL_MESSAGES, MessagingService.VERSION_30)
-                                                         .withAcceptVersions(new MessagingService.AcceptVersions(MessagingService.VERSION_30, MessagingService.VERSION_30))
-                                                         // TODO (alexp): This should be fixed and removed when frame decoding for compression and encryption is fixed
-                                                         .withEncryption(null)
-                                                         .withConnectTo(FBUtilities.getBroadcastAddressAndPort())
-                                                         .withCompression(false))
-                                   // TODO (alexp): This should be fixed and removed when frame decoding for compression and encryption is fixed
-                                   .inbound(settings -> settings.withEncryption(null)
-                                   ),
-                 (inbound, outbound, endpoint) -> {
+            test((inbound, outbound, endpoint) -> {
                      CountDownLatch done = new CountDownLatch(1);
                      unsafeSetHandler(Verb._TEST_1,
                                       () -> (msg) -> done.countDown());
