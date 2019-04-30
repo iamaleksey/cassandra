@@ -109,7 +109,18 @@ public class AsyncPromise<V> implements Promise<V>
         this.listeners = listener;
     }
 
+    AsyncPromise(EventExecutor executor, FailureHolder initialState, GenericFutureListener<? extends Future<? super V>> listener)
+    {
+        this(executor, initialState);
+        this.listeners = listener;
+    }
+
     public static <V> AsyncPromise<V> uncancellable(EventExecutor executor)
+    {
+        return new AsyncPromise<>(executor, UNCANCELLABLE);
+    }
+
+    public static <V> AsyncPromise<V> uncancellable(EventExecutor executor, GenericFutureListener<? extends Future<? super V>> listener)
     {
         return new AsyncPromise<>(executor, UNCANCELLABLE);
     }

@@ -1137,12 +1137,16 @@ public class OutboundConnection
         if (!Objects.equals(newTemplate.applicationReserveSendQueueEndpointCapacityInBytes, template.applicationReserveSendQueueEndpointCapacityInBytes)) throw new IllegalArgumentException();
         if (newTemplate.applicationReserveSendQueueGlobalCapacityInBytes != template.applicationReserveSendQueueGlobalCapacityInBytes) throw new IllegalArgumentException();
 
-        Promise<Void> done;
-        done = AsyncPromise.uncancellable(eventLoop);
-        runOnEventLoop(() -> {
+        Promise<Void> done = AsyncPromise.uncancellable(eventLoop);
+
+        delivery.stopAndRunOnEventLoop(() -> {
             template = newTemplate;
             settings = template.withDefaults(type, messagingVersion);
-            closeChannelGracefully(channel, done);
+            // delivery will immediately continue after this, triggering a reconnect if necessary;
+            // this might mean a slight delay for large message delivery, as the connect will be scheduled
+            // asynchronously, so we must wait for a second turn on the eventLoop
+            closeChannelTask(channel).run();
+            done.setSuccess(null);
         });
         return done;
     }
@@ -1230,6 +1234,7 @@ public class OutboundConnection
      */
     public Future<Void> interrupt()
     {
+
         return closeChannelGracefully(channel, new AsyncPromise<>(eventLoop));
     }
 
