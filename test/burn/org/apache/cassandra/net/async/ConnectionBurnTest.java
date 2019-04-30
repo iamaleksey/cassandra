@@ -280,6 +280,12 @@ public class ConnectionBurnTest extends ConnectionTest
                 return wrapped.shouldProcess(messageSize, message);
             }
 
+            public void onProcessingException(int messageSize, Message.Header header, Throwable t)
+            {
+                forId(header.id).onProcessingException(messageSize, header, t);
+                wrapped.onProcessingException(messageSize, header, t);
+            }
+
             public void onProcessed(int messageSize, Message.Header header)
             {
                 forId(header.id).onProcessed(messageSize, header);

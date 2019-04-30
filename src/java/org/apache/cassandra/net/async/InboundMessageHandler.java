@@ -37,16 +37,12 @@ import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownColumnException;
 import org.apache.cassandra.exceptions.UnknownTableException;
-import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
@@ -727,7 +723,15 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     Message message = provideMessage();
                     if (null != message && callbacks.shouldProcess(size, message))
                     {
-                        process(message);
+                        try
+                        {
+                            //noinspection unchecked
+                            header().verb.handler().doVerb((Message<Object>) message);
+                        }
+                        catch (Throwable t)
+                        {
+                            callbacks.onProcessingException(size, header, t);
+                        }
                         processed = true;
                     }
                 }
@@ -745,42 +749,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     callbacks.onExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
                 else
                     callbacks.onProcessed(size, header);
-            }
-        }
-
-        @SuppressWarnings("unchecked")
-        private void process(Message message)
-        {
-            try
-            {
-                header().verb.handler().doVerb(message);
-            }
-            catch (TombstoneOverwhelmingException | IndexNotAvailableException e)
-            {
-                maybeSendFailureResponse(e);
-                noSpamLogger.error(e.getMessage());
-            }
-            catch (IOException e)
-            {
-                maybeSendFailureResponse(e);
-                throw new RuntimeException(e);
-            }
-            catch (Throwable t)
-            {
-                maybeSendFailureResponse(t);
-                throw t;
-            }
-        }
-
-        private void maybeSendFailureResponse(Throwable t)
-        {
-            Header header = header();
-
-            if (header.callBackOnFailure())
-            {
-                RequestFailureReason reason = RequestFailureReason.forException(t);
-                Message response = Message.failureResponse(header.id, header.expiresAtNanos, reason);
-                MessagingService.instance().sendResponse(response, header.from);
             }
         }
 

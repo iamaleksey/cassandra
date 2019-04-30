@@ -17,6 +17,7 @@
  */
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -24,8 +25,13 @@ import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.ToLongFunction;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import io.netty.channel.Channel;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
@@ -33,9 +39,13 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.NoSpamLogger;
 
 public final class InboundMessageHandlers
 {
+    private static final Logger logger = LoggerFactory.getLogger(InboundMessageHandlers.class);
+    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
+
     private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
 
@@ -170,14 +180,10 @@ public final class InboundMessageHandlers
                 counters.addError(messageSize);
 
                 /*
-                 * If an exception is caught during deser, return a failure response immediately instead of waiting for the callback
-                 * on the other end to expire.
+                 * If an exception is caught during deser, return a failure response immediately
+                 * instead of waiting for the callback on the other end to expire.
                  */
-                if (header.callBackOnFailure())
-                {
-                    Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(t));
-                    MessagingService.instance().sendOneWay(response, peer);
-                }
+                maybeSendFailureResponse(header, t);
             }
 
             @Override
@@ -207,6 +213,19 @@ public final class InboundMessageHandlers
             }
 
             @Override
+            public void onProcessingException(int messageSize, Header header, Throwable t)
+            {
+                maybeSendFailureResponse(header, t);
+
+                if (t instanceof TombstoneOverwhelmingException || t instanceof IndexNotAvailableException)
+                    noSpamLogger.error(t.getMessage());
+                else if (t instanceof RuntimeException)
+                    throw (RuntimeException) t;
+                else
+                    throw new RuntimeException(t);
+            }
+
+            @Override
             public void onProcessed(int messageSize, Header header)
             {
                 counters.removePending(messageSize);
@@ -220,6 +239,15 @@ public final class InboundMessageHandlers
                 counters.addExpired(messageSize);
 
                 MessagingService.instance().droppedMessages.incrementWithLatency(header.verb, timeElapsed, unit);
+            }
+
+            private void maybeSendFailureResponse(Header header, Throwable t)
+            {
+                if (header.callBackOnFailure())
+                {
+                    Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(t));
+                    MessagingService.instance().sendOneWay(response, peer);
+                }
             }
         };
     }

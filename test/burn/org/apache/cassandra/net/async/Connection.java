@@ -147,6 +147,10 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         return false;
     }
 
+    public void onProcessingException(int messageSize, Message.Header header, Throwable t)
+    {
+    }
+
     public void onProcessed(int messageSize, Message.Header header)
     {
     }
