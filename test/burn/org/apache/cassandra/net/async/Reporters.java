@@ -42,11 +42,11 @@ class Reporters
         this.endpoints = endpoints;
         this.connections = connections;
         this.reporters = ImmutableList.of(
-            outboundReporter (true,  "Outbound Throughput",          OutboundConnection::sentBytes,          ConnectionBurnTest::prettyPrintMemory),
-            inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        ConnectionBurnTest::prettyPrintMemory),
+            outboundReporter (true,  "Outbound Throughput",          OutboundConnection::sentBytes,          Reporters::prettyPrintMemory),
+            inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        Reporters::prettyPrintMemory),
 
-            outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       ConnectionBurnTest::prettyPrintMemory),
-            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          ConnectionBurnTest::prettyPrintMemory),
+            outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       Reporters::prettyPrintMemory),
+            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          Reporters::prettyPrintMemory),
 
             outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
             inboundReporter  (true,  "Inbound Expirations",          InboundCounters::expiredCount,          Long::toString),
@@ -303,6 +303,15 @@ class Reporters
         }
 
         return builder.toString();
+    }
+
+    static String prettyPrintMemory(long size)
+    {
+        if (size >= 1000 * 1000 * 1000)
+            return String.format("%.0fG", size / (double) (1 << 30));
+        if (size >= 1000 * 1000)
+            return String.format("%.0fM", size / (double) (1 << 20));
+        return String.format("%.0fK", size / (double) (1 << 10));
     }
 }
 

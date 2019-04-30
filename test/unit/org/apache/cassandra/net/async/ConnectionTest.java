@@ -177,10 +177,11 @@ public class ConnectionTest
         }
     }
 
-    private static final EncryptionOptions.ServerEncryptionOptions encryptionOptions =
+    static final EncryptionOptions.ServerEncryptionOptions encryptionOptions =
             new EncryptionOptions.ServerEncryptionOptions()
             .withEnabled(true)
             .withLegacySslStoragePort(true)
+            .withOptional(true)
             .withInternodeEncryption(EncryptionOptions.ServerEncryptionOptions.InternodeEncryption.all)
             .withKeyStore("test/conf/cassandra_ssl_test.keystore")
             .withKeyStorePassword("cassandra")

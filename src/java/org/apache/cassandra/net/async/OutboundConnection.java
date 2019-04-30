@@ -1513,6 +1513,12 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
+    OutboundConnectionSettings template()
+    {
+        return template;
+    }
+
+    @VisibleForTesting
     OutboundConnectionSettings settings()
     {
         return settings;

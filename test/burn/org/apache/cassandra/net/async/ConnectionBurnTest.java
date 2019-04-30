@@ -33,7 +33,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -43,6 +42,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -56,10 +56,11 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
-public class ConnectionBurnTest extends ConnectionTest
+public class ConnectionBurnTest
 {
     static
     {
@@ -237,7 +238,11 @@ public class ConnectionBurnTest extends ConnectionTest
                         {
                             break;
                         }
-                        connections[random.nextInt(connections.length)].interrupt();
+                        Connection connection = connections[random.nextInt(connections.length)];
+                        OutboundConnectionSettings template = connection.outbound.template();
+                        template = ConnectionTest.SETTINGS.get(random.nextInt(ConnectionTest.SETTINGS.size()))
+                                   .outbound.apply(template);
+                        connection.reconnect(template);
                     }
                 });
 
@@ -360,15 +365,6 @@ public class ConnectionBurnTest extends ConnectionTest
 
     }
 
-    public static String prettyPrintMemory(long size)
-    {
-        if (size >= 1000 * 1000 * 1000)
-            return String.format("%.0fG", size / (double) (1 << 30));
-        if (size >= 1000 * 1000)
-            return String.format("%.0fM", size / (double) (1 << 20));
-        return String.format("%.0fK", size / (double) (1 << 10));
-    }
-
     static List<InetAddressAndPort> endpoints(int count)
     {
         return IntStream.rangeClosed(1, count)
@@ -412,9 +408,11 @@ public class ConnectionBurnTest extends ConnectionTest
                                                 .withQueueCapacity(1 << 18)
                                                 .withEndpointReserveLimit(1 << 20)
                                                 .withGlobalReserveLimit(1 << 21)
-                                                .withTemplate(new InboundConnectionSettings());
+                                                .withTemplate(new InboundConnectionSettings()
+                                                              .withEncryption(ConnectionTest.encryptionOptions));
+
         test(inboundSettings, new OutboundConnectionSettings(null)
-//                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
+                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
                               .withTcpUserTimeoutInMS(0));
         MessagingService.instance().socketFactory.shutdownNow();
     }

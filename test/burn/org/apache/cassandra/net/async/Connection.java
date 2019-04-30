@@ -118,10 +118,10 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         }
     }
 
-    void interrupt()
+    void reconnect(OutboundConnectionSettings template)
     {
-        Verifier.InterruptEvent interrupt = verifier.interrupt();
-        outbound.interrupt().addListener(future -> interrupt.complete(verifier));
+        Verifier.ReconnectEvent interrupt = verifier.reconnect(template.acceptVersions.max);
+        outbound.reconnectWithNewTemplate(template).addListener(future -> interrupt.complete(verifier));
     }
 
     public void onSerialize(long id, int messagingVersion)
@@ -136,7 +136,7 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
 
     public void onArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
     {
-        verifier.onArrived(header.id);
+        verifier.onArrived(header.id, messageSize);
     }
 
     public void onDispatched(int messageSize, Message.Header header)
@@ -176,7 +176,7 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
     public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
     {
         controller.fail(messageSize);
-        verifier.onFailedDeserialize(header.id);
+        verifier.onFailedDeserialize(header.id, messageSize);
     }
 
     InboundCounters inboundCounters()

@@ -82,7 +82,7 @@ public class Verifier
         FAILED_CLOSING,
         FAILED_FRAME,
 
-        INTERRUPT_OUTBOUND,
+        RECONNECT_OUTBOUND,
         CONTROLLER_UPDATE
     }
 
@@ -161,17 +161,27 @@ public class Verifier
         }
     }
 
+    static class SimpleMessageEventWithSize extends SimpleMessageEvent
+    {
+        final int messageSize;
+        SimpleMessageEventWithSize(EventType type, long at, long messageId, int messageSize)
+        {
+            super(type, at, messageId);
+            this.messageSize = messageSize;
+        }
+    }
+
     static class ExpiredMessageEvent extends SimpleMessageEvent
     {
         enum ExpirationType {ON_SENT, ON_ARRIVED, ON_PROCESSED }
-        final int size;
+        final int messageSize;
         final long timeElapsed;
         final TimeUnit timeUnit;
         final ExpirationType expirationType;
-        ExpiredMessageEvent(long at, long messageId, int size, long timeElapsed, TimeUnit timeUnit, ExpirationType expirationType)
+        ExpiredMessageEvent(long at, long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit, ExpirationType expirationType)
         {
             super(FAILED_EXPIRED, at, messageId);
-            this.size = size;
+            this.messageSize = messageSize;
             this.timeElapsed = timeElapsed;
             this.timeUnit = timeUnit;
             this.expirationType = expirationType;
@@ -192,13 +202,13 @@ public class Verifier
 
     static class ProcessMessageEvent extends SimpleMessageEvent
     {
-        final int size;
+        final int messageSize;
         final Message<?> message;
-        ProcessMessageEvent(long at, Message<?> message, int size)
+        ProcessMessageEvent(long at, Message<?> message, int messageSize)
         {
             super(PROCESS, at, message.id());
             this.message = message;
-            this.size = size;
+            this.messageSize = messageSize;
         }
     }
 
@@ -208,106 +218,88 @@ public class Verifier
         events.put(enqueue.start, enqueue);
         return enqueue;
     }
-    private static EnqueueMessageEvent onEnqueue(Event e) { return (EnqueueMessageEvent)e; }
-
-    void onSerialize(long messageId, int messagingVersion)
-    {
-        long at = nextId();
-        events.put(at, new SerializeMessageEvent(SERIALIZE, at, messageId, messagingVersion));
-    }
-    private static SerializeMessageEvent onSerialize(Event e) { return (SerializeMessageEvent)e; }
-
-    void onArrived(long messageId)
-    {
-        long at = nextId();
-        events.put(at, new SimpleMessageEvent(ARRIVE, at, messageId));
-    }
-    private static SimpleMessageEvent onArrived(Event e) { return (SimpleMessageEvent)e; }
-
-    void onDeserialize(long messageId, int messagingVersion)
-    {
-        long at = nextId();
-        events.put(at, new SerializeMessageEvent(DESERIALIZE, at, messageId, messagingVersion));
-    }
-    private static SimpleMessageEvent onDeserialize(Event e) { return (SimpleMessageEvent)e; }
-
-    void onProcessed(Message<?> message, int size)
-    {
-        long at = nextId();
-        events.put(at, new ProcessMessageEvent(at, message, size));
-    }
-    private static ProcessMessageEvent onProcessed(Event e) { return (ProcessMessageEvent)e; }
-
-    void onExpiredBeforeSend(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
-    {
-        onExpired(messageId, size, timeElapsed, timeUnit, ExpirationType.ON_SENT);
-    }
-    void onArrivedExpired(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
-    {
-        onExpired(messageId, size, timeElapsed, timeUnit, ExpirationType.ON_ARRIVED);
-    }
-    void onProcessedExpired(long messageId, int size, long timeElapsed, TimeUnit timeUnit)
-    {
-        onExpired(messageId, size, timeElapsed, timeUnit, ExpirationType.ON_PROCESSED);
-    }
-    private void onExpired(long messageId, int size, long timeElapsed, TimeUnit timeUnit, ExpirationType expirationType)
-    {
-        long at = nextId();
-        events.put(at, new ExpiredMessageEvent(at, messageId, size, timeElapsed, timeUnit, expirationType));
-    }
-    private static ExpiredMessageEvent onExpired(Event e) { return (ExpiredMessageEvent)e; }
-
     void onOverloaded(long messageId)
     {
         long at = nextId();
         events.put(at, new SimpleMessageEvent(FAILED_OVERLOADED, at, messageId));
     }
-    private static SimpleMessageEvent onOverloaded(Event e) { return (SimpleMessageEvent)e; }
-
-    void onFailedSerialize(long messageId)
-    {
-        long at = nextId();
-        events.put(at, new SimpleMessageEvent(FAILED_SERIALIZE, at, messageId));
-    }
-    private static SimpleMessageEvent onFailedSerialize(Event e) { return (SimpleMessageEvent)e; }
-    void onFailedDeserialize(long messageId)
-    {
-        long at = nextId();
-        events.put(at, new SimpleMessageEvent(FAILED_DESERIALIZE, at, messageId));
-    }
-    private static SimpleMessageEvent onFailedDeserialize(Event e) { return (SimpleMessageEvent)e; }
-
     void onFailedClosing(long messageId)
     {
         long at = nextId();
         events.put(at, new SimpleMessageEvent(FAILED_CLOSING, at, messageId));
     }
-    private static SimpleMessageEvent onFailedClosing(Event e) { return (SimpleMessageEvent)e; }
-
+    void onSerialize(long messageId, int messagingVersion)
+    {
+        long at = nextId();
+        events.put(at, new SerializeMessageEvent(SERIALIZE, at, messageId, messagingVersion));
+    }
+    void onFailedSerialize(long messageId)
+    {
+        long at = nextId();
+        events.put(at, new SimpleMessageEvent(FAILED_SERIALIZE, at, messageId));
+    }
+    void onExpiredBeforeSend(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
+    {
+        onExpired(messageId, messageSize, timeElapsed, timeUnit, ExpirationType.ON_SENT);
+    }
     void onSendFrame(int messageCount, int payloadSizeInBytes)
     {
         long at = nextId();
         events.put(at, new FrameEvent(SEND_FRAME, at, messageCount, payloadSizeInBytes));
     }
-
     void onSentFrame(int messageCount, int payloadSizeInBytes)
     {
         long at = nextId();
         events.put(at, new FrameEvent(SENT_FRAME, at, messageCount, payloadSizeInBytes));
     }
-
     void onFailedFrame(int messageCount, int payloadSizeInBytes)
     {
         long at = nextId();
         events.put(at, new FrameEvent(FAILED_DESERIALIZE, at, messageCount, payloadSizeInBytes));
     }
-
-
-    static class InterruptEvent extends BoundedEvent
+    void onArrived(long messageId, int messageSize)
     {
-        InterruptEvent(long start)
+        long at = nextId();
+        events.put(at, new SimpleMessageEventWithSize(ARRIVE, at, messageId, messageSize));
+    }
+    void onArrivedExpired(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
+    {
+        onExpired(messageId, messageSize, timeElapsed, timeUnit, ExpirationType.ON_ARRIVED);
+    }
+    void onDeserialize(long messageId, int messagingVersion)
+    {
+        long at = nextId();
+        events.put(at, new SerializeMessageEvent(DESERIALIZE, at, messageId, messagingVersion));
+    }
+    void onFailedDeserialize(long messageId, int messageSize)
+    {
+        long at = nextId();
+        events.put(at, new SimpleMessageEventWithSize(FAILED_DESERIALIZE, at, messageId, messageSize));
+    }
+    void onProcessed(Message<?> message, int messageSize)
+    {
+        long at = nextId();
+        events.put(at, new ProcessMessageEvent(at, message, messageSize));
+    }
+    void onProcessedExpired(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
+    {
+        onExpired(messageId, messageSize, timeElapsed, timeUnit, ExpirationType.ON_PROCESSED);
+    }
+    private void onExpired(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit, ExpirationType expirationType)
+    {
+        long at = nextId();
+        events.put(at, new ExpiredMessageEvent(at, messageId, messageSize, timeElapsed, timeUnit, expirationType));
+    }
+
+
+
+    static class ReconnectEvent extends BoundedEvent
+    {
+        final int messagingVersion;
+        ReconnectEvent(long start, int messagingVersion)
         {
-            super(EventType.INTERRUPT_OUTBOUND, start);
+            super(EventType.RECONNECT_OUTBOUND, start);
+            this.messagingVersion = messagingVersion;
         }
     }
 
@@ -323,11 +315,11 @@ public class Verifier
         }
     }
 
-    InterruptEvent interrupt()
+    ReconnectEvent reconnect(int messagingVersion)
     {
-        InterruptEvent interrupt = new InterruptEvent(nextId());
-        events.put(interrupt.start, interrupt);
-        return interrupt;
+        ReconnectEvent reconnect = new ReconnectEvent(nextId(), messagingVersion);
+        events.put(reconnect.start, reconnect);
+        return reconnect;
     }
 
     private final BytesInFlightController controller;
@@ -364,6 +356,11 @@ public class Verifier
         long lastUpdateNanos;
         ConnectionState sentOn;
 
+        int messageSize()
+        {
+            return message.serializedSize(messagingVersion);
+        }
+
         MessageState(Message<?> message, long enqueueStart)
         {
             this.enqueueStart = enqueueStart;
@@ -396,6 +393,7 @@ public class Verifier
 
     static final class ConnectionState
     {
+        final int messagingVersion;
         // Strict message order will then be determined at serialization time, since this happens on a single thread.
         // The order in which messages arrive here determines the order they will arrive on the other node.
         // must follow either ENQUEUE_START or ENQUEUE_END
@@ -413,6 +411,11 @@ public class Verifier
 
         final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
                                   deserializingOffEventLoop = new Queue<>();
+
+        ConnectionState(int messagingVersion)
+        {
+            this.messagingVersion = messagingVersion;
+        }
     }
 
     final Queue<Frame> reuseFrames = new Queue<>();
@@ -421,7 +424,7 @@ public class Verifier
     long canonicalBytesInFlight = 0;
     long nextMessageId = 0;
     long now;
-    ConnectionState currentConnection = new ConnectionState();
+    ConnectionState currentConnection = new ConnectionState(current_version);
 
     public void run(Runnable onFailure, long deadlineNanos)
     {
@@ -453,7 +456,7 @@ public class Verifier
                     case ENQUEUE:
                     {
                         MessageState m;
-                        EnqueueMessageEvent e = onEnqueue(next);
+                        EnqueueMessageEvent e = (EnqueueMessageEvent) next;
                         assert nextMessageId == e.start || nextMessageId == e.end;
                         assert e.message != null;
                         if (nextMessageId == e.start)
@@ -477,7 +480,7 @@ public class Verifier
                     case FAILED_OVERLOADED:
                     {
                         // TODO: verify that we could have exceeded our memory limits
-                        SimpleMessageEvent e = onOverloaded(next);
+                        SimpleMessageEvent e = (SimpleMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = remove(e.messageId, enqueueing, messages);
                         if (ENQUEUE != m.state)
@@ -487,7 +490,7 @@ public class Verifier
                     case FAILED_CLOSING:
                     {
                         // TODO: verify if this is acceptable due to e.g. inbound refusing to process for long enough
-                        SimpleMessageEvent e = onFailedClosing(next);
+                        SimpleMessageEvent e = (SimpleMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         enqueueing.remove(m);
@@ -500,7 +503,7 @@ public class Verifier
                     {
                         // serialize happens serially, so we can compress the asynchronicity of the above enqueue
                         // into a linear sequence of events we expect to occur on arrival
-                        SerializeMessageEvent e = onSerialize(next);
+                        SerializeMessageEvent e = (SerializeMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         assert m.state == ENQUEUE;
@@ -529,8 +532,9 @@ public class Verifier
                     }
                     case FAILED_SERIALIZE:
                     {
+                        // we require that _either_ this runs or SERIALIZE, so that we can correctly track bytes in flight
                         // TODO: verify this failure to serialize was intended by test
-                        SimpleMessageEvent e = onFailedSerialize(next);
+                        SimpleMessageEvent e = (SimpleMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         enqueueing.remove(m);
@@ -574,7 +578,7 @@ public class Verifier
                     }
                     case FAILED_FRAME:
                     {
-                        // TODO: is it possible for this to be signalled AFTER our interrupt event? probably, in which case this will be wrong
+                        // TODO: is it possible for this to be signalled AFTER our reconnect event? probably, in which case this will be wrong
                         // TODO: verify that this was expected
                         Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.FAILED);
                         if (frame != null && frame.messagingVersion >= VERSION_40)
@@ -588,10 +592,13 @@ public class Verifier
                     }
                     case ARRIVE:
                     {
-                        SimpleMessageEvent e = onArrived(next);
+                        SimpleMessageEventWithSize e = (SimpleMessageEventWithSize) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         m.arrive = e.at;
+                        if (e.messageSize != m.messageSize())
+                            fail("onArrived with invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
+
                         if (outboundType == LARGE_MESSAGES)
                         {
                             assert m.state == SERIALIZE;
@@ -655,7 +662,7 @@ public class Verifier
                     {
                         // deserialize may happen in parallel for large messages, but in sequence for small messages
                         // we currently require that this event be issued before any possible error is thrown
-                        SimpleMessageEvent e = onDeserialize(next);
+                        SimpleMessageEvent e = (SimpleMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         assert m.state == ARRIVE;
@@ -687,16 +694,18 @@ public class Verifier
                     case FAILED_DESERIALIZE:
                     {
                         // TODO: verify this failure to deserialize was intended by test
-                        SimpleMessageEvent e = onFailedDeserialize(next);
+                        SimpleMessageEventWithSize e = (SimpleMessageEventWithSize) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
+                        if (e.messageSize != m.messageSize())
+                            fail("onFailedDeserialize has invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
                         assert m.state == DESERIALIZE;
                         (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m);
                         break;
                     }
                     case PROCESS:
                     {
-                        ProcessMessageEvent e = onProcessed(next);
+                        ProcessMessageEvent e = (ProcessMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         if (m == null)
@@ -709,11 +718,9 @@ public class Verifier
                             fail("Invalid message payload for %d: %s supplied by processor, but %s implied by original message and messaging version",
                                  e.messageId, Arrays.toString((byte[]) e.message.payload), Arrays.toString((byte[]) m.message.payload));
                         }
-                        if (e.size != m.message.serializedSize(m.messagingVersion))
-                        {
-                            fail("Invalid serialized size for %d: %d supplied by processor, but %d implied by original message and messaging version",
-                                 e.messageId, e.size, m.message.serializedSize(m.messagingVersion));
-                        }
+                        if (e.messageSize != m.messageSize())
+                            fail("Processing with invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
+
                         if (m.processOutOfOrder)
                         {
                             assert !m.processOnEventLoop; // will have already been reported small (processOnEventLoop) messages
@@ -753,7 +760,7 @@ public class Verifier
                     }
                     case FAILED_EXPIRED:
                     {
-                        ExpiredMessageEvent e = onExpired(next);
+                        ExpiredMessageEvent e = (ExpiredMessageEvent) next;
                         assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         switch (e.expirationType)
@@ -789,17 +796,21 @@ public class Verifier
                             case DESERIALIZE: (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m); break;
                             case SERIALIZE: m.sentOn.serializing.remove(m); break;
                         }
+
+                        if (e.messageSize != m.messageSize())
+                            fail("onExpired %s with invalid size for %s: %d vs %d", e.expirationType, m, e.messageSize, m.messageSize());
+
                         break;
                     }
                     case CONTROLLER_UPDATE:
                     {
                         break;
                     }
-                    case INTERRUPT_OUTBOUND:
+                    case RECONNECT_OUTBOUND:
                     {
-                        InterruptEvent e = (InterruptEvent) next;
+                        ReconnectEvent e = (ReconnectEvent) next;
                         if (nextMessageId == e.end)
-                            currentConnection = new ConnectionState();
+                            currentConnection = new ConnectionState(e.messagingVersion);
                         break;
                     }
                     default:
@@ -960,20 +971,6 @@ public class Verifier
             return readerChunk;
         }
 
-//        public Event peek()
-//        {
-//            return readerChunk(rea).get(readerId);
-//        }
-//
-//        public Event poll()
-//        {
-//            Chunk chunk = readerChunk();
-//            Event event = chunk.get(readerId);
-//            if (event != null)
-//                ++readerId;
-//            return event;
-//        }
-//
         public Event await(long id, long timeout, TimeUnit unit) throws InterruptedException
         {
             return await(id, System.nanoTime() + unit.toNanos(timeout));
