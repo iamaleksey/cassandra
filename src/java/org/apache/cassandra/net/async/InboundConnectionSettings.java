@@ -204,7 +204,7 @@ public class InboundConnectionSettings
             socketFactory = instance().socketFactory;
 
         if (handlersFactory == null)
-            handlersFactory = MessagingService.instance()::getInbound;
+            handlersFactory = instance()::getInbound;
 
         Preconditions.checkArgument(socketReceiveBufferSizeInBytes == 0 || socketReceiveBufferSizeInBytes >= 1 << 10, "illegal socket send buffer size: " + socketReceiveBufferSizeInBytes);
         Preconditions.checkArgument(applicationReceiveQueueCapacityInBytes >= 1 << 10, "illegal application receive queue capacity: " + applicationReceiveQueueCapacityInBytes);

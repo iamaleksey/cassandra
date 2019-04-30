@@ -442,6 +442,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return true;
         }
 
+        // At that point, we know we don't have enough capacity in the queue. However, we still
+        // should take not more than `bytes` here since capacity can go up without us knowing
         long allocatedExcess = min(currentQueueSize + bytes - queueCapacity, bytes);
 
         switch (ResourceLimits.tryAllocate(endpointReserve, globalReserve, allocatedExcess))
