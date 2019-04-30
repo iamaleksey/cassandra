@@ -306,7 +306,8 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 10;
-            CountDownLatch done = new CountDownLatch(count);
+            CountDownLatch receiveDone = new CountDownLatch(count);
+            CountDownLatch deliveryDone = new CountDownLatch(1);
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object noPayload, DataOutputPlus out, int version) throws IOException
@@ -324,13 +325,16 @@ public class ConnectionTest
                     return LARGE_MESSAGE_THRESHOLD + 1;
                 }
             });
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> receiveDone.countDown());
             Message<?> message = Message.builder(Verb._TEST_1, new Object())
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
                                         .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            Assert.assertTrue(done.await(10, SECONDS));
+            Assert.assertTrue(receiveDone.await(10, SECONDS));
+
+            outbound.unsafeRunOnDelivery(deliveryDone::countDown);
+            Assert.assertTrue(deliveryDone.await(10, SECONDS));
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
