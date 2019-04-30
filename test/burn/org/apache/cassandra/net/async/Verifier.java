@@ -554,8 +554,8 @@ public class Verifier
                                 break;
                             }
 
-                            int fi = 0, mi = -1;
-                            while (fi < framesInFlight.size() && mi < 0)
+                            int fi = -1, mi = -1;
+                            while (fi + 1 < framesInFlight.size() && mi < 0)
                                 mi = framesInFlight.get(++fi).indexOf(m);
 
                             if (fi == framesInFlight.size())

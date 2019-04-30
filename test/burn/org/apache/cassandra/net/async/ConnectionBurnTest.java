@@ -196,6 +196,7 @@ public class ConnectionBurnTest extends ConnectionTest
             try
             {
                 long deadline = System.nanoTime() + runForNanos;
+                Verb._TEST_2.unsafeSetHandler(() -> message -> {});
                 Verb._TEST_2.unsafeSetSerializer(() -> serializer);
                 inbound.sockets.open().get();
 
