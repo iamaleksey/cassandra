@@ -239,7 +239,7 @@ public class ConnectionBurnTest
                             break;
                         }
                         Connection connection = connections[random.nextInt(connections.length)];
-                        OutboundConnectionSettings template = connection.outbound.template();
+                        OutboundConnectionSettings template = connection.outboundTemplate;
                         template = ConnectionTest.SETTINGS.get(random.nextInt(ConnectionTest.SETTINGS.size()))
                                    .outbound.apply(template);
                         connection.reconnect(template);
@@ -412,7 +412,6 @@ public class ConnectionBurnTest
                                                               .withEncryption(ConnectionTest.encryptionOptions));
 
         test(inboundSettings, new OutboundConnectionSettings(null)
-                              .withAcceptVersions(new MessagingService.AcceptVersions(VERSION_30, VERSION_30))
                               .withTcpUserTimeoutInMS(0));
         MessagingService.instance().socketFactory.shutdownNow();
     }

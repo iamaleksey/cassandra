@@ -555,7 +555,7 @@ public class OutboundConnection
         {
             JVMStabilityInspector.inspectThrowable(cause, false);
             if (isCausedByConnectionReset(cause))
-                logger.debug("{} channel closed by provider", id(), cause);
+                logger.info("{} channel closed by provider", id(), cause);
             else
                 logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
 
@@ -1000,10 +1000,13 @@ public class OutboundConnection
 
                     channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
                         @Override
-                        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-                            super.channelInactive(ctx);
-                            logger.info("{} channel closed by provider", id());
-                            closeChannelNow(ctx.channel());
+                        public void channelInactive(ChannelHandlerContext ctx) {
+                            if (ctx.channel() == channel)
+                            {
+                                logger.info("{} channel closed by provider", id());
+                                closeChannelNow(channel);
+                            }
+                            ctx.fireChannelInactive();
                         }
 
                         @Override

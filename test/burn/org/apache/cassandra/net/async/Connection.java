@@ -42,6 +42,7 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
     final InboundMessageHandlers inboundHandlers;
     final BytesInFlightController controller;
     final OutboundConnection outbound;
+    final OutboundConnectionSettings outboundTemplate;
     final Verifier verifier;
     final MessageGenerator sendGenerator;
     final String linkId;
@@ -66,11 +67,10 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         this.nextSendId.set(minId);
         this.linkId = sender.toString(false) + "->" + recipient.toString(false) + "-" + type;
         this.verifier = new Verifier(controller, type);
-        this.outbound = new OutboundConnection(type,
-                                               outboundTemplate.toEndpoint(recipient)
-                                                               .withFrom(sender)
-                                                               .withCallbacks(this),
-                                               reserveCapacityInBytes);
+        this.outboundTemplate = outboundTemplate.toEndpoint(recipient)
+                                                .withFrom(sender)
+                                                .withCallbacks(this);
+        this.outbound = new OutboundConnection(type, this.outboundTemplate, reserveCapacityInBytes);
     }
 
     void start(Runnable onFailure, Executor executor, long deadlineNanos)
@@ -120,7 +120,7 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
 
     void reconnect(OutboundConnectionSettings template)
     {
-        Verifier.ReconnectEvent interrupt = verifier.reconnect(template.acceptVersions.max);
+        Verifier.ReconnectEvent interrupt = verifier.reconnect(template.acceptVersions == null ? current_version : template.acceptVersions.max);
         outbound.reconnectWithNewTemplate(template).addListener(future -> interrupt.complete(verifier));
     }
 

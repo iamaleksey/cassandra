@@ -341,6 +341,12 @@ public class Verifier
     private void fail(String message, Object ... params)
     {
         logger.error("{}", String.format(message, params));
+        logger.error("Connection: {}", currentConnection);
+    }
+
+    private void failinfo(String message, Object ... params)
+    {
+        logger.error("{}", String.format(message, params));
     }
 
     private static class MessageState
@@ -376,8 +382,8 @@ public class Verifier
 
         public String toString()
         {
-            return String.format("{id:%d, ver:%d, state:%s, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d}",
-                                 message.id(), messagingVersion, state, enqueueStart, enqueueEnd, serialize, arrive, deserialize);
+            return String.format("{id:%d, ver:%d, state:%s, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d, expires:%d, sentOn: %d}",
+                                 message.id(), messagingVersion, state, enqueueStart, enqueueEnd, serialize, arrive, deserialize, ApproximateTime.toCurrentTimeMillis(expiresAtNanos), sentOn == null ? -1 : sentOn.connectionId);
         }
     }
 
@@ -393,6 +399,7 @@ public class Verifier
 
     static final class ConnectionState
     {
+        final long connectionId;
         final int messagingVersion;
         // Strict message order will then be determined at serialization time, since this happens on a single thread.
         // The order in which messages arrive here determines the order they will arrive on the other node.
@@ -412,9 +419,16 @@ public class Verifier
         final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
                                   deserializingOffEventLoop = new Queue<>();
 
-        ConnectionState(int messagingVersion)
+        ConnectionState(long connectionId, int messagingVersion)
         {
+            this.connectionId = connectionId;
             this.messagingVersion = messagingVersion;
+        }
+
+        public String toString()
+        {
+            return String.format("{id: %d, ver: %d, ser: %d, inFlight: %s, arriving: %d, deserOn: %d, deserOff: %d}",
+                                 connectionId, messagingVersion, serializing.size(), framesInFlight, arriving.size(), deserializingOnEventLoop.size(), deserializingOffEventLoop.size());
         }
     }
 
@@ -424,7 +438,8 @@ public class Verifier
     long canonicalBytesInFlight = 0;
     long nextMessageId = 0;
     long now;
-    ConnectionState currentConnection = new ConnectionState(current_version);
+    long connectionCounter;
+    ConnectionState currentConnection = new ConnectionState(connectionCounter++, current_version);
 
     public void run(Runnable onFailure, long deadlineNanos)
     {
@@ -631,16 +646,22 @@ public class Verifier
                                 // we have skipped over some frames, meaning these have either failed (and we know it)
                                 // or we have not yet heard about them and they have presumably failed, or something
                                 // has gone wrong
+                                fail("BEGIN: Successfully sent frames were not delivered");
                                 for (int i = 0 ; i < fi ; ++i)
                                 {
                                     Frame skip = m.sentOn.framesInFlight.get(i);
                                     skip.receiveStatus = Frame.Status.FAILED;
                                     if (skip.sendStatus == Frame.Status.SUCCESS)
-                                        fail("Successfully sent frame %s was not delivered", skip);
+                                    {
+                                        failinfo("Frame %s", skip);
+                                        for (int j = 0 ; j < skip.size() ; ++j)
+                                            failinfo("Containing: %s", skip.get(j));
+                                    }
                                     clear(skip, messages);
                                     reuseFrames.add(skip.reset());
                                 }
                                 m.sentOn.framesInFlight.removeFirst(fi);
+                                failinfo("END: Successfully sent frames were not delivered");
                             }
 
                             Frame frame = m.sentOn.framesInFlight.get(0);
@@ -767,16 +788,17 @@ public class Verifier
                         {
                             case ON_SENT:
                                 if (m.state != ENQUEUE)
-                                    fail("Invalid expiry on sent of %s", m);
+                                    fail("Invalid state onExpiry ON_SENT of %s", m);
                                 break;
                             case ON_ARRIVED:
-                                if (outboundType == LARGE_MESSAGES ? m.state != SERIALIZE
-                                                                   : m.state != SEND_FRAME && m.state != SENT_FRAME && m.state != FAILED_FRAME)
-                                    fail("Invalid expiry on arrival of %s", m);
+                                if (m.state != ARRIVE && // can be deferred and return to expire on arrival
+                                    (outboundType == LARGE_MESSAGES ? m.state != SERIALIZE
+                                                                    : m.state != SEND_FRAME && m.state != SENT_FRAME && m.state != FAILED_FRAME))
+                                    fail("Invalid state onExpiry ON_ARRIVED of %s", m);
                                 break;
                             case ON_PROCESSED:
                                 if (m.state != ARRIVE)
-                                    fail("Invalid expiry on processed of %s", m);
+                                    fail("Invalid state onExpiry ON_PROCESSED of %s", m);
                                 break;
                         }
 
@@ -794,7 +816,15 @@ public class Verifier
                         {
                             case ENQUEUE: enqueueing.remove(m); break;
                             case DESERIALIZE: (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m); break;
+                            case SEND_FRAME: case SENT_FRAME: case FAILED_FRAME:
+                                // TODO: this should be robust to re-ordering; should perhaps extract a common method
+                                m.sentOn.framesInFlight.get(0).remove(m);
+                                if (m.sentOn.framesInFlight.get(0).isEmpty())
+                                    m.sentOn.framesInFlight.removeFirst(1);
+                                break;
                             case SERIALIZE: m.sentOn.serializing.remove(m); break;
+                            case ARRIVE: m.sentOn.arriving.remove(m); break;
+                            default: throw new IllegalStateException(m.state.toString());
                         }
 
                         if (e.messageSize != m.messageSize())
@@ -810,7 +840,7 @@ public class Verifier
                     {
                         ReconnectEvent e = (ReconnectEvent) next;
                         if (nextMessageId == e.end)
-                            currentConnection = new ConnectionState(e.messagingVersion);
+                            currentConnection = new ConnectionState(connectionCounter, e.messagingVersion);
                         break;
                     }
                     default:
@@ -1130,6 +1160,24 @@ public class Verifier
         {
             return begin == end;
         }
+
+        public String toString()
+        {
+            StringBuilder result = new StringBuilder();
+            result.append('[');
+            toString(result);
+            result.append(']');
+            return result.toString();
+        }
+
+        void toString(StringBuilder out)
+        {
+            for (int i = 0 ; i < size() ; ++i)
+            {
+                if (i > 0) out.append(", ");
+                out.append(get(i));
+            }
+        }
     }
 
 
@@ -1176,6 +1224,17 @@ public class Verifier
         {
             --framesWithStatus;
             return super.poll();
+        }
+
+        public String toString()
+        {
+            StringBuilder result = new StringBuilder();
+            result.append("[withStatus=");
+            result.append(framesWithStatus);
+            result.append(", ");
+            toString(result);
+            result.append(']');
+            return result.toString();
         }
     }
 

@@ -193,8 +193,8 @@ public class ConnectionTest
     static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
 
     static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
-        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
-                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
+//        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
+//                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
         settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
                             .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
         settings -> settings.outbound(outbound -> outbound.withCompression(true))
@@ -205,14 +205,14 @@ public class ConnectionTest
         MODIFIERS
     );
 
-    private static List<Settings> applyPowerSet(List<Settings> settings, List<Function<Settings, Settings>> modifiers)
+    private static <T> List<T> applyPowerSet(List<T> settings, List<Function<T, T>> modifiers)
     {
-        List<Settings> result = new ArrayList<>();
-        for (Set<Function<Settings, Settings>> set : Sets.powerSet(new HashSet<>(modifiers)))
+        List<T> result = new ArrayList<>();
+        for (Set<Function<T, T>> set : Sets.powerSet(new HashSet<>(modifiers)))
         {
-            for (Settings s : settings)
+            for (T s : settings)
             {
-                for (Function<Settings, Settings> f : set)
+                for (Function<T, T> f : set)
                     s = f.apply(s);
                 result.add(s);
             }
