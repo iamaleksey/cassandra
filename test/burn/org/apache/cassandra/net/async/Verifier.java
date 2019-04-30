@@ -81,6 +81,8 @@ public class Verifier
         FAILED_DESERIALIZE,
         FAILED_CLOSING,
         FAILED_FRAME,
+
+        INTERRUPT_OUTBOUND,
         CONTROLLER_UPDATE
     }
 
@@ -107,10 +109,10 @@ public class Verifier
     {
         final long start;
         volatile long end;
-        BoundedEvent(EventType type, Verifier verifier)
+        BoundedEvent(EventType type, long start)
         {
             super(type);
-            this.start = verifier.sequenceId.getAndIncrement();
+            this.start = start;
         }
         public void complete(Verifier verifier)
         {
@@ -132,9 +134,9 @@ public class Verifier
     static class BoundedMessageEvent extends BoundedEvent
     {
         final long messageId;
-        BoundedMessageEvent(EventType type, Verifier verifier, long messageId)
+        BoundedMessageEvent(EventType type, long start, long messageId)
         {
-            super(type, verifier);
+            super(type, start);
             this.messageId = messageId;
         }
     }
@@ -142,9 +144,9 @@ public class Verifier
     static class EnqueueMessageEvent extends BoundedMessageEvent
     {
         final Message<?> message;
-        EnqueueMessageEvent(EventType type, Verifier verifier, Message<?> message)
+        EnqueueMessageEvent(EventType type, long start, Message<?> message)
         {
-            super(type, verifier, message.id());
+            super(type, start, message.id());
             this.message = message;
         }
     }
@@ -200,21 +202,9 @@ public class Verifier
         }
     }
 
-    static class ControllerEvent extends BoundedEvent
-    {
-        final long minimumBytesInFlight;
-        final long maximumBytesInFlight;
-        ControllerEvent(Verifier verifier, long minimumBytesInFlight, long maximumBytesInFlight)
-        {
-            super(EventType.CONTROLLER_UPDATE, verifier);
-            this.minimumBytesInFlight = minimumBytesInFlight;
-            this.maximumBytesInFlight = maximumBytesInFlight;
-        }
-    }
-
     EnqueueMessageEvent onEnqueue(Message<?> message)
     {
-        EnqueueMessageEvent enqueue = new EnqueueMessageEvent(ENQUEUE, this, message);
+        EnqueueMessageEvent enqueue = new EnqueueMessageEvent(ENQUEUE, nextId(), message);
         events.put(enqueue.start, enqueue);
         return enqueue;
     }
@@ -313,6 +303,32 @@ public class Verifier
     }
 
 
+    static class InterruptEvent extends BoundedEvent
+    {
+        InterruptEvent(long start)
+        {
+            super(EventType.INTERRUPT_OUTBOUND, start);
+        }
+    }
+
+    static class ControllerEvent extends BoundedEvent
+    {
+        final long minimumBytesInFlight;
+        final long maximumBytesInFlight;
+        ControllerEvent(long start, long minimumBytesInFlight, long maximumBytesInFlight)
+        {
+            super(EventType.CONTROLLER_UPDATE, start);
+            this.minimumBytesInFlight = minimumBytesInFlight;
+            this.maximumBytesInFlight = maximumBytesInFlight;
+        }
+    }
+
+    InterruptEvent interrupt()
+    {
+        InterruptEvent interrupt = new InterruptEvent(nextId());
+        events.put(interrupt.start, interrupt);
+        return interrupt;
+    }
 
     private final BytesInFlightController controller;
     private final AtomicLong sequenceId = new AtomicLong();
@@ -335,6 +351,39 @@ public class Verifier
         logger.error("{}", String.format(message, params));
     }
 
+    private static class MessageState
+    {
+        final Message<?> message; // temporary, only maintained until serialization to calculate actualSize
+        int messagingVersion;
+        // set initially to message.expiresAtNanos, but if at serialization time we use
+        // an older messaging version we may not be able to serialize expiration
+        long expiresAtNanos;
+        long enqueueStart, enqueueEnd, serialize, arrive, deserialize;
+        boolean processOnEventLoop, processOutOfOrder;
+        EventType state;
+        long lastUpdateNanos;
+        ConnectionState sentOn;
+
+        MessageState(Message<?> message, long enqueueStart)
+        {
+            this.enqueueStart = enqueueStart;
+            this.message = message;
+            this.expiresAtNanos = message.expiresAtNanos();
+        }
+
+        void update(EventType state)
+        {
+            this.state = state;
+            this.lastUpdateNanos = ApproximateTime.nanoTime();
+        }
+
+        public String toString()
+        {
+            return String.format("{id:%d, ver:%d, state:%s, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d}",
+                                 message.id(), messagingVersion, state, enqueueStart, enqueueEnd, serialize, arrive, deserialize);
+        }
+    }
+
     // TODO: - verify timeliness of all messages, not just those arriving out of order
     //         (integrate bytes in flight controller info into timeliness decisions)
     //       - indicate a message is expected to fail serialization (or deserialization)
@@ -345,30 +394,34 @@ public class Verifier
     // note that ENQUEUE_END - being concurrent - may not appear before the message's lifespan has completely ended.
     final Queue<MessageState> enqueueing = new Queue<>();
 
-    // Strict message order will then be determined at serialization time, since this happens on a single thread.
-    // The order in which messages arrive here determines the order they will arrive on the other node.
-    // must follow either ENQUEUE_START or ENQUEUE_END
-    final Queue<MessageState> serializing = new Queue<>();
+    static final class ConnectionState
+    {
+        // Strict message order will then be determined at serialization time, since this happens on a single thread.
+        // The order in which messages arrive here determines the order they will arrive on the other node.
+        // must follow either ENQUEUE_START or ENQUEUE_END
+        final Queue<MessageState> serializing = new Queue<>();
 
-    // Messages sent on the small connection will all be sent in frames; this is a concurrent operation,
-    // so only the sendingFrame MUST be encountered before any future events -
-    // large connections skip this step and goes straight to arriving
-    // we consult the queues in reverse order in arriving, as it is acceptable to find our frame in any of these queues
-    final FramesInFlight framesInFlight = new FramesInFlight(); // unknown if the messages will arrive, accept either
+        // Messages sent on the small connection will all be sent in frames; this is a concurrent operation,
+        // so only the sendingFrame MUST be encountered before any future events -
+        // large connections skip this step and goes straight to arriving
+        // we consult the queues in reverse order in arriving, as it is acceptable to find our frame in any of these queues
+        final FramesInFlight framesInFlight = new FramesInFlight(); // unknown if the messages will arrive, accept either
+
+        // for large messages OR < VERSION_40, arriving can occur BEFORE serializing completes successfully
+        // OR a frame is fully serialized
+        final Queue<MessageState> arriving = new Queue<>();
+
+        final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
+                                  deserializingOffEventLoop = new Queue<>();
+    }
+
     final Queue<Frame> reuseFrames = new Queue<>();
-
-    // for large messages OR < VERSION_40, arriving can occur BEFORE serializing completes successfully
-    // OR a frame is fully serialized
-    final Queue<MessageState> arriving = new Queue<>();
-
-    final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
-                              deserializingOffEventLoop = new Queue<>();
-
     final Queue<MessageState> processingOutOfOrder = new Queue<>();
 
     long canonicalBytesInFlight = 0;
-    long nextId = 0;
+    long nextMessageId = 0;
     long now;
+    ConnectionState currentConnection = new ConnectionState();
 
     public void run(Runnable onFailure, long deadlineNanos)
     {
@@ -376,7 +429,7 @@ public class Verifier
         {
             while ((now = ApproximateTime.nanoTime()) < deadlineNanos)
             {
-                Event next = events.await(nextId, 100L, TimeUnit.MILLISECONDS);
+                Event next = events.await(nextMessageId, 100L, TimeUnit.MILLISECONDS);
                 if (next == null)
                 {
                     // decide if we have any messages waiting too long to proceed
@@ -393,7 +446,7 @@ public class Verifier
                     }
                     continue;
                 }
-                events.clear(nextId); // TODO: simplify collection if we end up using it exclusively as a queue, as we are now
+                events.clear(nextMessageId); // TODO: simplify collection if we end up using it exclusively as a queue, as we are now
 
                 switch (next.type)
                 {
@@ -401,9 +454,9 @@ public class Verifier
                     {
                         MessageState m;
                         EnqueueMessageEvent e = onEnqueue(next);
-                        assert nextId == e.start || nextId == e.end;
+                        assert nextMessageId == e.start || nextMessageId == e.end;
                         assert e.message != null;
-                        if (nextId == e.start)
+                        if (nextMessageId == e.start)
                         {
                             canonicalBytesInFlight += e.message.serializedSize(current_version);
                             m = new MessageState(e.message, e.start);
@@ -425,7 +478,7 @@ public class Verifier
                     {
                         // TODO: verify that we could have exceeded our memory limits
                         SimpleMessageEvent e = onOverloaded(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = remove(e.messageId, enqueueing, messages);
                         if (ENQUEUE != m.state)
                             fail("Invalid state at overload of %d: expected message in %s, found %s", m.message.id(), ENQUEUE, m.state);
@@ -435,7 +488,7 @@ public class Verifier
                     {
                         // TODO: verify if this is acceptable due to e.g. inbound refusing to process for long enough
                         SimpleMessageEvent e = onFailedClosing(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         enqueueing.remove(m);
                         if (ENQUEUE == m.state) enqueueing.remove(m);
@@ -448,7 +501,7 @@ public class Verifier
                         // serialize happens serially, so we can compress the asynchronicity of the above enqueue
                         // into a linear sequence of events we expect to occur on arrival
                         SerializeMessageEvent e = onSerialize(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         assert m.state == ENQUEUE;
                         m.serialize = e.at;
@@ -469,7 +522,8 @@ public class Verifier
                             }
                         }
                         enqueueing.remove(mi);
-                        serializing.add(m);
+                        m.sentOn = currentConnection;
+                        currentConnection.serializing.add(m);
                         m.update(next.type);
                         break;
                     }
@@ -477,7 +531,7 @@ public class Verifier
                     {
                         // TODO: verify this failure to serialize was intended by test
                         SimpleMessageEvent e = onFailedSerialize(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         enqueueing.remove(m);
                         break;
@@ -485,15 +539,15 @@ public class Verifier
                     case SEND_FRAME:
                     {
                         FrameEvent e = (FrameEvent) next;
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         int size = 0;
                         Frame frame = reuseFrames.poll();
                         if (frame == null) frame = new Frame();
-                        MessageState first = serializing.get(0);
+                        MessageState first = currentConnection.serializing.get(0);
                         int messagingVersion = first.messagingVersion;
                         for (int i = 0 ; i < e.messageCount ; ++i)
                         {
-                            MessageState m = serializing.get(i);
+                            MessageState m = currentConnection.serializing.get(i);
                             size += m.message.serializedSize(m.messagingVersion);
                             if (m.messagingVersion != messagingVersion)
                             {
@@ -507,26 +561,27 @@ public class Verifier
                         frame.payloadSizeInBytes = e.payloadSizeInBytes;
                         frame.messageCount = e.messageCount;
                         frame.messagingVersion = messagingVersion;
-                        framesInFlight.add(frame);
-                        serializing.removeFirst(e.messageCount);
+                        currentConnection.framesInFlight.add(frame);
+                        currentConnection.serializing.removeFirst(e.messageCount);
                         if (e.payloadSizeInBytes != size)
                             fail("Invalid frame payload size with %s: expected %d, actual %d", first,  size, e.payloadSizeInBytes);
                         break;
                     }
                     case SENT_FRAME:
                     {
-                        framesInFlight.supplySendStatus(Frame.Status.SUCCESS);
+                        currentConnection.framesInFlight.supplySendStatus(Frame.Status.SUCCESS);
                         break;
                     }
                     case FAILED_FRAME:
                     {
+                        // TODO: is it possible for this to be signalled AFTER our interrupt event? probably, in which case this will be wrong
                         // TODO: verify that this was expected
-                        Frame frame = framesInFlight.supplySendStatus(Frame.Status.FAILED);
+                        Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.FAILED);
                         if (frame != null && frame.messagingVersion >= VERSION_40)
                         {
                             // the contents cannot be delivered without the whole frame arriving, so clear the contents now
                             clear(frame, messages);
-                            framesInFlight.remove(frame);
+                            currentConnection.framesInFlight.remove(frame);
                             reuseFrames.add(frame.reset());
                         }
                         break;
@@ -534,17 +589,17 @@ public class Verifier
                     case ARRIVE:
                     {
                         SimpleMessageEvent e = onArrived(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         m.arrive = e.at;
                         if (outboundType == LARGE_MESSAGES)
                         {
                             assert m.state == SERIALIZE;
-                            int mi = serializing.indexOf(m);
+                            int mi = m.sentOn.serializing.indexOf(m);
                             for (int i = 0; i < mi; ++i)
-                                fail("Invalid order of events: %s serialized to large stream strictly before %s, but arrived after", serializing.get(i), m);
-                            serializing.remove(mi);
-                            arriving.add(m);
+                                fail("Invalid order of events: %s serialized to large stream strictly before %s, but arrived after", m.sentOn.serializing.get(i), m);
+                            m.sentOn.serializing.remove(mi);
+                            m.sentOn.arriving.add(m);
                         }
                         else
                         {
@@ -555,10 +610,10 @@ public class Verifier
                             }
 
                             int fi = -1, mi = -1;
-                            while (fi + 1 < framesInFlight.size() && mi < 0)
-                                mi = framesInFlight.get(++fi).indexOf(m);
+                            while (fi + 1 < m.sentOn.framesInFlight.size() && mi < 0)
+                                mi = m.sentOn.framesInFlight.get(++fi).indexOf(m);
 
-                            if (fi == framesInFlight.size())
+                            if (fi == m.sentOn.framesInFlight.size())
                             {
                                 fail("Invalid state: %s, but no frame in flight was found to contain it", m);
                                 break;
@@ -571,27 +626,27 @@ public class Verifier
                                 // has gone wrong
                                 for (int i = 0 ; i < fi ; ++i)
                                 {
-                                    Frame skip = framesInFlight.get(i);
+                                    Frame skip = m.sentOn.framesInFlight.get(i);
                                     skip.receiveStatus = Frame.Status.FAILED;
                                     if (skip.sendStatus == Frame.Status.SUCCESS)
                                         fail("Successfully sent frame %s was not delivered", skip);
                                     clear(skip, messages);
                                     reuseFrames.add(skip.reset());
                                 }
-                                framesInFlight.removeFirst(fi);
+                                m.sentOn.framesInFlight.removeFirst(fi);
                             }
 
-                            Frame frame = framesInFlight.get(0);
+                            Frame frame = m.sentOn.framesInFlight.get(0);
                             for (int i = 0; i < mi; ++i)
                                 fail("Invalid order of events: %s serialized strictly before %s, but arrived after", frame.get(i), m);
 
                             frame.remove(mi);
                             if (frame.isEmpty())
                             {
-                                framesInFlight.poll();
+                                m.sentOn.framesInFlight.poll();
                                 reuseFrames.add(frame.reset());
                             }
-                            arriving.add(m);
+                            m.sentOn.arriving.add(m);
                         }
                         m.update(next.type);
                         break;
@@ -601,31 +656,31 @@ public class Verifier
                         // deserialize may happen in parallel for large messages, but in sequence for small messages
                         // we currently require that this event be issued before any possible error is thrown
                         SimpleMessageEvent e = onDeserialize(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.get(e.messageId);
                         assert m.state == ARRIVE;
                         m.deserialize = e.at;
                         // deserialize may be off-loaded, so we can only impose meaningful ordering constraints
                         // on those messages we know to have been processed on the event loop
-                        int mi = arriving.indexOf(m);
+                        int mi = m.sentOn.arriving.indexOf(m);
                         if (m.processOnEventLoop)
                         {
                             for (int i = 0 ; i < mi ; ++i)
                             {
-                                MessageState pm = arriving.get(i);
+                                MessageState pm = m.sentOn.arriving.get(i);
                                 if (pm.processOnEventLoop)
                                 {
                                     fail("Invalid order of events: %d (%d, %d) arrived strictly before %d (%d, %d), but deserialized after",
                                          pm.message.id(), pm.arrive, pm.deserialize, m.message.id(), m.arrive, m.deserialize);
                                 }
                             }
-                            deserializingOnEventLoop.add(m);
+                            m.sentOn.deserializingOnEventLoop.add(m);
                         }
                         else
                         {
-                            deserializingOffEventLoop.add(m);
+                            m.sentOn.deserializingOffEventLoop.add(m);
                         }
-                        arriving.remove(mi);
+                        m.sentOn.arriving.remove(mi);
                         m.update(next.type);
                         break;
                     }
@@ -633,16 +688,16 @@ public class Verifier
                     {
                         // TODO: verify this failure to deserialize was intended by test
                         SimpleMessageEvent e = onFailedDeserialize(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         assert m.state == DESERIALIZE;
-                        (m.processOnEventLoop ? deserializingOnEventLoop : deserializingOffEventLoop).remove(m);
+                        (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m);
                         break;
                     }
                     case PROCESS:
                     {
                         ProcessMessageEvent e = onProcessed(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         if (m == null)
                             break;
@@ -670,28 +725,28 @@ public class Verifier
                             // we can actually expect that this event will occur _immediately_ after the deserialize event
                             // so that we have exactly one mess
                             // c
-                            int mi = deserializingOnEventLoop.indexOf(m);
+                            int mi = m.sentOn.deserializingOnEventLoop.indexOf(m);
                             for (int i = 0 ; i < mi ; ++i)
                             {
-                                MessageState pm = deserializingOnEventLoop.get(i);
+                                MessageState pm = m.sentOn.deserializingOnEventLoop.get(i);
                                 fail("Invalid order of events: %s deserialized strictly before %s, but processed after",
                                      pm, m);
                             }
-                            clearFirst(mi, deserializingOnEventLoop, messages);
-                            deserializingOnEventLoop.poll();
+                            clearFirst(mi, m.sentOn.deserializingOnEventLoop, messages);
+                            m.sentOn.deserializingOnEventLoop.poll();
                         }
                         else
                         {
-                            int mi = deserializingOffEventLoop.indexOf(m);
+                            int mi = m.sentOn.deserializingOffEventLoop.indexOf(m);
                             // process may be off-loaded, so we can only impose meaningful ordering constraints
                             // on those messages we know to have been processed on the event loop
                             for (int i = 0 ; i < mi ; ++i)
                             {
-                                MessageState pm = deserializingOffEventLoop.get(i);
+                                MessageState pm = m.sentOn.deserializingOffEventLoop.get(i);
                                 pm.processOutOfOrder = true;
                                 processingOutOfOrder.add(pm);
                             }
-                            deserializingOffEventLoop.removeFirst(mi + 1);
+                            m.sentOn.deserializingOffEventLoop.removeFirst(mi + 1);
                         }
                         // this message has been fully validated
                         break;
@@ -699,7 +754,7 @@ public class Verifier
                     case FAILED_EXPIRED:
                     {
                         ExpiredMessageEvent e = onExpired(next);
-                        assert nextId == e.at;
+                        assert nextMessageId == e.at;
                         MessageState m = messages.remove(e.messageId);
                         switch (e.expirationType)
                         {
@@ -731,8 +786,8 @@ public class Verifier
                         switch (m.state)
                         {
                             case ENQUEUE: enqueueing.remove(m); break;
-                            case DESERIALIZE: (m.processOnEventLoop ? deserializingOnEventLoop : deserializingOffEventLoop).remove(m); break;
-                            case SERIALIZE: serializing.remove(m); break;
+                            case DESERIALIZE: (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m); break;
+                            case SERIALIZE: m.sentOn.serializing.remove(m); break;
                         }
                         break;
                     }
@@ -740,8 +795,17 @@ public class Verifier
                     {
                         break;
                     }
+                    case INTERRUPT_OUTBOUND:
+                    {
+                        InterruptEvent e = (InterruptEvent) next;
+                        if (nextMessageId == e.end)
+                            currentConnection = new ConnectionState();
+                        break;
+                    }
+                    default:
+                        throw new IllegalStateException();
                 }
-                ++nextId;
+                ++nextMessageId;
             }
         }
         catch (InterruptedException e)
@@ -963,38 +1027,6 @@ public class Verifier
         }
     }
 
-    private static class MessageState
-    {
-        final Message<?> message; // temporary, only maintained until serialization to calculate actualSize
-        int messagingVersion;
-        // set initially to message.expiresAtNanos, but if at serialization time we use
-        // an older messaging version we may not be able to serialize expiration
-        long expiresAtNanos;
-        long enqueueStart, enqueueEnd, serialize, arrive, deserialize;
-        boolean processOnEventLoop, processOutOfOrder;
-        EventType state;
-        long lastUpdateNanos;
-
-        MessageState(Message<?> message, long enqueueStart)
-        {
-            this.enqueueStart = enqueueStart;
-            this.message = message;
-            this.expiresAtNanos = message.expiresAtNanos();
-        }
-
-        void update(EventType state)
-        {
-            this.state = state;
-            this.lastUpdateNanos = ApproximateTime.nanoTime();
-        }
-
-        public String toString()
-        {
-            return String.format("{id:%d, ver:%d, state:%s, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d}",
-                                 message.id(), messagingVersion, state, enqueueStart, enqueueEnd, serialize, arrive, deserialize);
-        }
-    }
-
     static class Queue<T>
     {
         private Object[] items = new Object[10];
@@ -1105,8 +1137,10 @@ public class Verifier
 
 
 
-    class FramesInFlight extends Queue<Frame>
+    static class FramesInFlight extends Queue<Frame>
     {
+        // this may be negative, indicating we have processed a frame whose status we did not know at the time
+        // TODO: we should verify the status of these frames by logging the inferred status and verifying it matches
         private int framesWithStatus;
 
         Frame supplySendStatus(Frame.Status status)

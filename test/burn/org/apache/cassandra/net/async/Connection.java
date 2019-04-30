@@ -118,6 +118,12 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         }
     }
 
+    void interrupt()
+    {
+        Verifier.InterruptEvent interrupt = verifier.interrupt();
+        outbound.interrupt().addListener(future -> interrupt.complete(verifier));
+    }
+
     public void onSerialize(long id, int messagingVersion)
     {
         verifier.onSerialize(id, messagingVersion);

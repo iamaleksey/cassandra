@@ -56,7 +56,6 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
-import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
@@ -222,6 +221,23 @@ public class ConnectionBurnTest extends ConnectionTest
                         }
                         connections.get(0).controller.setInFlightByteBounds(random.nextInt(0, total), total);
                         Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.SECONDS);
+                    }
+                });
+
+                executor.execute(() -> {
+                    Thread.currentThread().setName("Test-SetInFlight");
+                    ThreadLocalRandom random = ThreadLocalRandom.current();
+                    while (true)
+                    {
+                        try
+                        {
+                            Thread.sleep(random.nextInt(1000));
+                        }
+                        catch (InterruptedException e)
+                        {
+                            break;
+                        }
+                        connections[random.nextInt(connections.length)].interrupt();
                     }
                 });
 
