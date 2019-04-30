@@ -93,32 +93,32 @@ public class ConnectionUtils
         {
             if (checkSubmitted)
             {
-                Assert.assertEquals(submitted, connection.submittedCount());
+                Assert.assertEquals("submitted count values don't match", submitted, connection.submittedCount());
             }
             if (checkPending)
             {
-                Assert.assertEquals(pending, connection.pendingCount());
-                Assert.assertEquals(pendingBytes, connection.pendingBytes());
+                Assert.assertEquals("pending count values don't match", pending, connection.pendingCount());
+                Assert.assertEquals("pending bytes values don't match", pendingBytes, connection.pendingBytes());
             }
             if (checkSent)
             {
-                Assert.assertEquals(sent, connection.sentCount());
-                Assert.assertEquals(sentBytes, connection.sentBytes());
+                Assert.assertEquals("sent count values don't match", sent, connection.sentCount());
+                Assert.assertEquals("sent bytes values don't match", sentBytes, connection.sentBytes());
             }
             if (checkOverload)
             {
-                Assert.assertEquals(overload, connection.overloadedCount());
-                Assert.assertEquals(overloadBytes, connection.overloadedBytes());
+                Assert.assertEquals("overload count values don't match", overload, connection.overloadedCount());
+                Assert.assertEquals("overload bytes values don't match", overloadBytes, connection.overloadedBytes());
             }
             if (checkExpired)
             {
-                Assert.assertEquals(expired, connection.expiredCount());
-                Assert.assertEquals(expiredBytes, connection.expiredBytes());
+                Assert.assertEquals("expired count values don't match", expired, connection.expiredCount());
+                Assert.assertEquals("expired bytes values don't match", expiredBytes, connection.expiredBytes());
             }
             if (checkError)
             {
-                Assert.assertEquals(error, connection.errorCount());
-                Assert.assertEquals(errorBytes, connection.errorBytes());
+                Assert.assertEquals("error count values dont' match", error, connection.errorCount());
+                Assert.assertEquals("error bytes values don't match", errorBytes, connection.errorBytes());
             }
         }
     }
@@ -182,23 +182,23 @@ public class ConnectionUtils
         {
             if (checkReceived)
             {
-                Assert.assertEquals(received, connection.receivedCount());
-                Assert.assertEquals(receivedBytes, connection.receivedBytes());
+                Assert.assertEquals("received count values don't match", received, connection.receivedCount());
+                Assert.assertEquals("received bytes values don't match", receivedBytes, connection.receivedBytes());
             }
             if (checkProcessed)
             {
-                Assert.assertEquals(processed, connection.processedCount());
-                Assert.assertEquals(processedBytes, connection.processedBytes());
+                Assert.assertEquals("processed count values don't match", processed, connection.processedCount());
+                Assert.assertEquals("processed bytes values don't match", processedBytes, connection.processedBytes());
             }
             if (checkExpired)
             {
-                Assert.assertEquals(expired, connection.expiredCount());
-                Assert.assertEquals(expiredBytes, connection.expiredBytes());
+                Assert.assertEquals("expired count values don't match", expired, connection.expiredCount());
+                Assert.assertEquals("expired bytes values don't match", expiredBytes, connection.expiredBytes());
             }
             if (checkError)
             {
-                Assert.assertEquals(error, connection.errorCount());
-                Assert.assertEquals(errorBytes, connection.errorBytes());
+                Assert.assertEquals("error count values don't match", error, connection.errorCount());
+                Assert.assertEquals("error bytes values don't match", errorBytes, connection.errorBytes());
             }
             if (checkPending)
             {
@@ -207,8 +207,8 @@ public class ConnectionUtils
                 if (pending < connection.pendingCount())
                     for (int i = 0 ; i < 10 && pending < connection.pendingCount() ; ++i)
                         Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.MILLISECONDS);
-                Assert.assertEquals(pending, connection.pendingCount());
-                Assert.assertEquals(pendingBytes, connection.pendingBytes());
+                Assert.assertEquals("pending count values don't match", pending, connection.pendingCount());
+                Assert.assertEquals("pending bytes values don't match", pendingBytes, connection.pendingBytes());
             }
         }
     }
