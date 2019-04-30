@@ -198,7 +198,7 @@ public class MatcherResponse
                             {
                                 try
                                 {
-                                    response.verb().handler().doVerb((Message<Object>) message);
+                                    response.verb().handler().doVerb((Message<Object>) response);
                                 }
                                 catch (IOException e)
                                 {
