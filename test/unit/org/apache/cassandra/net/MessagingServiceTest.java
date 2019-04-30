@@ -167,34 +167,30 @@ public class MessagingServiceTest
     }
 
     @Test
-    public void testNegativeDCLatency() throws Exception
+    public void testNegativeDCLatency()
     {
+        MessagingMetrics.Updater updater = MessagingService.instance().metrics.getForPeer(InetAddressAndPort.getLocalHost());
+
         // if clocks are off should just not track anything
         int latency = -100;
-
-        ConcurrentHashMap<String, MessagingMetrics.Updater> dcLatency = MessagingService.instance().metrics.dcUpdaters;
-        dcLatency.clear();
 
         long now = ApproximateTime.currentTimeMillis();
         long sentAt = now - latency;
 
-        assertNull(dcLatency.get("datacenter1"));
-        addDCLatency(sentAt, now);
-        assertNull(dcLatency.get("datacenter1"));
+        long count = updater.dcLatency.getCount();
+        updater.addTimeTaken(now - sentAt, MILLISECONDS);
+        // negative value shoudln't be recorded
+        assertEquals(count, updater.dcLatency.getCount());
     }
 
     @Test
-    public void testQueueWaitLatency() throws Exception
+    public void testQueueWaitLatency()
     {
         int latency = 100;
         Verb verb = Verb.MUTATION_REQ;
 
         Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
-        queueWaitLatency.clear();
-
-        assertNull(queueWaitLatency.get(verb));
         MessagingService.instance().metrics.addQueueWaitTime(verb, latency, MILLISECONDS);
-        assertNotNull(queueWaitLatency.get(verb));
         assertEquals(1, queueWaitLatency.get(verb).getCount());
         long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, MILLISECONDS.toNanos(latency))) - 1];
         assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());

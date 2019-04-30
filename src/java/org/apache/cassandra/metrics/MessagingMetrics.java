@@ -61,8 +61,11 @@ public class MessagingMetrics
 
         public void addTimeTaken(long timeTaken, TimeUnit units)
         {
-            dcLatency.update(timeTaken, units);
-            allLatency.update(timeTaken, units);
+            if (timeTaken > 0)
+            {
+                dcLatency.update(timeTaken, units);
+                allLatency.update(timeTaken, units);
+            }
         }
     }
 
