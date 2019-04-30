@@ -35,6 +35,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.function.ToLongFunction;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
@@ -87,6 +88,7 @@ public class ConnectionTest
 
     private final Map<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> serializers = new HashMap<>();
     private final Map<Verb, Supplier<? extends IVerbHandler<?>>> handlers = new HashMap<>();
+    private final Map<Verb, ToLongFunction<TimeUnit>> timeouts = new HashMap<>();
 
     private void unsafeSetSerializer(Verb verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> supplier) throws Throwable
     {
@@ -98,13 +100,23 @@ public class ConnectionTest
         handlers.putIfAbsent(verb, verb.unsafeSetHandler(supplier));
     }
 
+    private void unsafeSetExpiration(Verb verb, ToLongFunction<TimeUnit> expiration) throws Throwable
+    {
+        timeouts.putIfAbsent(verb, verb.unsafeSetExpiration(expiration));
+    }
+
     @After
     public void resetVerbs() throws Throwable
     {
         for (Map.Entry<Verb, Supplier<? extends IVersionedAsymmetricSerializer<?, ?>>> e : serializers.entrySet())
             e.getKey().unsafeSetSerializer(e.getValue());
+        serializers.clear();
         for (Map.Entry<Verb, Supplier<? extends IVerbHandler<?>>> e : handlers.entrySet())
             e.getKey().unsafeSetHandler(e.getValue());
+        handlers.clear();
+        for (Map.Entry<Verb, ToLongFunction<TimeUnit>> e : timeouts.entrySet())
+            e.getKey().unsafeSetExpiration(e.getValue());
+        timeouts.clear();
     }
 
     @BeforeClass
@@ -778,12 +790,33 @@ public class ConnectionTest
     }
 
     @Test
-    public void testAcquireRelease() throws Throwable
+    public void testInboundExpiration() throws Throwable
+    {
+        test((inbound, outbound, endpoint) -> {
+            unsafeSetExpiration(Verb._TEST_1, (t) -> 0);
+            AtomicInteger counter = new AtomicInteger();
+            CountDownLatch latch = new CountDownLatch(1);
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> counter.incrementAndGet());
+            unsafeSetHandler(Verb._TEST_2, () -> msg -> latch.countDown());
+
+            Message<?> message = Message.out(Verb._TEST_1, noPayload);
+            for (int i = 0 ; i < 10 ; ++i)
+                outbound.enqueue(message);
+
+            outbound.enqueue(Message.out(Verb._TEST_2, noPayload));
+            latch.await(1, MINUTES);
+            Assert.assertEquals(0, latch.getCount());
+            Assert.assertEquals(0, counter.get());
+        });
+    }
+
+    @Test
+    public void testAcquireReleaseOutbound() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
             ExecutorService executor = Executors.newFixedThreadPool(100);
             int acquireStep = 123;
-            outbound.unsafeAcquireCapacity(100 * 10000, 100 * 10000 * acquireStep);
+            Assert.assertTrue(outbound.unsafeAcquireCapacity(100 * 10000, 100 * 10000 * acquireStep));
             AtomicLong acquisitionFailures = new AtomicLong();
             for (int i = 0; i < 100; i++)
             {
@@ -820,6 +853,7 @@ public class ConnectionTest
         unsafeSetHandler(Verb._TEST_1, () -> message -> latch.countDown());
         outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
         latch.await(10, SECONDS);
+        Assert.assertEquals(0, latch.getCount());
         Assert.assertTrue(outbound.isConnected());
     }
 

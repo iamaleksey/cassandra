@@ -274,6 +274,19 @@ public enum Verb
         return original;
     }
 
+    @VisibleForTesting
+    public ToLongFunction<TimeUnit> unsafeSetExpiration(ToLongFunction<TimeUnit> expiration) throws NoSuchFieldException, IllegalAccessException
+    {
+        ToLongFunction<TimeUnit> original = this.expiration;
+        Field field = Verb.class.getDeclaredField("expiration");
+        field.setAccessible(true);
+        Field modifiers = Field.class.getDeclaredField("modifiers");
+        modifiers.setAccessible(true);
+        modifiers.setInt(field, field.getModifiers() & ~Modifier.FINAL);
+        field.set(this, expiration);
+        return original;
+    }
+
     private static final Verb[] idToVerbMap;
 
     static
