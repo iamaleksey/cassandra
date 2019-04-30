@@ -18,21 +18,30 @@
 
 package org.apache.cassandra.net.async;
 
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Uninterruptibles;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.mina.util.IdentityHashSet;
 import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.min;
 
+@SuppressWarnings("WeakerAccess")
 public class OutboundMessageQueue
 {
+    private static final Logger logger = LoggerFactory.getLogger(OutboundMessageQueue.class);
+
     public interface MessageConsumer<Produces extends Throwable>
     {
         boolean accept(Message<?> message) throws Produces;
@@ -73,9 +82,10 @@ public class OutboundMessageQueue
         return new WithLock(nowNanos);
     }
 
-    public void runEventually(long nowNanos, Consumer<WithLock> runEventually)
+    public void runEventually(Consumer<WithLock> runEventually)
     {
-        try (WithLock withLock = lockOrCallback(nowNanos, () -> runEventually(nowNanos, runEventually)))
+        // TODO: should we be offloading the callback to another thread to guarantee unlock thread is not unduly burdened?
+        try (WithLock withLock = lockOrCallback(ApproximateTime.nanoTime(), () -> runEventually(runEventually)))
         {
             if (withLock == null)
                 return;
@@ -102,7 +112,7 @@ public class OutboundMessageQueue
     {
         private final long nowNanos;
 
-        public WithLock(long nowNanos)
+        private WithLock(long nowNanos)
         {
             this.nowNanos = nowNanos;
             earliestExpiresAt = Long.MAX_VALUE;
@@ -190,7 +200,6 @@ public class OutboundMessageQueue
     {
         class Pruner implements PrunableArrayQueue.Pruner<Message<?>>
         {
-            private int count = 0;
             private long earliestExpiresAt = Long.MAX_VALUE;
 
             public boolean shouldPrune(Message<?> message)
@@ -200,7 +209,6 @@ public class OutboundMessageQueue
 
             public void onPruned(Message<?> message)
             {
-                ++count;
                 onExpired.accept(message);
             }
 
@@ -216,59 +224,40 @@ public class OutboundMessageQueue
         maybeUpdateMinimumExpiryTime(pruner.earliestExpiresAt);
     }
 
-    /**
-     * Remove the provided Message from the queue, if present.
-     *
-     * WARNING: This is a blocking call.
-     */
-    public boolean undoAdd(Message<?> remove)
+    private static class Locked implements Runnable
     {
-        final Semaphore done = new Semaphore(0);
-        class Remover implements PrunableArrayQueue.Pruner<Message<?>>
+        final Runnable run;
+        final Locked next;
+        private Locked(Runnable run, Locked next)
         {
-            private long earliestExpiresAt = Long.MAX_VALUE;
-            private boolean success;
-
-            @Override
-            public boolean shouldPrune(Message<?> message)
-            {
-                return message == remove;
-            }
-
-            @Override
-            public void onPruned(Message<?> message)
-            {
-                success = true;
-            }
-
-            @Override
-            public void onKept(Message<?> message)
-            {
-                earliestExpiresAt = min(message.expiresAtNanos(), earliestExpiresAt);
-            }
+            this.run = run;
+            this.next = next;
         }
 
-        final Remover remover = new Remover();
-        runEventually(() -> {
-            earliestExpiresAt = Long.MAX_VALUE;
-            externalQueue.drain(internalQueue::offer);
-            internalQueue.prune(remover);
-            maybeUpdateMinimumExpiryTime(remover.earliestExpiresAt);
-            done.release();
-        });
-        done.acquireUninterruptibly();
-        return remover.success;
-    }
-
-    private interface Locked extends Runnable
-    {
-        default Locked andThen(Runnable next)
+        Locked andThen(Runnable next)
         {
-            return () -> { this.run(); next.run(); };
+            return new Locked(next, this);
+        }
+
+        public void run()
+        {
+            Locked cur = this;
+            while (cur != null)
+            {
+                try
+                {
+                    cur.run.run();
+                }
+                catch (Throwable t)
+                {
+                    logger.error("Unexpected error when executing deferred lock-intending functions", t);
+                }
+                cur = cur.next;
+            }
         }
     }
 
-    private static final Locked LOCKED = () -> {};
+    private static final Locked LOCKED = new Locked(() -> {}, null);
 
     private volatile Locked locked = null;
     private static final AtomicReferenceFieldUpdater<OutboundMessageQueue, Locked> lockedUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, Locked.class, "locked");
@@ -347,6 +336,118 @@ public class OutboundMessageQueue
         Locked locked = lockedUpdater.getAndSet(this, null);
         locked.run();
     }
+
+
+    /**
+     * While removal happens extremely infrequently, it seems possible for many to still interleave with a connection
+     * being closed, as experimentally we have encountered enough pending removes to overflow the Locked call stack
+     * (prior to making its evaluation iterative).
+     *
+     * While the stack can no longer be exhausted, this suggests a high potential cost for evaluating all removals,
+     * so to ensure system stability we aggregate all pending removes into a single shared object that evaluate
+     * together with only a single lock acquisition.
+     */
+    private volatile RemoveRunner removeRunner = null;
+    private static final AtomicReferenceFieldUpdater<OutboundMessageQueue, RemoveRunner> removeRunnerUpdater =
+    AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, RemoveRunner.class, "removeRunner");
+
+    static class Remove
+    {
+        final Message<?> message;
+        final Remove next;
+
+        Remove(Message<?> message, Remove next)
+        {
+            this.message = message;
+            this.next = next;
+        }
+    }
+
+    private class RemoveRunner extends AtomicReference<Remove> implements Runnable
+    {
+        final CountDownLatch done = new CountDownLatch(1);
+        final IdentityHashSet<Message<?>> removed = new IdentityHashSet<>();
+
+        RemoveRunner() { super(new Remove(null, null)); }
+
+        boolean undo(Message<?> message)
+        {
+            return null != updateAndGet(prev -> prev == null ? null : new Remove(message, prev));
+        }
+
+        public void run()
+        {
+            IdentityHashSet<Message<?>> remove = new IdentityHashSet<>();
+            removeRunner = null;
+            Remove undo = getAndSet(null);
+            while (undo.message != null)
+            {
+                remove.add(undo.message);
+                undo = undo.next;
+            }
+
+            class Remover implements PrunableArrayQueue.Pruner<Message<?>>
+            {
+                private long earliestExpiresAt = Long.MAX_VALUE;
+
+                @Override
+                public boolean shouldPrune(Message<?> message)
+                {
+                    return remove.contains(message);
+                }
+
+                @Override
+                public void onPruned(Message<?> message)
+                {
+                    removed.add(message);
+                }
+
+                @Override
+                public void onKept(Message<?> message)
+                {
+                    earliestExpiresAt = min(message.expiresAtNanos(), earliestExpiresAt);
+                }
+            }
+
+            Remover remover = new Remover();
+            earliestExpiresAt = Long.MAX_VALUE;
+            externalQueue.drain(internalQueue::offer);
+            internalQueue.prune(remover);
+            maybeUpdateMinimumExpiryTime(remover.earliestExpiresAt);
+            done.countDown();
+        }
+    }
+
+    /**
+     * Remove the provided Message from the queue, if present.
+     *
+     * WARNING: This is a blocking call.
+     */
+    public boolean remove(Message<?> remove)
+    {
+        if (remove == null)
+            throw new NullPointerException();
+        
+        RemoveRunner runner;
+        while (true)
+        {
+            runner = removeRunner;
+            if (runner != null && runner.undo(remove))
+                break;
+
+            if (runner == null && removeRunnerUpdater.compareAndSet(this, null, runner = new RemoveRunner()))
+            {
+                runner.undo(remove);
+                runEventually(runner);
+                break;
+            }
+        }
+
+        //noinspection UnstableApiUsage
+        Uninterruptibles.awaitUninterruptibly(runner.done);
+        return runner.removed.contains(remove);
+    }
+
 
     private static boolean shouldSend(Message<?> m, long nowNanos)
     {

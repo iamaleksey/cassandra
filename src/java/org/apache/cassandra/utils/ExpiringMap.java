@@ -43,18 +43,8 @@ public class ExpiringMap<K, V>
     public static class CacheableObject<T>
     {
         public final T value;
-        public final long expiresAtNanos;
-        public final long createdAtNanos;
-
-        private CacheableObject(T value, long timeout, TimeUnit unit)
-        {
-            this(value, Clock.instance.nanoTime(), timeout, unit);
-        }
-
-        private CacheableObject(T value, long createdAtNanos, long timeout, TimeUnit unit)
-        {
-            this(value, createdAtNanos, createdAtNanos + unit.toNanos(timeout));
-        }
+        final long expiresAtNanos;
+        final long createdAtNanos;
 
         private CacheableObject(T value, long createdAtNanos, long expiresAtNanos)
         {
@@ -79,31 +69,37 @@ public class ExpiringMap<K, V>
     private final ScheduledExecutorService service = new DebuggableScheduledThreadPoolExecutor("EXPIRING-MAP-REAPER");
 
     private final ConcurrentMap<K, CacheableObject<V>> cache = new ConcurrentHashMap<>();
-    private final long defaultExpiration;
-    private final TimeUnit defaultExpirationUnit;
 
     private final BiConsumer<K, CacheableObject<V>> onExpired;
 
-    /**
-     *
-     * @param defaultExpiration the TTL for objects in the cache in milliseconds
-     */
-    public ExpiringMap(long defaultExpiration, TimeUnit defaultExpirationUnit, BiConsumer<K, CacheableObject<V>> onExpired)
+    public ExpiringMap(long expirationInterval, TimeUnit expirationIntervalUnits, BiConsumer<K, CacheableObject<V>> onExpired)
     {
         assert onExpired != null;
 
-        this.defaultExpiration = defaultExpiration;
-        this.defaultExpirationUnit = defaultExpirationUnit;
         this.onExpired = onExpired;
 
-        if (defaultExpiration <= 0)
+        if (expirationInterval <= 0)
             throw new IllegalArgumentException("Argument specified must be a positive number");
 
         Runnable runnable = () ->
         {
+            long start = Clock.instance.nanoTime();
+            int n = 0;
+            for (Map.Entry<K, CacheableObject<V>> entry : cache.entrySet())
+            {
+                if (entry.getValue().isReadyToDieAt(start))
+                {
+                    if (cache.remove(entry.getKey()) != null)
+                    {
+                        n++;
+                        onExpired.accept(entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            logger.trace("Expired {} entries", n);
         };
 
-        service.scheduleWithFixedDelay(runnable, defaultExpiration / 2, defaultExpiration / 2, TimeUnit.MILLISECONDS);
+        service.scheduleWithFixedDelay(runnable, expirationInterval, expirationInterval, expirationIntervalUnits);
     }
 
     public void shutdownNow(boolean expireContents)
@@ -163,25 +159,6 @@ public class ExpiringMap<K, V>
     {
         shutdown = false;
         cache.clear();
-    }
-
-    public V put(K key, V value)
-    {
-        return putWithTimeout(key, value, defaultExpiration, defaultExpirationUnit);
-    }
-
-    public V putWithTimeout(K key, V value, long timeout, TimeUnit unit)
-    {
-        if (shutdown)
-        {
-            // StorageProxy isn't equipped to deal with "I'm nominally alive, but I can't send any messages out."
-            // So we'll just sit on this thread until the rest of the server shutdown completes.
-            //
-            // See comments in CustomTThreadPoolServer.serve, CASSANDRA-3335, and CASSANDRA-3727.
-            Uninterruptibles.sleepUninterruptibly(Long.MAX_VALUE, NANOSECONDS);
-        }
-        CacheableObject<V> previous = cache.put(key, new CacheableObject<>(value, timeout, unit));
-        return (previous == null) ? null : previous.value;
     }
 
     public V put(K key, V value, long createdAtNanos, long expiresAtNanos)

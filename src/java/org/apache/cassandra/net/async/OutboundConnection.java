@@ -253,7 +253,7 @@ public class OutboundConnection
         // we might race with the channel closing; if this happens, to ensure this message eventually arrives
         // we need to remove ourselves from the queue and throw a ClosedChannelException, so that another channel
         // can be opened in our place to try and send on.
-        if (isClosed() && queue.undoAdd(message))
+        if (isClosed() && queue.remove(message))
         {
             releaseCapacity(1, canonicalSize);
             throw new ClosedChannelException();
@@ -1345,7 +1345,7 @@ public class OutboundConnection
          *  is between messages, that checks if the queue is empty; if it is, it schedules cleanup on the eventLoop.
          */
 
-        Runnable clearQueue = () -> queue.runEventually(ApproximateTime.nanoTime(), withLock -> withLock.consume(this::onClosed));
+        Runnable clearQueue = () -> queue.runEventually(withLock -> withLock.consume(this::onClosed));
 
         if (flushQueue)
         {

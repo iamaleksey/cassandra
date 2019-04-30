@@ -77,7 +77,7 @@ public class Callbacks
             }
         };
 
-        callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS), NANOSECONDS, timeoutReporter);
+        callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2, NANOSECONDS, timeoutReporter);
         onDrop = OutboundMessageCallbacks.invokeOnDrop(message -> callbacks.removeAndExpire(message.id()));
     }
 
@@ -162,12 +162,6 @@ public class Callbacks
     public void unsafeClear()
     {
         callbacks.reset();
-    }
-
-    @VisibleForTesting
-    public void unsafeSet(long messageId, CallbackInfo callback)
-    {
-        callbacks.put(messageId, callback);
     }
 
 }
