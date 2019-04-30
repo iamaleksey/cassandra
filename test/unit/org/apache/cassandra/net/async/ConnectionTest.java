@@ -56,6 +56,8 @@ import io.netty.channel.ChannelPromise;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.exceptions.UnknownColumnException;
+import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -665,7 +667,7 @@ public class ConnectionTest
                 public Object deserialize(DataInputPlus in, int version) throws IOException
                 {
                     if (counter.getAndIncrement() == 3)
-                        throw new IOException();
+                        throw new UnknownColumnException("");
 
                     return in.readInt();
                 }
