@@ -1420,7 +1420,7 @@ public class OutboundConnection
         String channelId = isConnected() && isConnected(channel)
                            ? channel.id().asShortText()
                            : "[no-channel]";
-        return settings.from + "->" + settings.endpoint + '-' + type + '-' + channelId;
+        return settings.from + "->" + settings.connectTo + '-' + type + '-' + channelId;
     }
 
     @Override

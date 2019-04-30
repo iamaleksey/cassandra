@@ -542,7 +542,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     String id()
     {
-        return peer + "->" + self + '-' + type + '-' + channel.id().asShortText();
+        return channel.remoteAddress() + "->" + channel.localAddress() + '-' + type + '-' + channel.id().asShortText();
     }
 
     private class LargeMessage
