@@ -191,20 +191,9 @@ public class MatcherResponse
                         {
                             CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
                             if (cb != null)
-                            {
                                 cb.callback.response(response);
-                            }
                             else
-                            {
-                                try
-                                {
-                                    response.verb().handler().doVerb((Message<Object>) response);
-                                }
-                                catch (IOException e)
-                                {
-                                    throw new RuntimeException(e);
-                                }
-                            }
+                                processResponse(response);
 
                             spy.matchingResponse(response);
                         }
@@ -220,7 +209,7 @@ public class MatcherResponse
         return spy;
     }
 
-    void process(Message<?> message)
+    private void processResponse(Message<?> message)
     {
         if (!MessagingService.instance().messageSink.allowInbound(message))
             return;
