@@ -66,7 +66,7 @@ public class LargeColumnTest extends DistributedTestBase
         try (Cluster cluster = init(Cluster.build(nodes)
                                            .withConfig(config ->
                                                        config.set("commitlog_segment_size_in_mb", (columnSize * 3) >> 20)
-                                                             .set("internode_application_reserve_send_queue_capacity_in_bytes", columnSize * 2)
+                                                             .set("internode_application_reserve_send_queue_endpoint_capacity_in_bytes", columnSize * 2)
                                                              .set("internode_application_reserve_send_queue_global_capacity_in_bytes", columnSize * 3)
                                                              .set("write_request_timeout_in_ms", SECONDS.toMillis(30L))
                                                              .set("read_request_timeout_in_ms", SECONDS.toMillis(30L))
