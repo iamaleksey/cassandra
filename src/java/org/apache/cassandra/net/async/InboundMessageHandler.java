@@ -18,6 +18,7 @@
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
@@ -565,9 +566,19 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return channel.eventLoop();
     }
 
+    String id(boolean includeReal)
+    {
+        if (!includeReal)
+            return id();
+
+        return SocketFactory.channelId(peer, (InetSocketAddress) channel.remoteAddress(),
+                                       self, (InetSocketAddress) channel.localAddress(),
+                                       type, channel.id().asShortText());
+    }
+
     String id()
     {
-        return channel.remoteAddress() + "->" + channel.localAddress() + '-' + type + '-' + channel.id().asShortText();
+        return SocketFactory.channelId(peer, self, type, channel.id().asShortText());
     }
 
     private class LargeMessage

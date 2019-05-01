@@ -57,6 +57,7 @@ import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.EncryptionOptions;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
@@ -250,6 +251,24 @@ public final class SocketFactory
     public static boolean isCausedByConnectionReset(Throwable t)
     {
         return isCausedBy(t, SocketFactory::isConnectionReset);
+    }
+
+    public static String channelId(InetAddressAndPort from, InetSocketAddress realFrom, InetAddressAndPort to, InetSocketAddress realTo, ConnectionType type, String id)
+    {
+        return addressId(from, realFrom) + "->" + addressId(to, realTo) + '-' + type + '-' + id;
+    }
+
+    private static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
+    {
+        String str = address.toString();
+        if (!address.address.equals(realAddress.getAddress()) || address.port != realAddress.getPort())
+            str += "(" + InetAddressAndPort.toString(realAddress.getAddress(), realAddress.getPort()) + ")";
+        return str;
+    }
+
+    public static String channelId(InetAddressAndPort from, InetAddressAndPort to, ConnectionType type, String id)
+    {
+        return from + "->" + to + '-' + type + '-' + id;
     }
 
 }

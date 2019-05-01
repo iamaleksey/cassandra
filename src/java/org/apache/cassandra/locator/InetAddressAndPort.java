@@ -132,12 +132,17 @@ public final class InetAddressAndPort implements Comparable<InetAddressAndPort>,
     {
         if (withPort)
         {
-            return HostAndPort.fromParts(address.getHostAddress(), port).toString();
+            return toString(address, port);
         }
         else
         {
             return address.toString();
         }
+    }
+
+    public static String toString(InetAddress address, int port)
+    {
+        return HostAndPort.fromParts(address.getHostAddress(), port).toString();
     }
 
     public static InetAddressAndPort getByName(String name) throws UnknownHostException

@@ -416,7 +416,7 @@ public class InboundConnectionInitiator
                 settings.handlers.apply(from).createHandler(frameDecoder, initiate.type, pipeline.channel(), useMessagingVersion);
 
             logger.info("{} connection established, version = {}, compress = {}, encryption = {}",
-                        handler.id(),
+                        handler.id(true),
                         useMessagingVersion,
                         initiate.withCompression,
                         pipeline.get("ssl") != null ? encryptionLogStatement(settings.encryption) : "disabled");

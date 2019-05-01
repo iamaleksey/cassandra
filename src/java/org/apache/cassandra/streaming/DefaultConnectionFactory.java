@@ -52,7 +52,7 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
                 return result.getNow().success().channel;
 
             if (++attempts == MAX_CONNECT_ATTEMPTS)
-                throw new IOException("failed to connect to " + template.endpoint + " for streaming data", result.cause());
+                throw new IOException("failed to connect to " + template.to + " for streaming data", result.cause());
         }
     }
 }

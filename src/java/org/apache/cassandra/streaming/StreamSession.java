@@ -188,7 +188,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
                          int index, UUID pendingRepair, PreviewKind previewKind)
     {
         this.streamOperation = streamOperation;
-        this.peer = template.endpoint;
+        this.peer = template.to;
         this.template = template;
         this.index = index;
 

@@ -185,7 +185,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     {
         Channel channel = factory.createConnection(template, streamingVersion);
         ChannelPipeline pipeline = channel.pipeline();
-        pipeline.addLast("stream", new StreamingInboundHandler(template.endpoint, streamingVersion, session));
+        pipeline.addLast("stream", new StreamingInboundHandler(template.to, streamingVersion, session));
         channel.attr(TRANSFERRING_FILE_ATTR).set(Boolean.FALSE);
         logger.debug("Creating channel id {} local {} remote {}", channel.id(), channel.localAddress(), channel.remoteAddress());
         return channel;
@@ -276,7 +276,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
 
         Channel channel = channelFuture.channel();
         logger.error("{} failed to send a stream message/data to peer {}: msg = {}",
-                     createLogTag(session, channel), template.endpoint, msg, future.cause());
+                     createLogTag(session, channel), template.to, msg, future.cause());
 
         // StreamSession will invoke close(), but we have to mark this sender as closed so the session doesn't try
         // to send any failure messages
@@ -515,7 +515,7 @@ public class NettyStreamingMessageSender implements StreamingMessageSender
     {
         closed = true;
         if (logger.isDebugEnabled())
-            logger.debug("{} Closing stream connection channels on {}", createLogTag(session, null), template.endpoint);
+            logger.debug("{} Closing stream connection channels on {}", createLogTag(session, null), template.to);
         for (ScheduledFuture<?> future : channelKeepAlives)
             future.cancel(false);
         channelKeepAlives.clear();

@@ -227,7 +227,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public void closeOutboundNow(OutboundConnections connections)
     {
         connections.close(true).addListener(
-            future -> channelManagers.remove(connections.template().endpoint, connections)
+            future -> channelManagers.remove(connections.template().to, connections)
         );
     }
 

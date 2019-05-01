@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.net.ConnectException;
+import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
@@ -45,6 +46,7 @@ import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
@@ -87,6 +89,7 @@ import static org.apache.cassandra.utils.Throwables.isCausedBy;
  *
  * All methods are safe to invoke from any thread unless otherwise stated.
  */
+@SuppressWarnings("WeakerAccess")
 public class OutboundConnection
 {
     static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
@@ -205,7 +208,7 @@ public class OutboundConnection
     {
         // use the best guessed messaging version for a node
         // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
-        this.messagingVersion = MessagingService.instance().versions.get(template.endpoint);
+        this.messagingVersion = MessagingService.instance().versions.get(template.to);
         this.template = template;
         this.settings = template.withDefaults(type, messagingVersion);
         this.type = type;
@@ -343,8 +346,7 @@ public class OutboundConnection
     /**
      * Mark a number of pending bytes as flushed to the network, releasing their capacity for new outbound messages.
      */
-    @VisibleForTesting
-    void releaseCapacity(long count, long bytes)
+    private void releaseCapacity(long count, long bytes)
     {
         long decrement = pendingCountAndBytes(count, bytes);
         long prev = pendingCountAndBytesUpdater.getAndAdd(this, -decrement);
@@ -863,7 +865,7 @@ public class OutboundConnection
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-OUT-" + settings.from + "->" + settings.endpoint + '-' + type;
+                threadName = "Messaging-OUT-" + settings.from + "->" + settings.to + '-' + type;
                 Thread.currentThread().setName(threadName);
 
                 super.run();
@@ -1026,7 +1028,7 @@ public class OutboundConnection
                     ++successfulConnections;
 
                     logger.info("{} successfully connected, version = {}, compress = {}, encryption = {}",
-                                id(),
+                                id(true),
                                 messagingVersion,
                                 settings.withCompression,
                                 encryptionLogStatement(settings.encryption));
@@ -1038,14 +1040,14 @@ public class OutboundConnection
                     // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                     messagingVersion = result.retry().withMessagingVersion;
                     settings = template.withDefaults(type, messagingVersion);
-                    MessagingService.instance().versions.set(settings.endpoint, messagingVersion);
+                    MessagingService.instance().versions.set(settings.to, messagingVersion);
                     attempt();
                     break;
 
                 case INCOMPATIBLE:
                     // we cannot communicate with this peer given its messaging version; mark this as any other failure, and continue trying
                     Throwable t = new IOException(String.format("Incompatible peer: %s, messaging version: %s",
-                                                                settings.endpoint, result.incompatible().maxMessagingVersion));
+                                                                settings.to, result.incompatible().maxMessagingVersion));
                     t.fillInStackTrace();
                     onFailure(t);
                     break;
@@ -1079,7 +1081,7 @@ public class OutboundConnection
                              connecting = null;
                              if (future.isCancelled())
                                  return;
-                             if (future.isSuccess())
+                             if (future.isSuccess()) //noinspection unchecked
                                  onCompletedHandshake((Result<MessagingSuccess>) future.getNow());
                              else
                                  onFailure(future.cause());
@@ -1245,7 +1247,7 @@ public class OutboundConnection
      * Schedule this connection to be permanently closed; only one close may be scheduled,
      * any future scheduled closes are referred to the original triggering one (which may have a different schedule)
      */
-    public Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueue)
+    Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueue)
     {
         Promise<Void> scheduledClose = AsyncPromise.uncancellable(eventLoop);
         if (!scheduledCloseUpdater.compareAndSet(this, null, scheduledClose))
@@ -1278,7 +1280,7 @@ public class OutboundConnection
         if (!closingUpdater.compareAndSet(this, null, closing))
             return this.closing;
 
-        /**
+        /*
          * Now define a cleanup closure, that will be deferred until it is safe to do so.
          * Once run it:
          *   - immediately _logically_ closes the channel by updating this object's fields, but defers actually closing
@@ -1340,7 +1342,7 @@ public class OutboundConnection
                 onceNotConnecting.run();
         };
 
-        /**
+        /*
          * If we want to shutdown gracefully, flushing any outstanding messages, we have to do it very carefully.
          * Things to note:
          *
@@ -1414,13 +1416,23 @@ public class OutboundConnection
         return isClosed;
     }
 
+    private String id(boolean includeReal)
+    {
+        Channel channel = this.channel;
+        if (!includeReal || channel == null)
+            return id();
+        return SocketFactory.channelId(settings.from, (InetSocketAddress) channel.remoteAddress(),
+                                       settings.to, (InetSocketAddress) channel.localAddress(),
+                                       type, channel.id().asShortText());
+    }
+
     private String id()
     {
         Channel channel = this.channel;
         String channelId = isConnected() && isConnected(channel)
                            ? channel.id().asShortText()
                            : "[no-channel]";
-        return settings.from + "->" + settings.connectTo + '-' + type + '-' + channelId;
+        return SocketFactory.channelId(settings.from, settings.to, type, channelId);
     }
 
     @Override
@@ -1521,28 +1533,9 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
-    OutboundConnectionSettings template()
-    {
-        return template;
-    }
-
-    @VisibleForTesting
     OutboundConnectionSettings settings()
     {
         return settings;
-    }
-
-    @VisibleForTesting
-    EventLoop unsafeGetEventLoop()
-    {
-        return eventLoop;
-    }
-
-    @VisibleForTesting
-    void unsafeAddToQueue(Message<?> msg)
-    {
-        pendingCountAndBytesUpdater.addAndGet(this, pendingCountAndBytes(1, canonicalSize(msg)));
-        queue.unsafeAdd(msg);
     }
 
     @VisibleForTesting
@@ -1552,48 +1545,15 @@ public class OutboundConnection
     }
 
     @VisibleForTesting
-    void unsafeSetMessagingVersion(int messagingVersion)
-    {
-        this.messagingVersion = messagingVersion;
-        this.settings = template.withDefaults(type, messagingVersion);
-    }
-
-    @VisibleForTesting
-    void unsafeStartDelivery()
-    {
-        delivery.execute();
-    }
-
-    @VisibleForTesting
-    Future<?> unsafeGetWhileDisconnected()
-    {
-        return whileDisconnected;
-    }
-
-    @VisibleForTesting
     void unsafeRunOnDelivery(Runnable run)
     {
         delivery.stopAndRun(run);
     }
 
     @VisibleForTesting
-    void unsafeSetChannel(Channel channel)
-    {
-        this.channel = channel;
-    }
-
-    @VisibleForTesting
     Channel unsafeGetChannel()
     {
         return channel;
-    }
-
-    @VisibleForTesting
-    void unsafeSetClosed(boolean closed)
-    {
-        closingUpdater.set(this, closed ? eventLoop.newSucceededFuture(null) : null);
-        this.isConnected = false;
-        this.isClosed = true;
     }
 
     @VisibleForTesting

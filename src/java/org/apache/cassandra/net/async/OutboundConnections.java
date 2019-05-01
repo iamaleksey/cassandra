@@ -85,7 +85,7 @@ public class OutboundConnections
 
             if (existing == null)
             {
-                connections.metrics = new InternodeOutboundMetrics(template.endpoint, connections);
+                connections.metrics = new InternodeOutboundMetrics(template.to, connections);
                 connections.metricsReady.signalAll();
             }
             else
@@ -273,9 +273,9 @@ public class OutboundConnections
                     connections.large.submittedCount(),
                     connections.urgent.submittedCount()
                 );
-                curEndpointToCounts.put(connections.template.endpoint, cur);
+                curEndpointToCounts.put(connections.template.to, cur);
 
-                Counts prev = prevEndpointToCounts.get(connections.template.endpoint);
+                Counts prev = prevEndpointToCounts.get(connections.template.to);
                 if (prev == null)
                     continue;
 
@@ -283,7 +283,7 @@ public class OutboundConnections
                     continue;
 
                 if (cur.small == prev.small && cur.large == prev.large && cur.urgent == prev.urgent
-                    && !Gossiper.instance.isKnownEndpoint(connections.template.endpoint))
+                    && !Gossiper.instance.isKnownEndpoint(connections.template.to))
                 {
                     // close entirely if no traffic and the endpoint is unknown
                     messagingService.closeOutboundNow(connections);

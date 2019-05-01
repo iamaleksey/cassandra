@@ -126,8 +126,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         if (!settings.authenticate())
         {
             // interrupt other connections, so they must attempt to re-authenticate
-            MessagingService.instance().interruptOutbound(settings.endpoint);
-            return new FailedFuture<>(eventLoop, new IOException("authentication failed to " + settings.endpoint));
+            MessagingService.instance().interruptOutbound(settings.to);
+            return new FailedFuture<>(eventLoop, new IOException("authentication failed to " + settings.to));
         }
 
         // this is a bit ugly, but is the easiest way to ensure that if we timeout we can propagate a suitable error message
@@ -193,7 +193,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 // check if we should actually encrypt this connection
                 SslContext sslContext = SSLFactory.getOrCreateSslContext(settings.encryption, true, SSLFactory.SocketType.CLIENT);
                 // for some reason channel.remoteAddress() will return null
-                InetAddressAndPort address = settings.endpoint;
+                InetAddressAndPort address = settings.to;
                 InetSocketAddress peer = settings.encryption.require_endpoint_verification ? new InetSocketAddress(address.address, address.port) : null;
                 SslHandler sslHandler = newSslHandler(channel, sslContext, peer);
                 logger.trace("creating outbound netty SslContext: context={}, engine={}", sslContext.getClass().getName(), sslHandler.engine().getClass().getName());
@@ -344,9 +344,9 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
             JVMStabilityInspector.inspectThrowable(cause, false);
             resultPromise.tryFailure(cause);
             if (isCausedByConnectionReset(cause))
-                logger.info("Failed to connect to peer {}", settings.endpoint, cause);
+                logger.info("Failed to connect to peer {}", settings.to, cause);
             else
-                logger.error("Failed to handshake with peer {}", settings.endpoint, cause);
+                logger.error("Failed to handshake with peer {}", settings.to, cause);
             ctx.close();
         }
     }
