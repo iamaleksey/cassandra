@@ -26,6 +26,7 @@ import java.util.Objects;
 
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -87,7 +88,7 @@ public class AsymmetricSyncRequest extends RepairMessage
             out.writeInt(message.ranges.size());
             for (Range<Token> range : message.ranges)
             {
-                MessagingService.validatePartitioner(range);
+                IPartitioner.validate(range);
                 AbstractBounds.tokenSerializer.serialize(range, out, version);
             }
             out.writeInt(message.previewKind.getSerializationVal());
@@ -102,7 +103,7 @@ public class AsymmetricSyncRequest extends RepairMessage
             int rangesCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangesCount);
             for (int i = 0; i < rangesCount; ++i)
-                ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, MessagingService.globalPartitioner(), version));
+                ranges.add((Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, IPartitioner.global(), version));
             PreviewKind previewKind = PreviewKind.deserialize(in.readInt());
             return new AsymmetricSyncRequest(desc, owner, src, dst, ranges, previewKind);
         }

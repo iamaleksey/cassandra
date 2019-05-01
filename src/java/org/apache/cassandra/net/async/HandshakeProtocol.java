@@ -40,7 +40,6 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
-import static org.apache.cassandra.net.MessagingService.getBits;
 import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
 import static org.apache.cassandra.net.async.Crc.*;
 import static org.apache.cassandra.net.async.Crc.computeCrc32;
@@ -405,4 +404,10 @@ public class HandshakeProtocol
             return String.format("ConfirmOutboundPre40(maxMessagingVersion: %d; address: %s)", maxMessagingVersion, from);
         }
     }
+
+    private static int getBits(int packed, int start, int count)
+    {
+        return (packed >>> start) & ~(-1 << count);
+    }
+
 }

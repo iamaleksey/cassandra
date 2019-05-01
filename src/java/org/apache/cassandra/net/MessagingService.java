@@ -455,11 +455,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         socketFactory.awaitTerminationUntil(deadlineNanos);
     }
 
-    public static int getBits(int packed, int start, int count)
-    {
-        return (packed >>> start) & ~(-1 << count);
-    }
-
     private OutboundConnections getOutbound(InetAddressAndPort to)
     {
         OutboundConnections connections = channelManagers.get(to);
