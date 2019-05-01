@@ -39,6 +39,9 @@ public class InternodeInboundMetrics
     private final MetricName processedCount;
     private final MetricName receivedBytes;
     private final MetricName receivedCount;
+    private final MetricName throttledBytes;
+    private final MetricName throttledCount;
+    private final MetricName throttledNanos;
 
     /**
      * Create metrics for given inbound message handlers.
@@ -62,6 +65,9 @@ public class InternodeInboundMetrics
         register(processedCount = factory.createMetricName("ProcessedCount"), handlers::processedCount);
         register(receivedBytes = factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);
         register(receivedCount = factory.createMetricName("ReceivedCount"), handlers::receivedCount);
+        register(throttledBytes = factory.createMetricName("ThrottledBytes"), handlers::throttledBytes);
+        register(throttledCount = factory.createMetricName("ThrottledCount"), handlers::throttledCount);
+        register(throttledNanos = factory.createMetricName("ThrottledNanos"), handlers::throttledNanos);
     }
 
     public void release()
@@ -78,6 +84,9 @@ public class InternodeInboundMetrics
         remove(processedCount);
         remove(receivedBytes);
         remove(receivedCount);
+        remove(throttledBytes);
+        remove(throttledCount);
+        remove(throttledNanos);
     }
 
     private static void register(MetricName name, Gauge gauge)

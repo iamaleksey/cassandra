@@ -17,7 +17,6 @@
  */
 package org.apache.cassandra.net.async;
 
-import java.io.IOException;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -279,6 +278,21 @@ public final class InboundMessageHandlers
         return sumHandlers(h -> h.receivedBytes) + closedReceivedBytes;
     }
 
+    public long throttledCount()
+    {
+        return sumHandlers(h -> h.throttledCount) + closedThrottledCount;
+    }
+
+    public long throttledBytes()
+    {
+        return sumHandlers(h -> h.throttledBytes) + closedThrottledBytes;
+    }
+
+    public long throttledNanos()
+    {
+        return sumHandlers(h -> h.throttledNanos) + closedThrottledNanos;
+    }
+
     public int corruptFramesRecovered()
     {
         return (int) sumHandlers(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
@@ -329,16 +343,27 @@ public final class InboundMessageHandlers
         return sumCounters(InboundCounters::pendingBytes);
     }
 
-    private volatile long closedReceivedCount;
-    private volatile long closedReceivedBytes;
+    /*
+     * 'Archived' counter values, combined for all connections that have been closed.
+     */
+
+    private volatile long closedReceivedCount, closedReceivedBytes;
 
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedReceivedCountUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedReceivedCount");
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedReceivedBytesUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedReceivedBytes");
 
-    private volatile int closedCorruptFramesRecovered;
-    private volatile int closedCorruptFramesUnrecovered;
+    private volatile long closedThrottledCount, closedThrottledBytes, closedThrottledNanos;
+
+    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledCountUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledCount");
+    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledBytesUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledBytes");
+    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledNanosUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledNanos");
+
+    private volatile int closedCorruptFramesRecovered, closedCorruptFramesUnrecovered;
 
     private static final AtomicIntegerFieldUpdater<InboundMessageHandlers> closedCorruptFramesRecoveredUpdater =
         AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesRecovered");
@@ -349,6 +374,10 @@ public final class InboundMessageHandlers
     {
         closedReceivedCountUpdater.addAndGet(this, handler.receivedCount);
         closedReceivedBytesUpdater.addAndGet(this, handler.receivedBytes);
+
+        closedThrottledCountUpdater.addAndGet(this, handler.throttledCount);
+        closedThrottledBytesUpdater.addAndGet(this, handler.throttledBytes);
+        closedThrottledNanosUpdater.addAndGet(this, handler.throttledNanos);
 
         closedCorruptFramesRecoveredUpdater.addAndGet(this, handler.corruptFramesRecovered);
         closedCorruptFramesUnrecoveredUpdater.addAndGet(this, handler.corruptFramesUnrecovered);

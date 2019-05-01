@@ -106,8 +106,12 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
 
-    long receivedCount, receivedBytes;
+    /*
+     * Counters
+     */
     int corruptFramesRecovered, corruptFramesUnrecovered;
+    long receivedCount, receivedBytes;
+    long throttledCount, throttledBytes, throttledNanos;
 
     InboundMessageHandler(FrameDecoder decoder,
 
@@ -208,7 +212,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return true;
         }
 
-        if (!acquireCapacity(endpointReserve, globalReserve, size, header.expiresAtNanos))
+        if (!acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
 
         callbacks.onArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
@@ -278,7 +282,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
 
-        if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, header.expiresAtNanos))
+        if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
 
         if (expired)
@@ -331,18 +335,41 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private boolean onEndpointReserveCapacityRegained(Limit endpointReserve) throws IOException
+    private void onEndpointReserveCapacityRegained(Limit endpointReserve, long elapsedNanos)
     {
-        assert channel.eventLoop().inEventLoop();
-        ticket = null;
-        return !isClosed && processUpToOneMessage(endpointReserve, globalReserveCapacity);
+        try
+        {
+            onReserveCapacityRegained(endpointReserve, globalReserveCapacity, elapsedNanos);
+        }
+        catch (Throwable t)
+        {
+            exceptionCaught(t);
+        }
     }
 
-    private boolean onGlobalReserveCapacityRegained(Limit globalReserve) throws IOException
+    private void onGlobalReserveCapacityRegained(Limit globalReserve, long elapsedNanos)
+    {
+        try
+        {
+            onReserveCapacityRegained(endpointReserveCapacity, globalReserve, elapsedNanos);
+        }
+        catch (Throwable t)
+        {
+            exceptionCaught(t);
+        }
+    }
+
+    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve, long elapsedNanos) throws IOException
     {
         assert channel.eventLoop().inEventLoop();
-        ticket = null;
-        return !isClosed && processUpToOneMessage(endpointReserveCapacity, globalReserve);
+
+        if (!isClosed)
+        {
+            ticket = null;
+            throttledNanos += elapsedNanos;
+            if (processUpToOneMessage(endpointReserve, globalReserve))
+                decoder.reactivate();
+        }
     }
 
     /*
@@ -410,21 +437,26 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void resume() throws IOException
-    {
-        assert channel.eventLoop().inEventLoop();
-
-        if (!isClosed)
-            decoder.reactivate();
-    }
-
-    private EventLoop eventLoop()
-    {
-        return channel.eventLoop();
-    }
-
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
-    private boolean acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes, long expiresAtNanos)
+    private boolean acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes, long currentTimeNanos, long expiresAtNanos)
+    {
+        ResourceLimits.Outcome outcome = acquireCapacity(endpointReserve, globalReserve, bytes);
+
+        if (outcome == ResourceLimits.Outcome.INSUFFICIENT_ENDPOINT)
+            ticket = endpointWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
+        else if (outcome == ResourceLimits.Outcome.INSUFFICIENT_GLOBAL)
+            ticket = globalWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
+
+        if (outcome != ResourceLimits.Outcome.SUCCESS)
+        {
+            throttledCount++;
+            throttledBytes += bytes;
+        }
+
+        return outcome == ResourceLimits.Outcome.SUCCESS;
+    }
+
+    private ResourceLimits.Outcome acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes)
     {
         long currentQueueSize = queueSize;
 
@@ -435,22 +467,16 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (currentQueueSize + bytes <= queueCapacity)
         {
             queueSizeUpdater.addAndGet(this, bytes);
-            return true;
+            return ResourceLimits.Outcome.SUCCESS;
         }
 
         // At that point, we know we don't have enough capacity in the queue. However, we still
         // should take not more than `bytes` here since capacity can go up without us knowing
         long allocatedExcess = min(currentQueueSize + bytes - queueCapacity, bytes);
 
-        switch (ResourceLimits.tryAllocate(endpointReserve, globalReserve, allocatedExcess))
-        {
-            case INSUFFICIENT_ENDPOINT:
-                ticket = endpointWaitQueue.register(this, bytes, expiresAtNanos);
-                return false;
-            case INSUFFICIENT_GLOBAL:
-                ticket = globalWaitQueue.register(this, bytes, expiresAtNanos);
-                return false;
-        }
+        ResourceLimits.Outcome outcome = ResourceLimits.tryAllocate(endpointReserve, globalReserve, allocatedExcess);
+        if (outcome != ResourceLimits.Outcome.SUCCESS)
+            return outcome;
 
         long newQueueSize = queueSizeUpdater.addAndGet(this, bytes);
         long actualExcess = max(0, min(newQueueSize - queueCapacity, bytes));
@@ -458,7 +484,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (actualExcess != allocatedExcess) // can be smaller if a release happened since
             ResourceLimits.release(endpointReserve, globalReserve, allocatedExcess - actualExcess);
 
-        return true;
+        return ResourceLimits.Outcome.SUCCESS;
     }
 
     private void releaseCapacity(int bytes)
@@ -534,10 +560,9 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         onClosed.call(this);
     }
 
-    @VisibleForTesting
-    public ConnectionType type()
+    private EventLoop eventLoop()
     {
-        return type;
+        return channel.eventLoop();
     }
 
     String id()
@@ -855,9 +880,9 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return new WaitQueue(Kind.GLOBAL_CAPACITY, globalReserveCapacity);
         }
 
-        private Ticket register(InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+        private Ticket register(InboundMessageHandler handler, int bytesRequested, long registeredAtNanos, long expiresAtNanos)
         {
-            Ticket ticket = new Ticket(this, handler, bytesRequested, expiresAtNanos);
+            Ticket ticket = new Ticket(this, handler, bytesRequested, registeredAtNanos, expiresAtNanos);
             queue.add(ticket);
             signal(); // TODO: *conditionally* signal upon registering
             return ticket;
@@ -933,7 +958,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 try
                 {
                     for (Ticket ticket : tickets)
-                        ticket.reactivate(limit);
+                        ticket.reactivateHandler(limit);
                 }
                 finally
                 {
@@ -965,37 +990,31 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             private final WaitQueue waitQueue;
             private final InboundMessageHandler handler;
             private final int bytesRequested;
+            private final long reigsteredAtNanos;
             private final long expiresAtNanos;
 
-            private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long expiresAtNanos)
+            private Ticket(WaitQueue waitQueue, InboundMessageHandler handler, int bytesRequested, long registeredAtNanos, long expiresAtNanos)
             {
                 this.waitQueue = waitQueue;
                 this.handler = handler;
                 this.bytesRequested = bytesRequested;
+                this.reigsteredAtNanos = registeredAtNanos;
                 this.expiresAtNanos = expiresAtNanos;
             }
 
-            private void reactivate(Limit capacity)
+            private void reactivateHandler(Limit capacity)
             {
+                long elapsedNanos = ApproximateTime.nanoTime() - reigsteredAtNanos;
                 try
                 {
-                    boolean isActive = waitQueue.kind == Kind.ENDPOINT_CAPACITY
-                                     ? handler.onEndpointReserveCapacityRegained(capacity)
-                                     : handler.onGlobalReserveCapacityRegained(capacity);
-
-                    if (isActive)
-                        handler.resume();
+                    if (waitQueue.kind == Kind.ENDPOINT_CAPACITY)
+                        handler.onEndpointReserveCapacityRegained(capacity, elapsedNanos);
+                    else
+                        handler.onGlobalReserveCapacityRegained(capacity, elapsedNanos);
                 }
                 catch (Throwable t)
                 {
-                    try
-                    {
-                        handler.exceptionCaught(t);
-                    }
-                    catch (Throwable e)
-                    {
-                        logger.error("{} exception caught while invoking InboundMessageHandler's exceptionCaught()", handler.id(), e);
-                    }
+                    logger.error("{} exception caught while reactivating a handler", handler.id(), t);
                 }
             }
 
