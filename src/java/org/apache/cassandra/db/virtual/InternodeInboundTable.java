@@ -52,7 +52,6 @@ final class InternodeInboundTable extends AbstractVirtualTable
     private static final String PROCESSED_COUNT = "processed_count";
     private static final String RECEIVED_BYTES = "received_bytes";
     private static final String RECEIVED_COUNT = "received_count";
-    private static final String THROTTLED_BYTES = "throttled_bytes";
     private static final String THROTTLED_COUNT = "throttled_count";
     private static final String THROTTLED_NANOS = "throttled_nanos";
 
@@ -77,7 +76,6 @@ final class InternodeInboundTable extends AbstractVirtualTable
                            .addRegularColumn(PROCESSED_COUNT, LongType.instance)
                            .addRegularColumn(RECEIVED_BYTES, LongType.instance)
                            .addRegularColumn(RECEIVED_COUNT, LongType.instance)
-                           .addRegularColumn(THROTTLED_BYTES, LongType.instance)
                            .addRegularColumn(THROTTLED_COUNT, LongType.instance)
                            .addRegularColumn(THROTTLED_NANOS, LongType.instance)
                            .build());
@@ -125,7 +123,6 @@ final class InternodeInboundTable extends AbstractVirtualTable
                .column(PROCESSED_COUNT, handlers.processedCount())
                .column(RECEIVED_BYTES, handlers.receivedBytes())
                .column(RECEIVED_COUNT, handlers.receivedCount())
-               .column(THROTTLED_BYTES, handlers.throttledBytes())
                .column(THROTTLED_COUNT, handlers.throttledCount())
                .column(THROTTLED_NANOS, handlers.throttledNanos());
     }

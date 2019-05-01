@@ -283,11 +283,6 @@ public final class InboundMessageHandlers
         return sumHandlers(h -> h.throttledCount) + closedThrottledCount;
     }
 
-    public long throttledBytes()
-    {
-        return sumHandlers(h -> h.throttledBytes) + closedThrottledBytes;
-    }
-
     public long throttledNanos()
     {
         return sumHandlers(h -> h.throttledNanos) + closedThrottledNanos;
@@ -354,12 +349,10 @@ public final class InboundMessageHandlers
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedReceivedBytesUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedReceivedBytes");
 
-    private volatile long closedThrottledCount, closedThrottledBytes, closedThrottledNanos;
+    private volatile long closedThrottledCount, closedThrottledNanos;
 
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledCountUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledCount");
-    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledBytes");
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledNanosUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledNanos");
 
@@ -376,7 +369,6 @@ public final class InboundMessageHandlers
         closedReceivedBytesUpdater.addAndGet(this, handler.receivedBytes);
 
         closedThrottledCountUpdater.addAndGet(this, handler.throttledCount);
-        closedThrottledBytesUpdater.addAndGet(this, handler.throttledBytes);
         closedThrottledNanosUpdater.addAndGet(this, handler.throttledNanos);
 
         closedCorruptFramesRecoveredUpdater.addAndGet(this, handler.corruptFramesRecovered);

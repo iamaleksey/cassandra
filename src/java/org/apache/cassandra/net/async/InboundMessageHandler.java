@@ -112,7 +112,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
      */
     int corruptFramesRecovered, corruptFramesUnrecovered;
     long receivedCount, receivedBytes;
-    long throttledCount, throttledBytes, throttledNanos;
+    long throttledCount, throttledNanos;
 
     InboundMessageHandler(FrameDecoder decoder,
 
@@ -449,10 +449,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             ticket = globalWaitQueue.register(this, bytes, currentTimeNanos, expiresAtNanos);
 
         if (outcome != ResourceLimits.Outcome.SUCCESS)
-        {
             throttledCount++;
-            throttledBytes += bytes;
-        }
 
         return outcome == ResourceLimits.Outcome.SUCCESS;
     }
