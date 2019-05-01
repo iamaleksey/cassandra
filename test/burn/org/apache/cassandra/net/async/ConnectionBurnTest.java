@@ -20,6 +20,7 @@ package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
+import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,6 +34,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -41,8 +43,8 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.Channel;
+import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -56,7 +58,6 @@ import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
-import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
@@ -68,22 +69,32 @@ public class ConnectionBurnTest
         ApproximateTime.stop(ALMOST_SAME_TIME);
     }
 
+    static class NoGlobalInboundMetrics implements InboundMessageHandlers.GlobalMetricCallbacks
+    {
+        static final NoGlobalInboundMetrics instance = new NoGlobalInboundMetrics();
+        public LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to)
+        {
+            return (timeElapsed, timeUnit) -> {};
+        }
+        public void recordInternalLatency(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+        public void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+    }
+
     static class Inbound
     {
         final Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender;
         final InboundSockets sockets;
 
-        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, InboundMessageHandlers.HandlerProvider handlerProvider)
+        Inbound(List<InetAddressAndPort> endpoints, GlobalInboundSettings settings, Test test)
         {
-            ResourceLimits.Limit globalLimit = new ResourceLimits.Concurrent(settings.globalReserveLimit);
-            InboundMessageHandler.WaitQueue globalWaitQueue = InboundMessageHandler.WaitQueue.global(globalLimit);
+            final InboundMessageHandlers.GlobalResourceLimits globalInboundLimits = new InboundMessageHandlers.GlobalResourceLimits(new ResourceLimits.Concurrent(settings.globalReserveLimit));
             Map<InetAddressAndPort, Map<InetAddressAndPort, InboundMessageHandlers>> handlersByRecipientThenSender = new HashMap<>();
             List<InboundConnectionSettings> bind = new ArrayList<>();
             for (InetAddressAndPort recipient : endpoints)
             {
                 Map<InetAddressAndPort, InboundMessageHandlers> handlersBySender = new HashMap<>();
                 for (InetAddressAndPort sender : endpoints)
-                    handlersBySender.put(sender, new InboundMessageHandlers(recipient, sender, settings.queueCapacity, settings.endpointReserveLimit, globalLimit, globalWaitQueue, handlerProvider));
+                    handlersBySender.put(sender, new InboundMessageHandlers(recipient, sender, settings.queueCapacity, settings.endpointReserveLimit, globalInboundLimits, NoGlobalInboundMetrics.instance, test, test));
 
                 handlersByRecipientThenSender.put(recipient, handlersBySender);
                 bind.add(settings.template.withHandlers(handlersBySender::get).withBindAddress(recipient));
@@ -94,7 +105,7 @@ public class ConnectionBurnTest
     }
 
 
-    private static class Test implements InboundMessageHandlers.HandlerProvider
+    private static class Test implements InboundMessageHandlers.HandlerProvider, InboundMessageHandlers.MessageSink
     {
         private final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
         {
@@ -171,7 +182,8 @@ public class ConnectionBurnTest
                     ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
                     for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
-                        this.connections[i] = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
+                        Connection connection = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
+                        this.connections[i] = connection;
                         this.connectionMessageIds[i] = minId;
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
@@ -295,12 +307,6 @@ public class ConnectionBurnTest
                 wrapped.onExecuting(messageSize, header, timeElapsed, unit);
             }
 
-            public boolean shouldProcess(int messageSize, Message message)
-            {
-                forId(message.id()).shouldProcess(messageSize, message);
-                return wrapped.shouldProcess(messageSize, message);
-            }
-
             public void onProcessingException(int messageSize, Message.Header header, Throwable t)
             {
                 forId(header.id).onProcessingException(messageSize, header, t);
@@ -332,6 +338,16 @@ public class ConnectionBurnTest
             }
         }
 
+        public void fail(Message.Header header, Throwable failure)
+        {
+            // TODO: verify this
+        }
+
+        public void accept(Message<?> message)
+        {
+            forId(message.id()).process(message);
+        }
+
         public InboundMessageCallbacks wrap(InboundMessageCallbacks wrap)
         {
             return new WrappedInboundCallbacks(wrap);
@@ -351,9 +367,11 @@ public class ConnectionBurnTest
             InboundMessageHandler.WaitQueue endpointWaitQueue,
             InboundMessageHandler.WaitQueue globalWaitQueue,
             InboundMessageHandler.OnHandlerClosed onClosed,
-            InboundMessageCallbacks callbacks)
+            InboundMessageCallbacks callbacks,
+            ThrowingConsumer<Message<?>, ?> messageSink
+            )
         {
-            return new InboundMessageHandler(decoder, type, channel, self, peer, version, largeMessageThreshold, queueCapacity, endpointReserveCapacity, globalReserveCapacity, endpointWaitQueue, globalWaitQueue, onClosed, wrap(callbacks))
+            return new InboundMessageHandler(decoder, type, channel, self, peer, version, largeMessageThreshold, queueCapacity, endpointReserveCapacity, globalReserveCapacity, endpointWaitQueue, globalWaitQueue, onClosed, wrap(callbacks), messageSink)
             {
                 final IntConsumer releaseCapacity = size -> super.releaseProcessedCapacity(size, null);
                 protected void releaseProcessedCapacity(int bytes, Message.Header header)

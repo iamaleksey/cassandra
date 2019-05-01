@@ -36,6 +36,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
+import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.exceptions.UnknownColumnException;
@@ -103,6 +104,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final OnHandlerClosed onClosed;
     private final InboundMessageCallbacks callbacks;
+    private final ThrowingConsumer<Message<?>, ?> messageSink;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -130,7 +132,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                           WaitQueue globalWaitQueue,
 
                           OnHandlerClosed onClosed,
-                          InboundMessageCallbacks callbacks)
+                          InboundMessageCallbacks callbacks,
+                          ThrowingConsumer<Message<?>, ?> messageSink)
     {
         this.decoder = decoder;
 
@@ -149,6 +152,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         this.onClosed = onClosed;
         this.callbacks = callbacks;
+        this.messageSink = messageSink;
     }
 
     @Override
@@ -754,12 +758,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (!expired)
                 {
                     Message message = provideMessage();
-                    if (null != message && callbacks.shouldProcess(size, message))
+                    if (null != message)
                     {
                         try
                         {
-                            //noinspection unchecked
-                            header().verb.handler().doVerb((Message<Object>) message);
+                            messageSink.accept(message);
                         }
                         catch (Throwable t)
                         {

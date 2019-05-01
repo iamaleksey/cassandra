@@ -202,13 +202,11 @@ public class Verifier
 
     static class ProcessMessageEvent extends SimpleMessageEvent
     {
-        final int messageSize;
         final Message<?> message;
-        ProcessMessageEvent(long at, Message<?> message, int messageSize)
+        ProcessMessageEvent(long at, Message<?> message)
         {
             super(PROCESS, at, message.id());
             this.message = message;
-            this.messageSize = messageSize;
         }
     }
 
@@ -276,10 +274,10 @@ public class Verifier
         long at = nextId();
         events.put(at, new SimpleMessageEventWithSize(FAILED_DESERIALIZE, at, messageId, messageSize));
     }
-    void onProcessed(Message<?> message, int messageSize)
+    void onProcessed(Message<?> message)
     {
         long at = nextId();
-        events.put(at, new ProcessMessageEvent(at, message, messageSize));
+        events.put(at, new ProcessMessageEvent(at, message));
     }
     void onProcessedExpired(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
     {
@@ -739,8 +737,6 @@ public class Verifier
                             fail("Invalid message payload for %d: %s supplied by processor, but %s implied by original message and messaging version",
                                  e.messageId, Arrays.toString((byte[]) e.message.payload), Arrays.toString((byte[]) m.message.payload));
                         }
-                        if (e.messageSize != m.messageSize())
-                            fail("Processing with invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
 
                         if (m.processOutOfOrder)
                         {

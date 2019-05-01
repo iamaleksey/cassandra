@@ -147,10 +147,9 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
     {
     }
 
-    public boolean shouldProcess(int messageSize, Message message)
+    public void process(Message message)
     {
-        verifier.onProcessed(message, messageSize);
-        return false;
+        verifier.onProcessed(message);
     }
 
     public void onProcessingException(int messageSize, Message.Header header, Throwable t)

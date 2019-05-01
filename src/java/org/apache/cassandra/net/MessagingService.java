@@ -19,7 +19,6 @@ package org.apache.cassandra.net;
 
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -36,25 +35,21 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.dht.AbstractBounds;
-import org.apache.cassandra.dht.IPartitioner;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.async.ConnectionType;
 import org.apache.cassandra.net.async.FutureCombiner;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
-import org.apache.cassandra.net.async.InboundMessageHandler;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.apache.cassandra.net.async.LatencyConsumer;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.net.async.SocketFactory;
 import org.apache.cassandra.net.async.ResourceLimits;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
-import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.MBeanWrapper;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -104,19 +99,30 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
 
     public final SocketFactory socketFactory = new SocketFactory();
-    public final MessagingMetrics metrics = new MessagingMetrics();
     public final LatencySubscribers latency = new LatencySubscribers();
-    public final MessageSink messageSink = new MessageSink();
     public final Callbacks callbacks = new Callbacks(this);
+
+    public final InboundSink inboundSink = new InboundSink(message -> message.header.verb.handler().doVerb((Message<Object>) message))
+    {
+        public void fail(Message.Header header, Throwable failure)
+        {
+            if (header.callBackOnFailure())
+            {
+                Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(failure));
+                sendOneWay(response, header.from);
+            }
+        }
+    };
+    private final InboundMessageHandlers.GlobalResourceLimits globalInboundLimits = new InboundMessageHandlers.GlobalResourceLimits(
+        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes()));
+
     public final InboundSockets inbound = new InboundSockets(new InboundConnectionSettings()
                                                              .withHandlers(this::getInbound)
                                                              .withSocketFactory(socketFactory));
-    public final ResourceLimits.Limit reserveSendQueueGlobalLimitInBytes =
-        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
-    public final ResourceLimits.Limit reserveReceiveQueueGlobalLimitInBytes =
-        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes());
-    public final InboundMessageHandler.WaitQueue inboundHandlerWaitQueue = InboundMessageHandler.WaitQueue.global(reserveReceiveQueueGlobalLimitInBytes);
+    public final OutboundSink outboundSink = new OutboundSink(this::doSendOneWay);
+    public final ResourceLimits.Limit globalOutboundLimits =
+        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
@@ -126,11 +132,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     @VisibleForTesting
     MessagingService(boolean testOnly)
     {
-        if (!testOnly)
-        {
-            MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
-            droppedMessages.scheduleLogging();
-        }
+        super(testOnly);
         OutboundConnections.scheduleUnusedConnectionMonitoring(this, ScheduledExecutors.scheduledTasks, 1L, TimeUnit.HOURS);
     }
 
@@ -362,10 +364,11 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         if (to.equals(FBUtilities.getBroadcastAddressAndPort()))
             logger.trace("Message-to-self {} going over MessagingService", message);
 
-        // message sinks are a testing hook
-        if (!messageSink.allowOutbound(message, to))
-            return;
+        outboundSink.accept(message, to, specifyConnection);
+    }
 
+    private void doSendOneWay(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
+    {
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
         {
@@ -423,7 +426,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                               shutdownExecutors(deadline);
                       },
                       () -> callbacks.awaitTerminationUntil(deadline),
-                      messageSink::clear);
+                      inboundSink::clear,
+                      outboundSink::clear);
         }
         else
         {
@@ -440,7 +444,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                               shutdownExecutors(deadline);
                       },
                       () -> callbacks.awaitTerminationUntil(deadline),
-                      messageSink::clear);
+                      inboundSink::clear,
+                      outboundSink::clear);
         }
     }
 
@@ -453,26 +458,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public static int getBits(int packed, int start, int count)
     {
         return (packed >>> start) & ~(-1 << count);
-    }
-
-    // TODO why are these three methods here?
-    public static IPartitioner globalPartitioner()
-    {
-        return StorageService.instance.getTokenMetadata().partitioner;
-    }
-
-    public static void validatePartitioner(Collection<? extends AbstractBounds<?>> allBounds)
-    {
-        for (AbstractBounds<?> bounds : allBounds)
-            validatePartitioner(bounds);
-    }
-
-    public static void validatePartitioner(AbstractBounds<?> bounds)
-    {
-        if (globalPartitioner() != bounds.left.getPartitioner())
-            throw new AssertionError(String.format("Partitioner in bounds serialization. Expected %s, was %s.",
-                                                   globalPartitioner().getClass().getName(),
-                                                   bounds.left.getPartitioner().getClass().getName()));
     }
 
     private OutboundConnections getOutbound(InetAddressAndPort to)
@@ -494,8 +479,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                                        addr,
                                        DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes(),
                                        DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes(),
-                                       reserveReceiveQueueGlobalLimitInBytes,
-                                       inboundHandlerWaitQueue)
+                                       globalInboundLimits, metrics, inboundSink)
         );
     }
 

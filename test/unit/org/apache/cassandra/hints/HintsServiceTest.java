@@ -81,7 +81,8 @@ public class HintsServiceTest
     @Before
     public void reinstanciateService() throws Throwable
     {
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().inboundSink.clear();
+        MessagingService.instance().outboundSink.clear();
 
         if (!HintsService.instance.isShutDown())
         {

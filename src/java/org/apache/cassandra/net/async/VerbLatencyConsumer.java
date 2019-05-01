@@ -15,21 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.cassandra.net.async;
 
 import java.util.concurrent.TimeUnit;
 
-import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Message.Header;
+import org.apache.cassandra.net.Verb;
 
-public interface InboundMessageCallbacks
+public interface VerbLatencyConsumer
 {
-    void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
-    void onDispatched(int messageSize, Header header);
-    void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit);
-    void onProcessingException(int messageSize, Header header, Throwable t);
-    void onProcessed(int messageSize, Header header);
-    void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
-    void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
-    void onFailedDeserialize(int messageSize, Header header, Throwable t);
+    void accept(Verb verb, long timeElapsed, TimeUnit unit);
 }
+

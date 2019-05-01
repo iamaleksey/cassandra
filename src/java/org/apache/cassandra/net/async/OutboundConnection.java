@@ -409,7 +409,6 @@ public class OutboundConnection
     {
         releaseCapacity(1, canonicalSize(message));
         callbacks.onClosed(message);
-        MessagingService.instance().callbacks.removeAndExpire(message.id());
     }
 
     /**

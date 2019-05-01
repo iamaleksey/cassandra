@@ -24,6 +24,7 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
 
 import org.slf4j.Logger;
@@ -31,7 +32,6 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.InboundMessageCallbacks;
 
 /**
  * Sends a response for an incoming message with a matching {@link Matcher}.
@@ -46,7 +46,7 @@ public class MatcherResponse
     private final Set<Long> sendResponses = new HashSet<>();
     private final MockMessagingSpy spy = new MockMessagingSpy();
     private final AtomicInteger limitCounter = new AtomicInteger(Integer.MAX_VALUE);
-    private MessageSink.OutboundSink sink;
+    private BiPredicate<Message<?>, InetAddressAndPort> sink;
 
     MatcherResponse(Matcher<?> matcher)
     {
@@ -161,9 +161,9 @@ public class MatcherResponse
 
         assert sink == null: "destroy() must be called first to register new response";
 
-        sink = new MessageSink.OutboundSink()
+        sink = new BiPredicate<Message<?>, InetAddressAndPort>()
         {
-            public boolean allowOutbound(Message message, InetAddressAndPort to)
+            public boolean test(Message message, InetAddressAndPort to)
             {
                 // prevent outgoing message from being send in case matcher indicates a match
                 // and instead send the mocked response
@@ -204,14 +204,14 @@ public class MatcherResponse
                 return true;
             }
         };
-        MessagingService.instance().messageSink.addOutbound(sink);
+        MessagingService.instance().outboundSink.add(sink);
 
         return spy;
     }
 
     private void processResponse(Message<?> message)
     {
-        if (!MessagingService.instance().messageSink.allowInbound(message))
+        if (!MessagingService.instance().inboundSink.allow(message))
             return;
 
         StageManager.getStage(message.verb().stage).execute(() -> {
@@ -231,6 +231,6 @@ public class MatcherResponse
      */
     public void destroy()
     {
-        MessagingService.instance().messageSink.removeOutbound(sink);
+        MessagingService.instance().outboundSink.remove(sink);
     }
 }

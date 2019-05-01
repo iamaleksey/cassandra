@@ -66,7 +66,7 @@ public class StageManager
 
     private static LocalAwareExecutorService tracingExecutor()
     {
-        RejectedExecutionHandler reh = (r, executor) -> MessagingService.instance().droppedMessages.increment(Verb._TRACE);
+        RejectedExecutionHandler reh = (r, executor) -> MessagingService.instance().metrics.droppedMessages.increment(Verb._TRACE);
         return new TracingExecutor(1,
                                    1,
                                    KEEPALIVE,

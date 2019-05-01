@@ -60,8 +60,8 @@ public class AbstractPendingRepairTest extends AbstractRepairTest
         LocalSessionAccessor.startup();
 
         // cutoff messaging service
-        MessagingService.instance().messageSink.addOutbound((message, to) -> false);
-        MessagingService.instance().messageSink.addInbound((message) -> false);
+        MessagingService.instance().outboundSink.add((message, to) -> false);
+        MessagingService.instance().inboundSink.add((message) -> false);
     }
 
     @Before

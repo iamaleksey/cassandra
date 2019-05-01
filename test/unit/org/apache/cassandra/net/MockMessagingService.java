@@ -52,7 +52,8 @@ public class MockMessagingService
      */
     public static void cleanup()
     {
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
+        MessagingService.instance().inboundSink.clear();
     }
 
     /**

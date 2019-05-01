@@ -38,6 +38,7 @@ import org.apache.cassandra.utils.StatusLogger;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
+// TODO: merge with MessagingMetrics
 public class DroppedMessages
 {
     private static final Logger logger = LoggerFactory.getLogger(DroppedMessages.class);

@@ -1779,7 +1779,7 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 else
                 {
-                    MessagingService.instance().droppedMessages.incrementWithLatency(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
+                    MessagingService.instance().metrics.droppedMessages.incrementWithLatency(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.UNKNOWN);
                 }
 
@@ -2444,7 +2444,7 @@ public class StorageProxy implements StorageProxyMBean
             if (approxCurrentTimeNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = approxCurrentTimeNanos - approxCreationTimeNanos;
-                MessagingService.instance().droppedMessages.incrementWithLatency(verb, timeTakenNanos, NANOSECONDS);
+                MessagingService.instance().metrics.droppedMessages.incrementWithLatency(verb, timeTakenNanos, NANOSECONDS);
                 return;
             }
             try
@@ -2483,7 +2483,7 @@ public class StorageProxy implements StorageProxyMBean
             if (nowNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = nowNanos - approxCreationTimeNanos;
-                MessagingService.instance().droppedMessages.incrementWithLatency(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
+                MessagingService.instance().metrics.droppedMessages.incrementWithLatency(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
 
                 HintRunnable runnable = new HintRunnable(EndpointsForToken.of(localReplica.range().right, localReplica))
                 {

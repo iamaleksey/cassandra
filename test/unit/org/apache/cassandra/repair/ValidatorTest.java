@@ -91,7 +91,7 @@ public class ValidatorTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
         DatabaseDescriptor.setRepairSessionSpaceInMegabytes(testSizeMegabytes);
     }
 
@@ -412,7 +412,7 @@ public class ValidatorTest
     private CompletableFuture<Message> registerOutgoingMessageSink()
     {
         final CompletableFuture<Message> future = new CompletableFuture<>();
-        MessagingService.instance().messageSink.addOutbound((message, to) -> future.complete(message));
+        MessagingService.instance().outboundSink.add((message, to) -> future.complete(message));
         return future;
     }
 }

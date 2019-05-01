@@ -97,7 +97,7 @@ public class MessagingServiceTest
     @Before
     public void before() throws UnknownHostException
     {
-        messagingService.droppedMessages.resetMap(Integer.toString(metricScopeId++));
+        messagingService.metrics.droppedMessages.resetMap(Integer.toString(metricScopeId++));
         MockBackPressureStrategy.applied = false;
         messagingService.closeOutbound(InetAddressAndPort.getByName("127.0.0.2"));
         messagingService.closeOutbound(InetAddressAndPort.getByName("127.0.0.3"));
@@ -119,9 +119,9 @@ public class MessagingServiceTest
         Verb verb = Verb.READ_REQ;
 
         for (int i = 1; i <= 5000; i++)
-            messagingService.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
+            messagingService.metrics.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
 
-        List<String> logs = messagingService.droppedMessages.getLogs();
+        List<String> logs = messagingService.metrics.droppedMessages.getLogs();
         assertEquals(1, logs.size());
         Pattern regexp = Pattern.compile("READ_REQ messages were dropped in last 5000 ms: (\\d+) internal and (\\d+) cross node. Mean internal dropped latency: (\\d+) ms and Mean cross-node dropped latency: (\\d+) ms");
         Matcher matcher = regexp.matcher(logs.get(0));
@@ -130,15 +130,15 @@ public class MessagingServiceTest
         assertEquals(2500, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(5000, (int) messagingService.droppedMessages.getDroppedMessages().get(verb.toString()));
+        assertEquals(5000, (int) messagingService.metrics.droppedMessages.getDroppedMessages().get(verb.toString()));
 
-        logs = messagingService.droppedMessages.getLogs();
+        logs = messagingService.metrics.droppedMessages.getLogs();
         assertEquals(0, logs.size());
 
         for (int i = 0; i < 2500; i++)
-            messagingService.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
+            messagingService.metrics.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
 
-        logs = messagingService.droppedMessages.getLogs();
+        logs = messagingService.metrics.droppedMessages.getLogs();
         assertEquals(1, logs.size());
         matcher = regexp.matcher(logs.get(0));
         assertTrue(matcher.find());
@@ -146,14 +146,14 @@ public class MessagingServiceTest
         assertEquals(1250, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(7500, (int) messagingService.droppedMessages.getDroppedMessages().get(verb.toString()));
+        assertEquals(7500, (int) messagingService.metrics.droppedMessages.getDroppedMessages().get(verb.toString()));
     }
 
     @Test
     public void testDCLatency() throws Exception
     {
         int latency = 100;
-        ConcurrentHashMap<String, MessagingMetrics.Updater> dcLatency = MessagingService.instance().metrics.dcUpdaters;
+        ConcurrentHashMap<String, MessagingMetrics.DCLatencyRecorder> dcLatency = MessagingService.instance().metrics.dcLatency;
         dcLatency.clear();
 
         long now = ApproximateTime.currentTimeMillis();
@@ -169,7 +169,7 @@ public class MessagingServiceTest
     @Test
     public void testNegativeDCLatency()
     {
-        MessagingMetrics.Updater updater = MessagingService.instance().metrics.getForPeer(InetAddressAndPort.getLocalHost());
+        MessagingMetrics.DCLatencyRecorder updater = MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost());
 
         // if clocks are off should just not track anything
         int latency = -100;
@@ -178,7 +178,7 @@ public class MessagingServiceTest
         long sentAt = now - latency;
 
         long count = updater.dcLatency.getCount();
-        updater.addTimeTaken(now - sentAt, MILLISECONDS);
+        updater.accept(now - sentAt, MILLISECONDS);
         // negative value shoudln't be recorded
         assertEquals(count, updater.dcLatency.getCount());
     }
@@ -189,8 +189,8 @@ public class MessagingServiceTest
         int latency = 100;
         Verb verb = Verb.MUTATION_REQ;
 
-        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
-        MessagingService.instance().metrics.addQueueWaitTime(verb, latency, MILLISECONDS);
+        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.internalLatency;
+        MessagingService.instance().metrics.recordInternalLatency(verb, latency, MILLISECONDS);
         assertEquals(1, queueWaitLatency.get(verb).getCount());
         long expectedBucket = bucketOffsets[Math.abs(Arrays.binarySearch(bucketOffsets, MILLISECONDS.toNanos(latency))) - 1];
         assertEquals(expectedBucket, queueWaitLatency.get(verb).getSnapshot().getMax());
@@ -202,11 +202,11 @@ public class MessagingServiceTest
         int latency = -100;
         Verb verb = Verb.MUTATION_REQ;
 
-        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.queueWaitLatency;
+        Map<Verb, Timer> queueWaitLatency = MessagingService.instance().metrics.internalLatency;
         queueWaitLatency.clear();
 
         assertNull(queueWaitLatency.get(verb));
-        MessagingService.instance().metrics.addQueueWaitTime(verb, latency, MILLISECONDS);
+        MessagingService.instance().metrics.recordInternalLatency(verb, latency, MILLISECONDS);
         assertNull(queueWaitLatency.get(verb));
     }
 
@@ -301,7 +301,7 @@ public class MessagingServiceTest
 
     private static void addDCLatency(long sentAt, long nowTime) throws IOException
     {
-        MessagingService.instance().metrics.getForPeer(InetAddressAndPort.getLocalHost()).addTimeTaken(nowTime - sentAt, MILLISECONDS);
+        MessagingService.instance().metrics.internodeLatencyRecorder(InetAddressAndPort.getLocalHost()).accept(nowTime - sentAt, MILLISECONDS);
     }
 
     public static class MockBackPressureStrategy implements BackPressureStrategy<MockBackPressureStrategy.MockBackPressureState>

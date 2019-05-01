@@ -52,7 +52,7 @@ public abstract class Sampler<T>
     {
         samplerExecutor.setRejectedExecutionHandler((runnable, executor) ->
         {
-            MessagingService.instance().droppedMessages.increment(Verb._SAMPLE);
+            MessagingService.instance().metrics.droppedMessages.increment(Verb._SAMPLE);
         });
     }
 

@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.repair;
 
-import java.io.IOException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -54,10 +53,8 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ResponseVerbHandler;
-import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -158,7 +155,8 @@ public class RepairJobTest
     public void reset()
     {
         ActiveRepairService.instance.terminateSessions();
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
+        MessagingService.instance().inboundSink.clear();
         FBUtilities.reset();
     }
 
@@ -796,43 +794,35 @@ public class RepairJobTest
     private void interceptRepairMessages(Map<InetAddressAndPort, MerkleTrees> mockTrees,
                                          List<Message<?>> messageCapture)
     {
-        MessagingService.instance().messageSink.add(new MessageSink.Sink()
-        {
-            public boolean allowOutbound(Message<?> message, InetAddressAndPort to)
-            {
-                if (message == null || !(message.payload instanceof RepairMessage))
-                    return false;
-
-                // So different Thread's messages don't overwrite each other.
-                synchronized (messageLock)
-                {
-                    messageCapture.add(message);
-                }
-
-                RepairMessage rm = (RepairMessage) message.payload;
-                switch (rm.messageType)
-                {
-                    case SNAPSHOT:
-                        ResponseVerbHandler.instance.doVerb(message.emptyResponse());
-                        break;
-                    case VALIDATION_REQUEST:
-                        session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
-                        break;
-                    case SYNC_REQUEST:
-                        SyncRequest syncRequest = (SyncRequest) rm;
-                        session.syncComplete(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst),
-                                             true, Collections.emptyList());
-                        break;
-                    default:
-                        break;
-                }
+        MessagingService.instance().inboundSink.add(message -> message.verb().isResponse());
+        MessagingService.instance().outboundSink.add((message, to) -> {
+            if (message == null || !(message.payload instanceof RepairMessage))
                 return false;
+
+            // So different Thread's messages don't overwrite each other.
+            synchronized (messageLock)
+            {
+                messageCapture.add(message);
             }
 
-            public boolean allowInbound(Message<?> message)
+            RepairMessage rm = (RepairMessage) message.payload;
+            switch (rm.messageType)
             {
-                return message.verb().isResponse();
+                case SNAPSHOT:
+                    ResponseVerbHandler.instance.doVerb(message.emptyResponse());
+                    break;
+                case VALIDATION_REQUEST:
+                    session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
+                    break;
+                case SYNC_REQUEST:
+                    SyncRequest syncRequest = (SyncRequest) rm;
+                    session.syncComplete(sessionJobDesc, new SyncNodePair(syncRequest.src, syncRequest.dst),
+                                         true, Collections.emptyList());
+                    break;
+                default:
+                    break;
             }
+            return false;
         });
     }
 }

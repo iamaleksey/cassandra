@@ -28,9 +28,11 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
+import org.apache.cassandra.metrics.MessagingMetrics;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.security.SSLFactory;
+import org.apache.cassandra.utils.MBeanWrapper;
 
 public class MessagingServiceMBeanImpl implements MessagingServiceMBean
 {
@@ -42,9 +44,17 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     public final ConcurrentMap<InetAddressAndPort, InboundMessageHandlers> messageHandlers = new ConcurrentHashMap<>();
 
     public final EndpointMessagingVersions versions = new EndpointMessagingVersions();
-    public final DroppedMessages droppedMessages = new DroppedMessages();
+    public final MessagingMetrics metrics = new MessagingMetrics();
 
     // TODO: should we add all of the new metrics here, too?
+    MessagingServiceMBeanImpl(boolean testOnly)
+    {
+        if (!testOnly)
+        {
+            MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
+            metrics.droppedMessages.scheduleLogging();
+        }
+    }
 
     @Override
     public Map<String, Integer> getLargeMessagePendingTasks()
@@ -211,7 +221,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     @Override
     public Map<String, Integer> getDroppedMessages()
     {
-        return droppedMessages.getDroppedMessages();
+        return metrics.droppedMessages.getDroppedMessages();
     }
 
     @Override

@@ -29,6 +29,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
+import java.util.function.BiPredicate;
 
 import org.slf4j.LoggerFactory;
 
@@ -67,10 +68,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessageSink;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundMessageCallbacks;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ActiveRepairService;
@@ -181,16 +179,16 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
                 deliverToInstance.accept(to, message);
         };
 
-        MessagingService.instance().messageSink.addOutbound(new MessageDeliverySink(deliverToInstanceIfNotFiltered));
+        MessagingService.instance().outboundSink.add(new MessageDeliverySink(deliverToInstanceIfNotFiltered));
     }
 
     // unnecessary if registerMockMessaging used
     private void registerFilter(ICluster cluster)
     {
-        MessagingService.instance().messageSink.addOutbound((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb().id));
+        MessagingService.instance().outboundSink.add((message, to) -> cluster.filters().permit(this, cluster.get(to), message.verb().id));
     }
 
-    private class MessageDeliverySink implements MessageSink.OutboundSink
+    private class MessageDeliverySink implements BiPredicate<Message<?>, InetAddressAndPort>
     {
         private final BiConsumer<InetAddressAndPort, IMessage> deliver;
         MessageDeliverySink(BiConsumer<InetAddressAndPort, IMessage> deliver)
@@ -199,7 +197,7 @@ public class Instance extends IsolatedExecutor implements IInvokableInstance
         }
 
         @Override
-        public boolean allowOutbound(Message<?> messageOut, InetAddressAndPort to)
+        public boolean test(Message<?> messageOut, InetAddressAndPort to)
         {
             try (DataOutputBuffer out = new DataOutputBuffer(1024))
             {

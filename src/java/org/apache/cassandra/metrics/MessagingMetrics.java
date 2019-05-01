@@ -25,41 +25,45 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 
 import com.codahale.metrics.Timer;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.DroppedMessages;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.apache.cassandra.net.async.LatencyConsumer;
 
 import static org.apache.cassandra.metrics.CassandraMetricsRegistry.Metrics;
 
 /**
  * Metrics for messages
  */
-public class MessagingMetrics
+public class MessagingMetrics implements InboundMessageHandlers.GlobalMetricCallbacks
 {
     private static final MetricNameFactory factory = new DefaultNameFactory("Messaging");
     private final Timer allLatency;
-    public final ConcurrentHashMap<String, Updater> dcUpdaters;
-    public final EnumMap<Verb, Timer> queueWaitLatency;
+    public final ConcurrentHashMap<String, DCLatencyRecorder> dcLatency;
+    public final EnumMap<Verb, Timer> internalLatency;
+    public final DroppedMessages droppedMessages = new DroppedMessages();
 
     public MessagingMetrics()
     {
         allLatency = Metrics.timer(factory.createMetricName("CrossNodeLatency"));
-        dcUpdaters = new ConcurrentHashMap<>();
-        queueWaitLatency = new EnumMap<>(Verb.class);
+        dcLatency = new ConcurrentHashMap<>();
+        internalLatency = new EnumMap<>(Verb.class);
         for (Verb verb : Verb.VERBS)
-            queueWaitLatency.put(verb, Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
+            internalLatency.put(verb, Metrics.timer(factory.createMetricName(verb + "-WaitLatency")));
     }
 
-    public static class Updater
+    public static class DCLatencyRecorder implements LatencyConsumer
     {
         public final Timer dcLatency;
         public final Timer allLatency;
 
-        public Updater(Timer dcLatency, Timer allLatency)
+        DCLatencyRecorder(Timer dcLatency, Timer allLatency)
         {
             this.dcLatency = dcLatency;
             this.allLatency = allLatency;
         }
 
-        public void addTimeTaken(long timeTaken, TimeUnit units)
+        public void accept(long timeTaken, TimeUnit units)
         {
             if (timeTaken > 0)
             {
@@ -69,18 +73,23 @@ public class MessagingMetrics
         }
     }
 
-    public Updater getForPeer(InetAddressAndPort from)
+    public DCLatencyRecorder internodeLatencyRecorder(InetAddressAndPort from)
     {
         String dcName = DatabaseDescriptor.getEndpointSnitch().getDatacenter(from);
-        Updater dcUpdater = dcUpdaters.get(dcName);
+        DCLatencyRecorder dcUpdater = dcLatency.get(dcName);
         if (dcUpdater == null)
-            dcUpdater = dcUpdaters.computeIfAbsent(dcName, k -> new Updater(Metrics.timer(factory.createMetricName(dcName + "-Latency")), allLatency));
+            dcUpdater = dcLatency.computeIfAbsent(dcName, k -> new DCLatencyRecorder(Metrics.timer(factory.createMetricName(dcName + "-Latency")), allLatency));
         return dcUpdater;
     }
 
-    public void addQueueWaitTime(Verb verb, long timeTaken, TimeUnit units)
+    public void recordInternalLatency(Verb verb, long timeTaken, TimeUnit units)
     {
         if (timeTaken > 0)
-            queueWaitLatency.get(verb).update(timeTaken, units);
+            internalLatency.get(verb).update(timeTaken, units);
+    }
+
+    public void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit)
+    {
+        droppedMessages.incrementWithLatency(verb, timeElapsed, timeUnit);
     }
 }

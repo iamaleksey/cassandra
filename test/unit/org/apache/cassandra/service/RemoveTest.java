@@ -98,7 +98,8 @@ public class RemoveTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().inboundSink.clear();
+        MessagingService.instance().outboundSink.clear();
         MessagingService.instance().callbacks.unsafeClear();
     }
 

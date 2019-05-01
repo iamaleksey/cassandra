@@ -23,6 +23,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BiPredicate;
 
 import org.junit.After;
 import org.junit.Assert;
@@ -105,14 +106,14 @@ public class StartupClusterConnectivityCheckerTest
     @After
     public void tearDown()
     {
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
     }
 
     @Test
     public void execute_HappyPath()
     {
         Sink sink = new Sink(true, true, peers);
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().outboundSink.add(sink);
         Assert.assertTrue(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
     }
 
@@ -120,7 +121,7 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_NotAlive()
     {
         Sink sink = new Sink(false, true, peers);
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().outboundSink.add(sink);
         Assert.assertFalse(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
     }
 
@@ -128,7 +129,7 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_NoConnectionsAcks()
     {
         Sink sink = new Sink(true, false, peers);
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().outboundSink.add(sink);
         Assert.assertFalse(localQuorumConnectivityChecker.execute(peers, this::getDatacenter));
     }
 
@@ -181,18 +182,18 @@ public class StartupClusterConnectivityCheckerTest
     public void execute_ZeroWaitHasConnections() throws InterruptedException
     {
         Sink sink = new Sink(true, true, new HashSet<>());
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().outboundSink.add(sink);
         Assert.assertFalse(zeroWaitChecker.execute(peers, this::getDatacenter));
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
     }
 
     private void checkAvailable(StartupClusterConnectivityChecker checker, Set<InetAddressAndPort> available,
                                 boolean shouldPass)
     {
         Sink sink = new Sink(true, true, available);
-        MessagingService.instance().messageSink.add(sink);
+        MessagingService.instance().outboundSink.add(sink);
         Assert.assertEquals(shouldPass, checker.execute(peers, this::getDatacenter));
-        MessagingService.instance().messageSink.clear();
+        MessagingService.instance().outboundSink.clear();
     }
 
     private void copyCount(Set<InetAddressAndPort> source, Set<InetAddressAndPort> dest, int count)
@@ -207,7 +208,7 @@ public class StartupClusterConnectivityCheckerTest
         }
     }
 
-    private static class Sink implements MessageSink.Sink
+    private static class Sink implements BiPredicate<Message<?>, InetAddressAndPort>
     {
         private final boolean markAliveInGossip;
         private final boolean processConnectAck;
@@ -223,7 +224,7 @@ public class StartupClusterConnectivityCheckerTest
         }
 
         @Override
-        public boolean allowOutbound(Message message, InetAddressAndPort to)
+        public boolean test(Message message, InetAddressAndPort to)
         {
             ConnectionTypeRecorder recorder = seenConnectionRequests.computeIfAbsent(to, inetAddress ->  new ConnectionTypeRecorder());
 
@@ -240,12 +241,6 @@ public class StartupClusterConnectivityCheckerTest
 
             if (markAliveInGossip)
                 Gossiper.runInGossipStageBlocking(() -> Gossiper.instance.realMarkAlive(to, new EndpointState(new HeartBeatState(1, 1))));
-            return false;
-        }
-
-        @Override
-        public boolean allowInbound(Message message)
-        {
             return false;
         }
     }
