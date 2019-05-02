@@ -39,6 +39,7 @@ import org.apache.cassandra.net.MessagingService.AcceptVersions;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
 import static org.apache.cassandra.net.async.Crc.*;
@@ -356,7 +357,8 @@ public class HandshakeProtocol
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
             {
                 out.writeInt(maxMessagingVersion);
-                CompactEndpointSerializationHelper.instance.serialize(from, out, maxMessagingVersion);
+                // pre-4.0 nodes should only receive the address, never port, and it's ok to hardcode VERSION_30
+                CompactEndpointSerializationHelper.instance.serialize(from, out, VERSION_30);
                 buffer.flip();
                 return GlobalBufferPoolAllocator.wrap(buffer);
             }
