@@ -288,6 +288,11 @@ public class HandshakeProtocol
                 return null;
             int maxMessagingVersion = in.readInt();
             int useMessagingVersion = 0;
+
+            // if the other node is pre-4.0, it will respond only with its maxMessagingVersion
+            if (maxMessagingVersion < VERSION_40)
+                return new Accept(useMessagingVersion, maxMessagingVersion);
+
             if (handshakeMessagingVersion >= VERSION_40)
             {
                 if (in.readableBytes() < 8)
