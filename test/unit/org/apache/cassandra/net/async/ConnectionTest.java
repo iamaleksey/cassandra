@@ -278,12 +278,19 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 10;
-            CountDownLatch done = new CountDownLatch(count);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
+
+            CountDownLatch deliveryDone = new CountDownLatch(1);
+            CountDownLatch receiveDone = new CountDownLatch(count);
+
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> receiveDone.countDown());
             Message<?> message = Message.out(Verb._TEST_1, noPayload);
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            Assert.assertTrue(done.await(1, MINUTES));
+
+            Assert.assertTrue(receiveDone.await(10, SECONDS));
+            outbound.unsafeRunOnDelivery(deliveryDone::countDown);
+            Assert.assertTrue(deliveryDone.await(10, SECONDS));
+
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
@@ -306,8 +313,10 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 10;
-            CountDownLatch receiveDone = new CountDownLatch(count);
+
             CountDownLatch deliveryDone = new CountDownLatch(1);
+            CountDownLatch receiveDone = new CountDownLatch(count);
+
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {
                 public void serialize(Object noPayload, DataOutputPlus out, int version) throws IOException
@@ -335,6 +344,7 @@ public class ConnectionTest
 
             outbound.unsafeRunOnDelivery(deliveryDone::countDown);
             Assert.assertTrue(deliveryDone.await(10, SECONDS));
+
             check(outbound).submitted(10)
                            .sent     (10, 10 * message.serializedSize(version))
                            .pending  ( 0,  0)
