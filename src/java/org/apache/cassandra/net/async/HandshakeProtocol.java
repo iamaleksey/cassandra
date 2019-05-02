@@ -292,23 +292,22 @@ public class HandshakeProtocol
             int useMessagingVersion = 0;
 
             // if the other node is pre-4.0, it will respond only with its maxMessagingVersion
-            if (maxMessagingVersion < VERSION_40)
+            if (maxMessagingVersion < VERSION_40 || handshakeMessagingVersion < VERSION_40)
                 return new Accept(useMessagingVersion, maxMessagingVersion);
 
-            if (handshakeMessagingVersion >= VERSION_40)
+            if (in.readableBytes() < 8)
             {
-                if (in.readableBytes() < 8)
-                {
-                    in.readerIndex(readerIndex);
-                    return null;
-                }
-                useMessagingVersion = in.readInt();
-                // verify crc
-                int computed = computeCrc32(in, readerIndex, readerIndex + 8);
-                int read = in.readInt();
-                if (read != computed)
-                    throw new InvalidCrc(read, computed);
+                in.readerIndex(readerIndex);
+                return null;
             }
+            useMessagingVersion = in.readInt();
+
+            // verify crc
+            int computed = computeCrc32(in, readerIndex, readerIndex + 8);
+            int read = in.readInt();
+            if (read != computed)
+                throw new InvalidCrc(read, computed);
+
             return new Accept(useMessagingVersion, maxMessagingVersion);
         }
 
