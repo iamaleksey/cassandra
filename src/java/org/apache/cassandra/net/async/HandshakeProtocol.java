@@ -144,7 +144,8 @@ public class HandshakeProtocol
             {
                 out.writeInt(Message.PROTOCOL_MAGIC);
                 out.writeInt(encodeFlags());
-                if (acceptVersions.max >= VERSION_40)
+
+                if (requestMessagingVersion >= VERSION_40 && acceptVersions.max >= VERSION_40)
                 {
                     CompactEndpointSerializationHelper.instance.serialize(from, out, requestMessagingVersion);
                     out.writeInt(computeCrc32(buffer, 0, buffer.position()));
@@ -183,7 +184,7 @@ public class HandshakeProtocol
 
                 InetAddressAndPort from = null;
 
-                if (maxMessagingVersion >= MessagingService.VERSION_40)
+                if (requestedMessagingVersion >= VERSION_40 && maxMessagingVersion >= MessagingService.VERSION_40)
                 {
                     from = CompactEndpointSerializationHelper.instance.deserialize(in, requestedMessagingVersion);
 
