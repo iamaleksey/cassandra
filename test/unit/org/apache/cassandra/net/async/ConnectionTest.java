@@ -435,7 +435,10 @@ public class ConnectionTest
         test((inbound, outbound, endpoint) -> {
             int version = outbound.settings().acceptVersions.max;
             int count = 100;
-            CountDownLatch done = new CountDownLatch(100);
+
+            CountDownLatch deliveryDone = new CountDownLatch(1);
+            CountDownLatch receiveDone = new CountDownLatch(100);
+
             AtomicInteger serialized = new AtomicInteger();
             Message<?> message = Message.builder(Verb._TEST_1, new Object())
                                         .withExpiresAt(System.nanoTime() + SECONDS.toNanos(30L))
@@ -449,13 +452,13 @@ public class ConnectionTest
                     {
                         if (0 == (i & 16))
                             out.writeByte(i);
-                        done.countDown();
+                        receiveDone.countDown();
                         throw new IOException();
                     }
                     if (1 != (i & 31))
                         out.writeByte(i);
                     else
-                        done.countDown();
+                        receiveDone.countDown();
                 }
 
                 public Object deserialize(DataInputPlus in, int version) throws IOException
@@ -469,11 +472,15 @@ public class ConnectionTest
                     return 1;
                 }
             });
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> done.countDown());
+
+            unsafeSetHandler(Verb._TEST_1, () -> msg -> receiveDone.countDown());
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);
-            Assert.assertTrue(done.await(1, MINUTES));
-            Assert.assertEquals(0, done.getCount());
+
+            Assert.assertTrue(receiveDone.await(1, MINUTES));
+            outbound.unsafeRunOnDelivery(deliveryDone::countDown);
+            Assert.assertTrue(deliveryDone.await(10, SECONDS));
+
             check(outbound).submitted(100)
                            .sent     ( 90, 90 * message.serializedSize(version))
                            .pending  (  0,  0)
