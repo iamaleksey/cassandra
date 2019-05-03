@@ -571,7 +571,7 @@ public class OutboundConnection
         public void run()
         {
             /* do/while handling setup for {@link #doRun()}, and repeat invocations thereof */
-            do
+            while (true)
             {
                 if (terminated)
                     return;
@@ -592,7 +592,8 @@ public class OutboundConnection
                     stopAndRun.getAndSet(null).run();
                 }
 
-                if (!isConnected())
+                Channel channel = OutboundConnection.this.channel;
+                if (!isConnected() || !isConnected(channel))
                 {
                     // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
                     // we try to reconnect before running another stopAndRun so that we do not infinite loop in close
@@ -603,8 +604,10 @@ public class OutboundConnection
                     }
                     break;
                 }
+
+                if (!doRun(channel))
+                    break;
             }
-            while (doRun());
 
             maybeExecuteAgain();
         }
@@ -613,7 +616,7 @@ public class OutboundConnection
          * @return true if we should run again immediately;
          *         always false for eventLoop executor, as want to service other channels
          */
-        abstract boolean doRun();
+        abstract boolean doRun(Channel channel);
 
         /**
          * Schedule a task to run later on the delivery thread while delivery is not in progress,
@@ -669,7 +672,7 @@ public class OutboundConnection
          * If there is more work to be done, we submit ourselves for execution once the eventLoop has time.
          */
         @SuppressWarnings("resource")
-        boolean doRun()
+        boolean doRun(Channel channel)
         {
             if (!isWritable)
                 return false;
@@ -772,7 +775,6 @@ public class OutboundConnection
                     int releaseBytesFinal = canonicalSize;
                     int sendingBytesFinal = sendingBytes;
                     int sendingCountFinal = sendingCount;
-                    Channel closeChannelOnFailure = channel;
                     flushResult.addListener(future -> {
 
                         releaseCapacity(sendingCountFinal, releaseBytesFinal);
@@ -796,7 +798,7 @@ public class OutboundConnection
                         {
                             errorCount += sendingCountFinal;
                             errorBytes += sendingBytesFinal;
-                            invalidateChannel(closeChannelOnFailure, future.cause());
+                            invalidateChannel(channel, future.cause());
                             callbacks.onFailedFrame(sendingCountFinal, sendingBytesFinal);
                         }
                     });
@@ -877,7 +879,7 @@ public class OutboundConnection
         }
 
         @SuppressWarnings("resource") // this suppression is for the ecj compiler
-        boolean doRun()
+        boolean doRun(Channel channel)
         {
             Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
             if (send == null)
@@ -1428,9 +1430,7 @@ public class OutboundConnection
     private String id()
     {
         Channel channel = this.channel;
-        String channelId = isConnected() && isConnected(channel)
-                           ? channel.id().asShortText()
-                           : "[no-channel]";
+        String channelId = channel != null ? channel.id().asShortText() : "[no-channel]";
         return SocketFactory.channelId(settings.from, settings.to, type, channelId);
     }
 
