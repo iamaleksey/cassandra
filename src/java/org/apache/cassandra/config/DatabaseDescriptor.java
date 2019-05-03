@@ -1916,6 +1916,12 @@ public class DatabaseDescriptor
         return conf.internode_max_message_size_in_bytes;
     }
 
+    @VisibleForTesting
+    public static void setInternodeMaxMessageSizeInBytes(int value)
+    {
+        conf.internode_max_message_size_in_bytes = value;
+    }
+
     public static boolean startNativeTransport()
     {
         return conf.start_native_transport;

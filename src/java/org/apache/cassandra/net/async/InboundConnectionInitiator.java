@@ -22,6 +22,7 @@ import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.util.List;
 import java.util.concurrent.Future;
+import java.util.function.Consumer;
 
 import javax.net.ssl.SSLSession;
 
@@ -71,11 +72,14 @@ public class InboundConnectionInitiator
     {
         private final InboundConnectionSettings settings;
         private final ChannelGroup channelGroup;
+        private final Consumer<ChannelPipeline> pipelineInjector;
 
-        Initializer(InboundConnectionSettings settings, ChannelGroup channelGroup)
+        Initializer(InboundConnectionSettings settings, ChannelGroup channelGroup,
+                    Consumer<ChannelPipeline> pipelineInjector)
         {
             this.settings = settings;
             this.channelGroup = channelGroup;
+            this.pipelineInjector = pipelineInjector;
         }
 
         @Override
@@ -89,6 +93,8 @@ public class InboundConnectionInitiator
             channel.config().setOption(ChannelOption.TCP_NODELAY, true); // we only send handshake messages; no point ever delaying
 
             ChannelPipeline pipeline = channel.pipeline();
+
+            pipelineInjector.accept(pipeline);
 
             // order of handlers: ssl -> logger -> handshakeHandler
             if (settings.encryption.enabled)
@@ -111,6 +117,7 @@ public class InboundConnectionInitiator
                 pipeline.addLast("logger", new LoggingHandler(LogLevel.INFO));
 
             channel.pipeline().addLast("handshake", new Handler(settings));
+
         }
     }
 
@@ -166,9 +173,10 @@ public class InboundConnectionInitiator
         return channelFuture;
     }
 
-    public static ChannelFuture bind(InboundConnectionSettings settings, ChannelGroup channelGroup)
+    public static ChannelFuture bind(InboundConnectionSettings settings, ChannelGroup channelGroup,
+                                     Consumer<ChannelPipeline> pipelineInjector)
     {
-        return bind(new Initializer(settings, channelGroup));
+        return bind(new Initializer(settings, channelGroup, pipelineInjector));
     }
 
     /**
@@ -411,6 +419,7 @@ public class InboundConnectionInitiator
             else
                 frameDecoder = new FrameDecoderLegacy(allocator, useMessagingVersion);
 
+            System.out.println("frameDecoder = " + frameDecoder);
             frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =

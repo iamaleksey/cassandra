@@ -20,12 +20,14 @@ package org.apache.cassandra.net.async;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelPipeline;
 import io.netty.channel.group.ChannelGroup;
 import io.netty.channel.group.DefaultChannelGroup;
 import io.netty.util.concurrent.DefaultEventExecutor;
@@ -77,6 +79,11 @@ public class InboundSockets
 
         private Future<Void> open()
         {
+            return open(pipeline -> {});
+        }
+
+        private Future<Void> open(Consumer<ChannelPipeline> pipelineInjector)
+        {
             synchronized (this)
             {
                 if (listen != null)
@@ -85,7 +92,7 @@ public class InboundSockets
                     return binding;
                 if (closedWithoutOpening)
                     throw new IllegalStateException();
-                binding = InboundConnectionInitiator.bind(settings, connections);
+                binding = InboundConnectionInitiator.bind(settings, connections, pipelineInjector);
             }
 
             return binding.addListener(ignore -> {
@@ -183,6 +190,14 @@ public class InboundSockets
             out.add(new InboundSocket(template.withLegacyDefaults()));
     }
 
+    public Future<Void> open(Consumer<ChannelPipeline> pipelineInjector)
+    {
+        List<Future<Void>> opening = new ArrayList<>();
+        for (InboundSocket socket : sockets)
+            opening.add(socket.open(pipelineInjector));
+
+        return new FutureCombiner(opening);
+    }
     public Future<Void> open()
     {
         List<Future<Void>> opening = new ArrayList<>();
