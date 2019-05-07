@@ -22,16 +22,13 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.function.Consumer;
 import java.util.function.ToLongFunction;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
-import net.openhft.chronicle.core.util.ThrowingConsumer;
-import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
-import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message;
@@ -66,7 +63,7 @@ public final class InboundMessageHandlers
     private final InboundMessageCallbacks legacyCallbacks;
 
     private final InternodeInboundMetrics metrics;
-    private final MessageSink messageSink;
+    private final MessageConsumer messageConsumer;
 
     private final HandlerProvider handlerProvider;
     private final Collection<InboundMessageHandler> handlers = new CopyOnWriteArrayList<>();
@@ -83,7 +80,7 @@ public final class InboundMessageHandlers
         }
     }
 
-    public interface MessageSink extends ThrowingConsumer<Message<?>, Throwable>
+    public interface MessageConsumer extends Consumer<Message<?>>
     {
         void fail(Message.Header header, Throwable failure);
     }
@@ -101,9 +98,9 @@ public final class InboundMessageHandlers
                                   long endpointReserveCapacity,
                                   GlobalResourceLimits globalResourceLimits,
                                   GlobalMetricCallbacks globalMetricCallbacks,
-                                  MessageSink messageSink)
+                                  MessageConsumer messageConsumer)
     {
-        this(self, peer, queueCapacity, endpointReserveCapacity, globalResourceLimits, globalMetricCallbacks, messageSink, InboundMessageHandler::new);
+        this(self, peer, queueCapacity, endpointReserveCapacity, globalResourceLimits, globalMetricCallbacks, messageConsumer, InboundMessageHandler::new);
     }
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -112,7 +109,7 @@ public final class InboundMessageHandlers
                                   long endpointReserveCapacity,
                                   GlobalResourceLimits globalResourceLimits,
                                   GlobalMetricCallbacks globalMetricCallbacks,
-                                  MessageSink messageSink,
+                                  MessageConsumer messageConsumer,
                                   HandlerProvider handlerProvider)
     {
         this.self = self;
@@ -123,14 +120,14 @@ public final class InboundMessageHandlers
         this.globalReserveCapacity = globalResourceLimits.reserveCapacity;
         this.endpointWaitQueue = InboundMessageHandler.WaitQueue.endpoint(this.endpointReserveCapacity);
         this.globalWaitQueue = globalResourceLimits.waitQueue;
-        this.messageSink = messageSink;
+        this.messageConsumer = messageConsumer;
 
         this.handlerProvider = handlerProvider;
 
-        urgentCallbacks = makeMessageCallbacks(peer, urgentCounters, globalMetricCallbacks, messageSink);
-        smallCallbacks  = makeMessageCallbacks(peer, smallCounters, globalMetricCallbacks, messageSink);
-        largeCallbacks  = makeMessageCallbacks(peer, largeCounters, globalMetricCallbacks, messageSink);
-        legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageSink);
+        urgentCallbacks = makeMessageCallbacks(peer, urgentCounters, globalMetricCallbacks, messageConsumer);
+        smallCallbacks  = makeMessageCallbacks(peer, smallCounters, globalMetricCallbacks, messageConsumer);
+        largeCallbacks  = makeMessageCallbacks(peer, largeCounters, globalMetricCallbacks, messageConsumer);
+        legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageConsumer);
 
         metrics = new InternodeInboundMetrics(peer, this);
     }
@@ -155,8 +152,7 @@ public final class InboundMessageHandlers
 
                                     this::onHandlerClosed,
                                     callbacksFor(type),
-                                    messageSink
-                                    );
+                                    messageConsumer);
         handlers.add(handler);
         return handler;
     }
@@ -189,7 +185,7 @@ public final class InboundMessageHandlers
         throw new IllegalArgumentException();
     }
 
-    private static InboundMessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters, GlobalMetricCallbacks globalMetrics, MessageSink messageSink)
+    private static InboundMessageCallbacks makeMessageCallbacks(InetAddressAndPort peer, InboundCounters counters, GlobalMetricCallbacks globalMetrics, MessageConsumer messageConsumer)
     {
         LatencyConsumer internodeLatency = globalMetrics.internodeLatencyRecorder(peer);
 
@@ -212,7 +208,7 @@ public final class InboundMessageHandlers
                  * If an exception is caught during deser, return a failure response immediately
                  * instead of waiting for the callback on the other end to expire.
                  */
-                messageSink.fail(header, t);
+                messageConsumer.fail(header, t);
             }
 
             @Override
@@ -233,19 +229,6 @@ public final class InboundMessageHandlers
             public void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 globalMetrics.recordInternalLatency(header.verb, timeElapsed, unit);
-            }
-
-            @Override
-            public void onProcessingException(int messageSize, Header header, Throwable t)
-            {
-                messageSink.fail(header, t);
-
-                if (t instanceof TombstoneOverwhelmingException || t instanceof IndexNotAvailableException)
-                    noSpamLogger.error(t.getMessage());
-                else if (t instanceof RuntimeException)
-                    throw (RuntimeException) t;
-                else
-                    throw new RuntimeException(t);
             }
 
             @Override
@@ -425,6 +408,6 @@ public final class InboundMessageHandlers
 
                                       InboundMessageHandler.OnHandlerClosed onClosed,
                                       InboundMessageCallbacks callbacks,
-                                      ThrowingConsumer<Message<?>, ?> messageSink);
+                                      Consumer<Message<?>> consumer);
     }
 }

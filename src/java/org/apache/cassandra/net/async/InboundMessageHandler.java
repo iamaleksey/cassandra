@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -36,7 +37,6 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
-import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.concurrent.ExecutorLocals;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.exceptions.UnknownColumnException;
@@ -104,7 +104,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final OnHandlerClosed onClosed;
     private final InboundMessageCallbacks callbacks;
-    private final ThrowingConsumer<Message<?>, ?> messageSink;
+    private final Consumer<Message<?>> consumer;
 
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
@@ -133,7 +133,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                           OnHandlerClosed onClosed,
                           InboundMessageCallbacks callbacks,
-                          ThrowingConsumer<Message<?>, ?> messageSink)
+                          Consumer<Message<?>> consumer)
     {
         this.decoder = decoder;
 
@@ -152,7 +152,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         this.onClosed = onClosed;
         this.callbacks = callbacks;
-        this.messageSink = messageSink;
+        this.consumer = consumer;
     }
 
     @Override
@@ -760,14 +760,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                     Message message = provideMessage();
                     if (null != message)
                     {
-                        try
-                        {
-                            messageSink.accept(message);
-                        }
-                        catch (Throwable t)
-                        {
-                            callbacks.onProcessingException(size, header, t);
-                        }
+                        consumer.accept(message);
                         processed = true;
                     }
                 }

@@ -19,14 +19,23 @@
 package org.apache.cassandra.net;
 
 import java.io.IOException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Predicate;
 
-import net.openhft.chronicle.core.util.ThrowingConsumer;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.slf4j.LoggerFactory;
 
-public abstract class InboundSink implements InboundMessageHandlers.MessageSink
+import net.openhft.chronicle.core.util.ThrowingConsumer;
+import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.index.IndexNotAvailableException;
+import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.apache.cassandra.utils.NoSpamLogger;
+
+public abstract class InboundSink implements InboundMessageHandlers.MessageConsumer
 {
+    private static final NoSpamLogger noSpamLogger =
+        NoSpamLogger.getLogger(LoggerFactory.getLogger(InboundSink.class), 1L, TimeUnit.SECONDS);
+
     private static class Filtered implements ThrowingConsumer<Message<?>, IOException>
     {
         final Predicate<Message<?>> condition;
@@ -54,9 +63,23 @@ public abstract class InboundSink implements InboundMessageHandlers.MessageSink
         this.sink = sink;
     }
 
-    public void accept(Message<?> message) throws IOException
+    public void accept(Message<?> message)
     {
-        sink.accept(message);
+        try
+        {
+            sink.accept(message);
+        }
+        catch (Throwable t)
+        {
+            fail(message.header, t);
+
+            if (t instanceof TombstoneOverwhelmingException || t instanceof IndexNotAvailableException)
+                noSpamLogger.error(t.getMessage());
+            else if (t instanceof RuntimeException)
+                throw (RuntimeException) t;
+            else
+                throw new RuntimeException(t);
+        }
     }
 
     public void add(Predicate<Message<?>> allow)

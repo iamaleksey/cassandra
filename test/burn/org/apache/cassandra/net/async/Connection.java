@@ -152,10 +152,6 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         verifier.onProcessed(message);
     }
 
-    public void onProcessingException(int messageSize, Message.Header header, Throwable t)
-    {
-    }
-
     public void onProcessed(int messageSize, Message.Header header)
     {
     }

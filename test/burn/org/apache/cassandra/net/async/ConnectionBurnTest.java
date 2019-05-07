@@ -20,7 +20,6 @@ package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 import java.net.UnknownHostException;
-import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -34,7 +33,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.function.Function;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -43,7 +42,6 @@ import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import io.netty.channel.Channel;
-import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -105,7 +103,7 @@ public class ConnectionBurnTest
     }
 
 
-    private static class Test implements InboundMessageHandlers.HandlerProvider, InboundMessageHandlers.MessageSink
+    private static class Test implements InboundMessageHandlers.HandlerProvider, InboundMessageHandlers.MessageConsumer
     {
         private final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
         {
@@ -307,12 +305,6 @@ public class ConnectionBurnTest
                 wrapped.onExecuting(messageSize, header, timeElapsed, unit);
             }
 
-            public void onProcessingException(int messageSize, Message.Header header, Throwable t)
-            {
-                forId(header.id).onProcessingException(messageSize, header, t);
-                wrapped.onProcessingException(messageSize, header, t);
-            }
-
             public void onProcessed(int messageSize, Message.Header header)
             {
                 forId(header.id).onProcessed(messageSize, header);
@@ -368,7 +360,7 @@ public class ConnectionBurnTest
             InboundMessageHandler.WaitQueue globalWaitQueue,
             InboundMessageHandler.OnHandlerClosed onClosed,
             InboundMessageCallbacks callbacks,
-            ThrowingConsumer<Message<?>, ?> messageSink
+            Consumer<Message<?>> messageSink
             )
         {
             return new InboundMessageHandler(decoder, type, channel, self, peer, version, largeMessageThreshold, queueCapacity, endpointReserveCapacity, globalReserveCapacity, endpointWaitQueue, globalWaitQueue, onClosed, wrap(callbacks), messageSink)
