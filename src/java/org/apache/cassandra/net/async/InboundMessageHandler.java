@@ -755,14 +755,18 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 callbacks.onExecuting(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
 
-                if (!expired)
+                if (expired)
                 {
-                    Message message = provideMessage();
-                    if (null != message)
-                    {
-                        consumer.accept(message);
-                        processed = true;
-                    }
+                    callbacks.onExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                    return;
+                }
+
+                Message message = provideMessage();
+                if (null != message)
+                {
+                    consumer.accept(message);
+                    processed = true;
+                    callbacks.onProcessed(size, header);
                 }
             }
             finally
@@ -774,10 +778,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
                 releaseResources();
 
-                if (expired)
-                    callbacks.onExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-                else
-                    callbacks.onProcessed(size, header);
+                callbacks.onExecuted(size, header, ApproximateTime.nanoTime() - currentTimeNanos, NANOSECONDS);
             }
         }
 

@@ -305,6 +305,12 @@ public class ConnectionBurnTest
                 wrapped.onExecuting(messageSize, header, timeElapsed, unit);
             }
 
+            public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+            {
+                forId(header.id).onExecuted(messageSize, header, timeElapsed, unit);
+                wrapped.onExecuted(messageSize, header, timeElapsed, unit);
+            }
+
             public void onProcessed(int messageSize, Message.Header header)
             {
                 forId(header.id).onProcessed(messageSize, header);

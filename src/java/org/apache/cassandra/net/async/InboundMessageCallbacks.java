@@ -26,7 +26,7 @@ public interface InboundMessageCallbacks
     void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onDispatched(int messageSize, Header header);
     void onExecuting(int messageSize, Header header, long timeElapsed, TimeUnit unit);
-
+    void onExecuted(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onProcessed(int messageSize, Header header);
     void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
     void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);

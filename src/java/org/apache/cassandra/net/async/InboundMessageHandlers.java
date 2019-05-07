@@ -35,13 +35,9 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
-import org.apache.cassandra.utils.NoSpamLogger;
 
 public final class InboundMessageHandlers
 {
-    private static final Logger logger = LoggerFactory.getLogger(InboundMessageHandlers.class);
-    private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
-
     private final InetAddressAndPort self;
     private final InetAddressAndPort peer;
 
@@ -232,16 +228,20 @@ public final class InboundMessageHandlers
             }
 
             @Override
-            public void onProcessed(int messageSize, Header header)
+            public void onExecuted(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.removePending(messageSize);
+            }
+
+            @Override
+            public void onProcessed(int messageSize, Header header)
+            {
                 counters.addProcessed(messageSize);
             }
 
             @Override
             public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
-                counters.removePending(messageSize);
                 counters.addExpired(messageSize);
 
                 globalMetrics.recordDroppedMessage(header.verb, timeElapsed, unit);
