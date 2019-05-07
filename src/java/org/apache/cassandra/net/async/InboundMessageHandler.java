@@ -55,7 +55,6 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
-import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.max;
 import static java.lang.Math.min;
@@ -867,7 +866,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private final Kind kind;
         private final Limit reserveCapacity;
 
-        private final MpscLinkedQueue<Ticket> queue = MpscLinkedQueue.newMpscLinkedQueue();
+        private final ManyToOneConcurrentLinkedQueue<Ticket> queue = new ManyToOneConcurrentLinkedQueue<>();
 
         private WaitQueue(Kind kind, Limit reserveCapacity)
         {
@@ -888,17 +887,17 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private Ticket register(InboundMessageHandler handler, int bytesRequested, long registeredAtNanos, long expiresAtNanos)
         {
             Ticket ticket = new Ticket(this, handler, bytesRequested, registeredAtNanos, expiresAtNanos);
-            queue.add(ticket);
+            queue.offer(ticket);
             signal(); // TODO: *conditionally* signal upon registering
             return ticket;
         }
 
         void signal()
         {
-            if (queue.isEmpty())
+            if (queue.relaxedIsEmpty())
                 return;
 
-            if (NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> Integer.min(RUN_AGAIN, i + 1)))
+            if (NOT_RUNNING == scheduled && NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> Integer.min(RUN_AGAIN, i + 1)))
             {
                 do
                 {
@@ -922,7 +921,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             {
                 if (!t.call()) // invalidated
                 {
-                    queue.poll();
+                    queue.remove();
                     continue;
                 }
 
@@ -936,7 +935,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 if (null == tasks)
                     tasks = new IdentityHashMap<>();
 
-                queue.poll();
+                queue.remove();
                 tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ResumeProcessing()).add(t, isLive);
             }
 

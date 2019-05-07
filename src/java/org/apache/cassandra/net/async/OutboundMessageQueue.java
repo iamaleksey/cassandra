@@ -33,7 +33,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.mina.util.IdentityHashSet;
-import org.jctools.queues.MpscLinkedQueue;
 
 import static java.lang.Math.min;
 
@@ -49,7 +48,7 @@ public class OutboundMessageQueue
 
     private final MessageConsumer<RuntimeException> onExpired;
 
-    private final MpscLinkedQueue<Message<?>> externalQueue = MpscLinkedQueue.newMpscLinkedQueue();
+    private final ManyToOneConcurrentLinkedQueue<Message<?>> externalQueue = new ManyToOneConcurrentLinkedQueue<>();
     private final PrunableArrayQueue<Message<?>> internalQueue = new PrunableArrayQueue<>(256);
 
     private volatile long earliestExpiresAt = Long.MAX_VALUE;
@@ -64,7 +63,7 @@ public class OutboundMessageQueue
     public void add(Message<?> m)
     {
         maybePruneExpired();
-        externalQueue.add(m);
+        externalQueue.offer(m);
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
 
@@ -457,7 +456,7 @@ public class OutboundMessageQueue
     @VisibleForTesting
     void unsafeAdd(Message<?> m)
     {
-        externalQueue.add(m);
+        externalQueue.offer(m);
     }
 
 }
