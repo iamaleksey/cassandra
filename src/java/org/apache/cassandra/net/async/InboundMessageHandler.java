@@ -471,19 +471,29 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return ResourceLimits.Outcome.SUCCESS;
         }
 
-        // At that point, we know we don't have enough capacity in the queue. However, we still
-        // should take not more than `bytes` here since capacity can go up without us knowing
+        // we know we don't have enough local queue capacity for the entire message, so we need to borrow some from reserve capacity
         long allocatedExcess = min(currentQueueSize + bytes - queueCapacity, bytes);
 
-        ResourceLimits.Outcome outcome = ResourceLimits.tryAllocate(endpointReserve, globalReserve, allocatedExcess);
-        if (outcome != ResourceLimits.Outcome.SUCCESS)
-            return outcome;
+        if (!globalReserve.tryAllocate(allocatedExcess))
+            return ResourceLimits.Outcome.INSUFFICIENT_GLOBAL;
+
+        if (!endpointReserve.tryAllocate(allocatedExcess))
+        {
+            globalReserve.release(allocatedExcess);
+            globalWaitQueue.signal();
+            return ResourceLimits.Outcome.INSUFFICIENT_GLOBAL;
+        }
 
         long newQueueSize = queueSizeUpdater.addAndGet(this, bytes);
         long actualExcess = max(0, min(newQueueSize - queueCapacity, bytes));
 
         if (actualExcess != allocatedExcess) // can be smaller if a release happened since
+        {
             ResourceLimits.release(endpointReserve, globalReserve, allocatedExcess - actualExcess);
+
+            endpointWaitQueue.signal();
+            globalWaitQueue.signal();
+        }
 
         return ResourceLimits.Outcome.SUCCESS;
     }
