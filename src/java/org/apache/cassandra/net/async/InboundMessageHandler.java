@@ -887,8 +887,9 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         private Ticket register(InboundMessageHandler handler, int bytesRequested, long registeredAtNanos, long expiresAtNanos)
         {
             Ticket ticket = new Ticket(this, handler, bytesRequested, registeredAtNanos, expiresAtNanos);
-            queue.offer(ticket);
-            signal(); // TODO: *conditionally* signal upon registering
+            Ticket previous = queue.relaxedPeekLastAndOffer(ticket);
+            if (null == previous || !previous.isWaiting())
+                signal(); // only signal the queue if this handler is first to register
             return ticket;
         }
 
@@ -897,7 +898,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (queue.relaxedIsEmpty())
                 return;
 
-            if (NOT_RUNNING == scheduled && NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> Integer.min(RUN_AGAIN, i + 1)))
+            if (NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> Integer.min(RUN_AGAIN, i + 1)))
             {
                 do
                 {
@@ -1046,6 +1047,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             private void reset()
             {
                 state = WAITING;
+            }
+
+            private boolean isWaiting()
+            {
+                return state == WAITING;
             }
         }
     }

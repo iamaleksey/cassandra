@@ -42,7 +42,11 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
     }
 
     /**
-     * A false positive return can *NOT* occur, but a false negative is possible if invoked from a non-consumer thread.
+     * When invoked by the consumer thread, the answer will always be accurate.
+     * When invoked by a non-consumer thread, it won't always be the case:
+     *  - {@code true}  result indicates that the queue <em>IS</em> empty, no matter what;
+     *  - {@code false} result indicates that the queue <em>MIGHT BE</em> non-empty - the value of {@code head} might
+     *    not yet have been made externally visible by the consumer thread.
      */
     boolean relaxedIsEmpty()
     {
@@ -93,6 +97,15 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         internalOffer(e); return true;
     }
 
+    E relaxedPeekLastAndOffer(E e)
+    {
+        return internalOffer(e);
+    }
+
+    /*
+     * Adds the element to the queue and returns the item of the previous tail node.
+     * It's possible for the returned item to be already consumed.
+     */
     private E internalOffer(E e)
     {
         if (null == e)
