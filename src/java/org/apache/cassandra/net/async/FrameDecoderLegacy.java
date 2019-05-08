@@ -164,7 +164,6 @@ class FrameDecoderLegacy extends FrameDecoder
         catch (Message.InvalidLegacyProtocolMagic e)
         {
             into.add(CorruptFrame.unrecoverable(e.read, Message.PROTOCOL_MAGIC));
-            discard();
         }
         finally
         {
