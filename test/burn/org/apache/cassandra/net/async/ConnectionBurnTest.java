@@ -26,6 +26,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -40,6 +41,9 @@ import java.util.stream.IntStream;
 
 import com.google.common.primitives.Ints;
 import com.google.common.util.concurrent.Uninterruptibles;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -59,13 +63,18 @@ import org.apache.cassandra.utils.vint.VIntCoding;
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
+import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
 public class ConnectionBurnTest
 {
+    private static final Logger logger = LoggerFactory.getLogger(ConnectionBurnTest.class);
+
     static
     {
         // stop updating ALMOST_SAME_TIME so that we get consistent message expiration times
         ApproximateTime.stop(ALMOST_SAME_TIME);
+        DatabaseDescriptor.daemonInitialization();
+        DatabaseDescriptor.setCrossNodeTimeout(true);
     }
 
     static class NoGlobalInboundMetrics implements InboundMessageHandlers.GlobalMetricCallbacks
@@ -209,7 +218,39 @@ public class ConnectionBurnTest
 
                 CountDownLatch failed = new CountDownLatch(1);
                 for (Connection connection : connections)
-                    connection.start(failed::countDown, executor, deadline);
+                    connection.startVerifier(failed::countDown, executor, deadline);
+
+                for (int i = 0 ; i < 2 * connections.length ; ++i)
+                {
+                    executor.execute(() -> {
+                        try
+                        {
+                            ThreadLocalRandom random = ThreadLocalRandom.current();
+                            while (ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
+                            {
+                                Connection connection = connections[random.nextInt(connections.length)];
+                                Thread.currentThread().setName("Generate-" + connection.linkId);
+                                int count = 0;
+                                switch (random.nextInt() & 3)
+                                {
+                                    case 0: count = random.nextInt(100, 200); break;
+                                    case 1: count = random.nextInt(200, 1000); break;
+                                    case 2: count = random.nextInt(1000, 2000); break;
+                                    case 3: count = random.nextInt(2000, 10000); break;
+                                }
+                                while (count-- > 0 && ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
+                                    connection.sendOne();
+                            }
+                        }
+                        catch (Throwable t)
+                        {
+                            if (t instanceof InterruptedException)
+                                return;
+                            logger.error("Unexpected exception", t);
+                            failed.countDown();
+                        }
+                    });
+                }
 
                 executor.execute(() -> {
                     Thread.currentThread().setName("Test-SetInFlight");
@@ -416,7 +457,6 @@ public class ConnectionBurnTest
 
     public static void main(String[] args) throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException, TimeoutException
     {
-        DatabaseDescriptor.daemonInitialization();
         GlobalInboundSettings inboundSettings = new GlobalInboundSettings()
                                                 .withQueueCapacity(1 << 18)
                                                 .withEndpointReserveLimit(1 << 20)

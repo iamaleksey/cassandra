@@ -29,6 +29,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.vint.VIntCoding;
 import sun.misc.Unsafe;
 
@@ -48,12 +49,13 @@ abstract class MessageGenerator
     Message.Builder<Object> builder(long id)
     {
         random.setSeed(id ^ seed);
-        long now = System.nanoTime();
+        long now = ApproximateTime.nanoTime();
 
         int expiresInMillis;
         int expiryMask = random.nextInt();
-        if (0 == (expiryMask & 0xfffff)) expiresInMillis = 100;
-        else if (0 == (expiryMask & 0xfff)) expiresInMillis = 1000;
+        if (0 == (expiryMask & 0xffff)) expiresInMillis = 10;
+        else if (0 == (expiryMask & 0xfff)) expiresInMillis = 100;
+        else if (0 == (expiryMask & 0xff)) expiresInMillis = 1000;
         else if (0 == (expiryMask & 0xf)) expiresInMillis = 10000;
         else expiresInMillis = 5 * 60 * 1000;
 

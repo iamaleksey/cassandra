@@ -1535,6 +1535,11 @@ public class DatabaseDescriptor
         return conf.cross_node_timeout;
     }
 
+    public static void setCrossNodeTimeout(boolean crossNodeTimeout)
+    {
+        conf.cross_node_timeout = crossNodeTimeout;
+    }
+
     public static long getSlowQueryTimeout(TimeUnit units)
     {
         return units.convert(conf.slow_query_log_timeout_in_ms, MILLISECONDS);

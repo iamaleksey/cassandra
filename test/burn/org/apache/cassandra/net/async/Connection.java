@@ -81,10 +81,9 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         this.outbound = new OutboundConnection(type, this.outboundTemplate, reserveCapacityInBytes);
     }
 
-    void start(Runnable onFailure, Executor executor, long deadlineNanos)
+    void startVerifier(Runnable onFailure, Executor executor, long deadlineNanos)
     {
         executor.execute(runWithThreadName(() -> verifier.run(onFailure, deadlineNanos), "Verify-" + linkId));
-        executor.execute(runWithThreadName(() -> send(onFailure, deadlineNanos), "Generate-" + linkId));
     }
 
     private void send(Runnable onFailure, long deadlineNanos)
@@ -103,7 +102,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         }
     }
 
-    private void sendOne() throws InterruptedException
+    void sendOne() throws InterruptedException
     {
         long id = nextSendId.getAndUpdate(i -> i == maxId ? minId : i + 1);
         try

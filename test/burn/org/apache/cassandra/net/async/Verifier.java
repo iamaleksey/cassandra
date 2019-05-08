@@ -61,7 +61,6 @@ import static org.apache.cassandra.net.async.Verifier.EventType.SERIALIZE;
  * By making verification single threaded, it is easier to reason about (and complex enough as is), but also permits
  * a dedicated thread to monitor timeliness of events, e.g. elapsed time between a given SEND and its corresponding RECEIVE
  *
- * TODO: multiple threads sending messages
  * TODO: timeliness of events
  * TODO: periodically stop all activity to/from a given endpoint, until it stops (and verify queues all empty, counters all accurate)
  * TODO: integrate with proxy that corrupts frames
@@ -548,7 +547,7 @@ public class Verifier
                         for (int i = 0 ; i < mi ; ++i)
                         {
                             MessageState pm = enqueueing.get(i);
-                            if (pm.enqueueEnd != 0)
+                            if (pm.enqueueEnd != 0 && pm.enqueueEnd < m.enqueueStart)
                             {
                                 fail("Invalid order of events: %s enqueued strictly before %s, but serialized after",
                                      pm, m);
@@ -867,7 +866,7 @@ public class Verifier
                             default: throw new IllegalStateException(m.state.toString());
                         }
 
-                        if (e.messageSize != m.messageSize())
+                        if (m.messagingVersion != 0 && e.messageSize != m.messageSize())
                             fail("onExpired %s with invalid size for %s: %d vs %d", e.expirationType, m, e.messageSize, m.messageSize());
 
                         break;
