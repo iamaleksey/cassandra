@@ -241,7 +241,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         Message<?> message = null;
         try (DataInputBuffer in = new DataInputBuffer(buf, false))
         {
-            message = serializer.deserialize(in, header, version);
+            Message<?> m = serializer.deserialize(in, header, version);
+            if (in.available() > 0)
+                throw new InvalidSerializedSizeException(size, size - in.available());
+            message = m;
         }
         catch (UnknownTableException | UnknownColumnException e)
         {
@@ -698,7 +701,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             try (ChunkedInputPlus input = ChunkedInputPlus.of(buffers))
             {
-                return serializer.deserialize(input, header, version);
+                Message<?> m = serializer.deserialize(input, header, version);
+                int remainder = input.remainder();
+                if (remainder > 0)
+                    throw new InvalidSerializedSizeException(size, size - remainder);
+                return m;
             }
             catch (UnknownTableException | UnknownColumnException e)
             {

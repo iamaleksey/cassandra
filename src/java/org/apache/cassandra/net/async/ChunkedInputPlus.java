@@ -61,4 +61,19 @@ class ChunkedInputPlus extends RebufferingInputStream
         buffer = null;
         iter.forEachRemaining(SharedBytes::release);
     }
+
+    /**
+     * Returns the number of unconsumed bytes, destructively. Should only be used for sanity checking, once the input is no longer needed.
+     */
+    int remainder()
+    {
+        int bytes = 0;
+        while (iter.hasNext())
+        {
+            bytes += iter.peek().readableBytes();
+            iter.peek().release();
+            iter.next();
+        }
+        return bytes;
+    }
 }
