@@ -245,13 +245,14 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
         catch (UnknownTableException | UnknownColumnException e)
         {
-            noSpamLogger.info("{} {} caught while reading a small message", id(), e.getClass().getSimpleName(), e);
             callbacks.onFailedDeserialize(size, header, e);
+            noSpamLogger.info("{} incompatible schema encountered while deserializing a message", id(), e);
         }
         catch (Throwable t)
         {
+            JVMStabilityInspector.inspectThrowable(t, false);
             callbacks.onFailedDeserialize(size, header, t);
-            throw t;
+            logger.error("{} unexpected exception caught while deserializing a message", id(), t);
         }
         finally
         {
@@ -701,15 +702,14 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             catch (UnknownTableException | UnknownColumnException e)
             {
-                noSpamLogger.info("{} {} caught while reading a large message", e.getClass().getSimpleName(), id(), e);
                 callbacks.onFailedDeserialize(size, header, e);
+                noSpamLogger.info("{} incompatible schema encountered while deserializing a message", id(), e);
             }
             catch (Throwable t)
             {
                 JVMStabilityInspector.inspectThrowable(t, false);
-                logger.error("{} unexpected exception caught while reading a large message", id(), t);
                 callbacks.onFailedDeserialize(size, header, t);
-                channel.pipeline().context(InboundMessageHandler.this).fireExceptionCaught(t);
+                logger.error("{} unexpected exception caught while deserializing a message", id(), t);
             }
             finally
             {
