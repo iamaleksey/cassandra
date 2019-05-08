@@ -26,11 +26,10 @@ import io.netty.channel.ChannelPromise;
 import io.netty.channel.WriteBufferWaterMark;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 
-import static java.lang.Math.max;
-import static java.lang.Math.min;
-
 /**
  * A {@link DataOutputStreamPlus} that writes ASYNCHRONOUSLY to a Netty Channel.
+ *
+ * Intended as single use, to write one (large) message.
  *
  * The close() and flush() methods synchronously wait for pending writes, and will propagate any exceptions
  * encountered in writing them to the wire.
@@ -38,7 +37,7 @@ import static java.lang.Math.min;
  * The correctness of this class depends on the ChannelPromise we create against a Channel always being completed,
  * which appears to be a guarantee provided by Netty so long as the event loop is running.
  */
-public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
+public class AsyncMessageOutputPlus extends AsyncChannelOutputPlus
 {
     /**
      * the maximum {@link #highWaterMark} and minimum {@link #lowWaterMark} number of bytes we have flushing
@@ -54,20 +53,24 @@ public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
      *
      * This is somewhat arbitrary accounting, and a meaningless distinction for flushes of a consistent size.
      */
+    @SuppressWarnings("JavaDoc")
     private final int highWaterMark;
     private final int lowWaterMark;
     private final int bufferSize;
+    private final int messageSize;
+    private boolean closing;
 
     private final FrameEncoder.PayloadAllocator payloadAllocator;
     private volatile FrameEncoder.Payload payload;
 
-    public AsyncMessagingOutputPlus(Channel channel, int bufferSize, FrameEncoder.PayloadAllocator payloadAllocator)
+    AsyncMessageOutputPlus(Channel channel, int bufferSize, int messageSize, FrameEncoder.PayloadAllocator payloadAllocator)
     {
         super(channel);
         WriteBufferWaterMark waterMark = channel.config().getWriteBufferWaterMark();
         this.lowWaterMark = waterMark.low();
         this.highWaterMark = waterMark.high();
-        this.bufferSize = bufferSize;
+        this.messageSize = messageSize;
+        this.bufferSize = Math.min(messageSize, bufferSize);
         this.payloadAllocator = payloadAllocator;
         allocateBuffer();
     }
@@ -90,6 +93,9 @@ public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
         if (byteCount == 0)
             return;
 
+        if (byteCount + flushed() > (closing ? messageSize : messageSize - 1))
+            throw new InvalidSerializedSizeException(messageSize, byteCount + flushed());
+
         flush.finish();
         ChannelPromise promise = beginFlush(byteCount, lowWaterMark, highWaterMark);
         channel.writeAndFlush(flush, promise);
@@ -98,6 +104,7 @@ public class AsyncMessagingOutputPlus extends AsyncChannelOutputPlus
 
     public void close() throws IOException
     {
+        closing = true;
         if (flushed() == 0 && payload != null)
             payload.setSelfContained(true);
         super.close();

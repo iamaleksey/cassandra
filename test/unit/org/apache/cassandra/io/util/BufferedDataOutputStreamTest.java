@@ -610,17 +610,4 @@ public class BufferedDataOutputStreamTest
         }
     }
 
-    @Test
-    public void testWriteExcessSlow() throws Exception
-    {
-        try (DataOutputBuffer dob = new DataOutputBuffer(4))
-        {
-            dob.strictFlushing = true;
-            ByteBuffer buf = ByteBuffer.allocateDirect(8);
-            buf.putLong(0, 42);
-            dob.write(buf);
-            assertEquals(42, ByteBuffer.wrap(dob.toByteArray()).getLong());
-        }
-    }
-
 }

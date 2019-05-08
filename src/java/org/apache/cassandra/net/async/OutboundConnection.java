@@ -46,7 +46,6 @@ import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
-import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
@@ -106,6 +105,7 @@ public class OutboundConnection
     private final Delivery delivery;
 
     private final OutboundMessageCallbacks callbacks;
+    private final OutboundDebugCallbacks debug;
     private final OutboundMessageQueue queue;
     /** the number of bytes we permit to queue to the network without acquiring any shared resource permits */
     private final long pendingCapacityInBytes;
@@ -165,6 +165,7 @@ public class OutboundConnection
     // in this scenario, they briefly do not represent those currently in use, but those we intend to use imminently
     private volatile OutboundConnectionSettings template;
     private volatile OutboundConnectionSettings settings;
+    // should only be updated while we are disconnected, and by the event loop
     private volatile int messagingVersion;
     private volatile FrameEncoder.PayloadAllocator payloadAllocator;
 
@@ -216,6 +217,7 @@ public class OutboundConnection
         this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
         this.callbacks = settings.callbacks;
+        this.debug = settings.debug;
         this.queue = new OutboundMessageQueue(this::onExpired);
         this.delivery = type == ConnectionType.LARGE_MESSAGES
                         ? new LargeMessageDelivery()
@@ -390,14 +392,14 @@ public class OutboundConnection
      *
      * Only to be invoked by the delivery thread
      */
-    private void onFailedSerialize(Message<?> message, Throwable t)
+    private void onFailedSerialize(Message<?> message, int messagingVersion, Throwable t)
     {
         JVMStabilityInspector.inspectThrowable(t, false);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
         errorBytes += canonicalSize(message);
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
-        callbacks.onFailedSerialize(message);
+        callbacks.onFailedSerialize(message, messagingVersion);
     }
 
     /**
@@ -408,7 +410,7 @@ public class OutboundConnection
     private void onClosed(Message<?> message)
     {
         releaseCapacity(1, canonicalSize(message));
-        callbacks.onClosed(message);
+        callbacks.onDiscardOnClose(message);
     }
 
     /**
@@ -547,20 +549,6 @@ public class OutboundConnection
             this.inProgress = inProgress;
             if (!inProgress && wasInProgress)
                 executeAgain();
-        }
-
-        /**
-         * Handle a failure during delivery that invalidates the channel
-         */
-        void invalidateChannel(Channel channel, Throwable cause)
-        {
-            JVMStabilityInspector.inspectThrowable(cause, false);
-            if (isCausedByConnectionReset(cause))
-                logger.info("{} channel closed by provider", id(), cause);
-            else
-                logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
-
-            closeChannelNow(channel);
         }
 
         /**
@@ -730,7 +718,7 @@ public class OutboundConnection
                         Message.serializer.serialize(next, out, messagingVersion);
 
                         if (sending.length() != sendingBytes + messageSize)
-                            throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + (sending.length() - sendingBytes));
+                            throw new InvalidSerializedSizeException(messageSize, sending.length() - sendingBytes);
 
                         canonicalSize += canonicalSize(next);
                         sendingCount += 1;
@@ -738,7 +726,7 @@ public class OutboundConnection
                     }
                     catch (Throwable t)
                     {
-                        onFailedSerialize(next, t);
+                        onFailedSerialize(next, messagingVersion, t);
 
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
@@ -750,7 +738,7 @@ public class OutboundConnection
                     return false;
 
                 sending.finish();
-                callbacks.onSendFrame(sendingCount, sendingBytes);
+                debug.onSendSmallFrame(sendingCount, sendingBytes);
                 ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(channel, sending);
                 sending = null;
 
@@ -758,7 +746,7 @@ public class OutboundConnection
                 {
                     sentCount += sendingCount;
                     sentBytes += sendingBytes;
-                    callbacks.onSentFrame(sendingCount, sendingBytes);
+                    debug.onSentSmallFrame(sendingCount, sendingBytes);
                 }
                 else
                 {
@@ -792,14 +780,14 @@ public class OutboundConnection
                         {
                             sentCount += sendingCountFinal;
                             sentBytes += sendingBytesFinal;
-                            callbacks.onSentFrame(sendingCountFinal, sendingBytesFinal);
+                            debug.onSentSmallFrame(sendingCountFinal, sendingBytesFinal);
                         }
                         else
                         {
                             errorCount += sendingCountFinal;
                             errorBytes += sendingBytesFinal;
                             invalidateChannel(channel, future.cause());
-                            callbacks.onFailedFrame(sendingCountFinal, sendingBytesFinal);
+                            debug.onFailedSmallFrame(sendingCountFinal, sendingBytesFinal);
                         }
                     });
                     canonicalSize = 0;
@@ -824,6 +812,17 @@ public class OutboundConnection
             }
 
             return false;
+        }
+
+        private void invalidateChannel(Channel channel, Throwable cause)
+        {
+            JVMStabilityInspector.inspectThrowable(cause, false);
+            if (isCausedByConnectionReset(cause))
+                logger.info("{} channel closed by provider", id(), cause);
+            else
+                logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
+
+            closeChannelNow(channel);
         }
 
         void stopAndRunOnEventLoop(Runnable run)
@@ -878,18 +877,17 @@ public class OutboundConnection
             }
         }
 
-        @SuppressWarnings("resource") // this suppression is for the ecj compiler
         boolean doRun(Channel channel)
         {
             Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
             if (send == null)
                 return false;
 
-            AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, DEFAULT_BUFFER_SIZE, payloadAllocator);
+            AsyncMessageOutputPlus out = null;
             try
             {
                 int messageSize = send.serializedSize(messagingVersion);
-
+                out = new AsyncMessageOutputPlus(channel, DEFAULT_BUFFER_SIZE, messageSize, payloadAllocator);
                 // actual message size for this version is larger than permitted maximum
                 if (messageSize > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
                     throw new Message.OversizedMessageException(messageSize);
@@ -898,7 +896,7 @@ public class OutboundConnection
                 Message.serializer.serialize(send, out, messagingVersion);
 
                 if (out.position() != messageSize)
-                    throw new IOException("Calculated serializedSize " + messageSize + " did not match actual " + out.position());
+                    throw new InvalidSerializedSizeException(messageSize, out.position());
 
                 out.close();
                 sentCount += 1;
@@ -908,16 +906,17 @@ public class OutboundConnection
             }
             catch (Throwable t)
             {
-                onFailedSerialize(send, t);
+                onFailedSerialize(send, messagingVersion, t);
 
-                out.discard();
-                if (out.flushed() > 0 ||
+                if (out != null) out.discard();
+                if ((out != null && out.flushed() > 0) ||
                     isCausedBy(t, cause ->    isConnectionReset(cause)
                                            || cause instanceof Errors.NativeIoException
                                            || cause instanceof AsyncChannelOutputPlus.FlushException))
                 {
-                    invalidateChannel(channel, t);
-                    return false; // wait until we have reconnected
+                    // close the channel; this runs on the event loop, so we wait for this to complete to avoid racing with it
+                    closeChannelNow(channel).awaitUninterruptibly();
+                    return false;
                 }
                 return true;
             }
@@ -998,6 +997,7 @@ public class OutboundConnection
                         messagingVersion = success.messagingVersion;
                         settings = template.withDefaults(type, messagingVersion);
                     }
+                    debug.onConnect(messagingVersion, settings);
                     payloadAllocator = success.allocator;
                     channel = success.channel;
 
@@ -1206,9 +1206,9 @@ public class OutboundConnection
      *
      * Delivery will be executed again if necessary after this completes.
      */
-    private void closeChannelNow(Channel closeIfIs)
+    private Future<?> closeChannelNow(Channel closeIfIs)
     {
-        runOnEventLoop(closeChannelTask(closeIfIs)).addListener(future -> {
+        return runOnEventLoop(closeChannelTask(closeIfIs)).addListener(future -> {
             // ensure we will run delivery again at some point, if we have work
             // (could have multiple rounds of exceptions, with many waiting messages and no new ones)
             if (hasPending())
@@ -1224,8 +1224,8 @@ public class OutboundConnection
                 // no need to wait until the channel is closed to set ourselves as disconnected (and potentially open a new channel)
                 Channel close = channel;
                 isConnected = false;
-                payloadAllocator = null;
                 channel = null;
+                payloadAllocator = null;
                 scheduleMaintenanceWhileDisconnected();
                 close.close().addListener(future -> {
                     if (!future.isSuccess())
@@ -1240,7 +1240,6 @@ public class OutboundConnection
      */
     public Future<Void> interrupt()
     {
-
         return closeChannelGracefully(channel, new AsyncPromise<>(eventLoop));
     }
 

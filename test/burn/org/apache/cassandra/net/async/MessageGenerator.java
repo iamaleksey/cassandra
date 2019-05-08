@@ -18,14 +18,21 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.lang.reflect.Field;
 import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.utils.vint.VIntCoding;
 import sun.misc.Unsafe;
+
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
 
 abstract class MessageGenerator
 {
@@ -44,7 +51,14 @@ abstract class MessageGenerator
         return Message.builder(Verb._TEST_2, null)
                       .withExpiresAt(System.nanoTime() + TimeUnit.DAYS.toNanos(1L)); // don't expire for now
     }
-    abstract Message<?> generate(long id);
+
+    public int uniformInt(int limit)
+    {
+        return random.nextInt(limit);
+    }
+
+    // generate a Message<?> with the provided id and with both id and info encoded in its payload
+    abstract Message<?> generate(long id, byte info);
     abstract MessageGenerator copy();
 
     static final class UniformPayloadGenerator extends MessageGenerator
@@ -55,20 +69,21 @@ abstract class MessageGenerator
         UniformPayloadGenerator(long seed, int minSize, int maxSize)
         {
             super(seed);
-            this.minSize = Math.max(8, minSize);
-            this.maxSize = Math.max(8, maxSize);
+            this.minSize = Math.max(9, minSize);
+            this.maxSize = Math.max(9, maxSize);
             this.fillWithBytes = new byte[32];
             random.setSeed(seed);
             random.nextBytes(fillWithBytes);
         }
 
-        Message<?> generate(long id)
+        Message<?> generate(long id, byte info)
         {
             Message.Builder<Object> builder = builder(id);
             byte[] payload = new byte[minSize + random.nextInt(maxSize - minSize)];
             ByteBuffer wrapped = ByteBuffer.wrap(payload);
             setId(payload, id);
-            wrapped.position(8);
+            payload[8] = info;
+            wrapped.position(9);
             while (wrapped.hasRemaining())
                 wrapped.put(fillWithBytes, 0, Math.min(fillWithBytes.length, wrapped.remaining()));
             builder.withPayload(payload);
@@ -85,10 +100,62 @@ abstract class MessageGenerator
     {
         return unsafe.getLong(payload, BYTE_ARRAY_BASE_OFFSET);
     }
-
-    static void setId(byte[] payload, long id)
+    static byte getInfo(byte[] payload)
+    {
+        return payload[8];
+    }
+    private static void setId(byte[] payload, long id)
     {
         unsafe.putLong(payload, BYTE_ARRAY_BASE_OFFSET, id);
+    }
+
+    static class Header
+    {
+        public final int length;
+        public final long id;
+        public final byte info;
+
+        Header(int length, long id, byte info)
+        {
+            this.length = length;
+            this.id = id;
+            this.info = info;
+        }
+
+        public byte[] read(DataInputPlus in, int length, int messagingVersion) throws IOException
+        {
+            byte[] result = new byte[Math.max(9, length)];
+            setId(result, id);
+            result[8] = info;
+            in.readFully(result, 9, Math.max(0, length - 9));
+            return result;
+        }
+    }
+
+    static Header readHeader(DataInputPlus in, int messagingVersion) throws IOException
+    {
+        int length = messagingVersion < VERSION_40
+                     ? in.readInt()
+                     : (int) in.readUnsignedVInt();
+        long id = in.readLong();
+        if (ByteOrder.nativeOrder() == ByteOrder.LITTLE_ENDIAN)
+            id = Long.reverseBytes(id);
+        byte info = in.readByte();
+        return new Header(length, id, info);
+    }
+
+    static void write(byte[] payload, int writeBytes, DataOutputPlus out, int messagingVersion) throws IOException
+    {
+        if (messagingVersion < VERSION_40)
+            out.writeInt(payload.length);
+        else
+            out.writeUnsignedVInt(payload.length);
+        out.write(payload, 0, writeBytes);
+    }
+
+    static long serializedSize(byte[] payload, int messagingVersion)
+    {
+        return payload.length + (messagingVersion < VERSION_40 ? 4 : VIntCoding.computeUnsignedVIntSize(payload.length));
     }
 
     private static final Unsafe unsafe;

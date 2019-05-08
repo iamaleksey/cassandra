@@ -27,24 +27,12 @@ public interface OutboundMessageCallbacks
     {
         return new OutboundMessageCallbacks()
         {
-            public void onSendFrame(int messageCount, int payloadSizeInBytes) {}
-            public void onSentFrame(int messageCount, int payloadSizeInBytes) {}
-            public void onFailedFrame(int messageCount, int payloadSizeInBytes) {}
             public void onOverloaded(Message<?> message) { onDrop.accept(message); }
             public void onExpired(Message<?> message) { onDrop.accept(message); }
-            public void onFailedSerialize(Message<?> message) { onDrop.accept(message); }
-            public void onClosed(Message<?> message) { onDrop.accept(message); }
+            public void onFailedSerialize(Message<?> message, int messagingVersion) { onDrop.accept(message); }
+            public void onDiscardOnClose(Message<?> message) { onDrop.accept(message); }
         };
     }
-
-    /** A complete has been handed to Netty to write to the wire */
-    void onSendFrame(int messageCount, int payloadSizeInBytes);
-
-    /** A complete has been serialized to the wire */
-    void onSentFrame(int messageCount, int payloadSizeInBytes);
-
-    /** Failed to send an entire frame due to network problems; presumed to be invoked in same order as onSendFrame */
-    void onFailedFrame(int messageCount, int payloadSizeInBytes);
 
     /** A message was not enqueued to the link because too many messages are already waiting to send */
     void onOverloaded(Message<?> message);
@@ -53,8 +41,8 @@ public interface OutboundMessageCallbacks
     void onExpired(Message<?> message);
 
     /** A message was not serialized to a frame because an exception was thrown */
-    void onFailedSerialize(Message<?> message);
+    void onFailedSerialize(Message<?> message, int messagingVersion);
 
     /** A message was not sent because the connection was forcibly closed */
-    void onClosed(Message<?> message);
+    void onDiscardOnClose(Message<?> message);
 }

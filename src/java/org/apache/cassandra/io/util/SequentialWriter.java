@@ -44,6 +44,15 @@ public class SequentialWriter extends BufferedDataOutputStreamPlus implements Tr
 
     protected final FileChannel fchannel;
 
+    //Allow derived classes to specify writing to the channel
+    //directly shouldn't happen because they intercept via doFlush for things
+    //like compression or checksumming
+    //Another hack for this value is that it also indicates that flushing early
+    //should not occur, flushes aligned with buffer size are desired
+    //Unless... it's the last flush. Compression and checksum formats
+    //expect block (same as buffer size) alignment for everything except the last block
+    private final boolean strictFlushing;
+
     // whether to do trickling fsync() to avoid sudden bursts of dirty buffer flushing by kernel causing read
     // latency spikes
     private final SequentialWriterOption option;

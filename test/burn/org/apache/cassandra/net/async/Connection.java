@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
@@ -26,15 +27,21 @@ import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.async.Verifier.Destiny;
 import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
-class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
+public class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks, OutboundDebugCallbacks
 {
+    public static class IntentionalIOException extends IOException {}
+    public static class IntentionalRuntimeException extends RuntimeException {}
+
     private static final Logger logger = LoggerFactory.getLogger(Connection.class);
 
     final InetAddressAndPort sender;
@@ -69,7 +76,8 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         this.verifier = new Verifier(controller, type);
         this.outboundTemplate = outboundTemplate.toEndpoint(recipient)
                                                 .withFrom(sender)
-                                                .withCallbacks(this);
+                                                .withCallbacks(this)
+                                                .withDebugCallbacks(this);
         this.outbound = new OutboundConnection(type, this.outboundTemplate, reserveCapacityInBytes);
     }
 
@@ -100,14 +108,22 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         long id = nextSendId.getAndUpdate(i -> i == maxId ? minId : i + 1);
         try
         {
+            Destiny destiny = Destiny.SUCCEED;
+            byte realDestiny = 0;
             Message<?> msg;
             synchronized (sendGenerator)
             {
-                msg = sendGenerator.generate(id).withId(id);
+                if (0 == sendGenerator.uniformInt(1 << 10))
+                {
+                    // abnormal destiny
+                    realDestiny = (byte) (1 + sendGenerator.uniformInt(6));
+                    destiny = realDestiny <= 3 ? Destiny.FAIL_TO_SERIALIZE : Destiny.FAIL_TO_DESERIALIZE;
+                }
+                msg = sendGenerator.generate(id, realDestiny).withId(id);
             }
 
             controller.send(msg.serializedSize(current_version));
-            Verifier.EnqueueMessageEvent e = verifier.onEnqueue(msg);
+            Verifier.EnqueueMessageEvent e = verifier.onEnqueue(msg, destiny);
             outbound.enqueue(msg);
             e.complete(verifier);
         }
@@ -120,18 +136,72 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
 
     void reconnect(OutboundConnectionSettings template)
     {
-        Verifier.ReconnectEvent interrupt = verifier.reconnect(template.acceptVersions == null ? current_version : template.acceptVersions.max);
-        outbound.reconnectWithNewTemplate(template).addListener(future -> interrupt.complete(verifier));
+        outbound.reconnectWithNewTemplate(template);
     }
 
-    public void onSerialize(long id, int messagingVersion)
+    void serialize(long id, byte[] payload, DataOutputPlus out, int messagingVersion) throws IOException
     {
         verifier.onSerialize(id, messagingVersion);
+        int length = payload.length;
+        switch (MessageGenerator.getInfo(payload))
+        {
+            case 1:
+                switch ((int) (id & 1))
+                {
+                    case 0: throw new IntentionalIOException();
+                    case 1: throw new IntentionalRuntimeException();
+//                    case 2: throw new AssertionError("INTENTIONAL FAILURE");
+                }
+                break;
+            case 2:
+                length -= (int)id % payload.length;
+                break;
+            case 3:
+                length += (int)id & 65535;
+                break;
+        }
+
+        MessageGenerator.write(payload, Math.min(length, payload.length), out, messagingVersion);
+        while ((length -= payload.length) > 0)
+            out.write(payload, 0, Math.min(length, payload.length));
     }
 
-    public void onDeserialize(long id, int messagingVersion)
+    byte[] deserialize(MessageGenerator.Header header, DataInputPlus in, int messagingVersion) throws IOException
     {
-        verifier.onDeserialize(id, messagingVersion);
+        verifier.onDeserialize(header.id, messagingVersion);
+        int length = header.length;
+//        switch (header.info)
+//        {
+//            case 4:
+//                switch ((int) (header.id & 1))
+//                {
+//                    case 0: throw new IntentionalExceptions.IntentionalIOException();
+//                    case 1: throw new IntentionalExceptions.IntentionalRuntimeException();
+////                    case 2: throw new AssertionError("INTENTIONAL FAILURE");
+//                }
+//                break;
+//            case 5: {
+//                length -= (int)header.id % header.length;
+//                break;
+//            }
+//            case 6: {
+//                length += (int)header.id & 65535;
+//                break;
+//            }
+//        }
+        byte[] result = header.read(in, Math.min(header.length, length), messagingVersion);
+//        if (length > header.length)
+//        {
+//            length -= header.length;
+//            while (length >= 8)
+//            {
+//                in.readLong();
+//                length -= 8;
+//            }
+//            while (length-- > 0)
+//                in.readByte();
+//        }
+        return result;
     }
 
     public void onArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
@@ -139,31 +209,20 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         verifier.onArrived(header.id, messageSize);
     }
 
-    public void onDispatched(int messageSize, Message.Header header)
-    {
-    }
-
-    public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
-    {
-    }
-
-    public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
-    {
-    }
+    public void onDispatched(int messageSize, Message.Header header) {}
+    public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit) {}
+    public void onProcessed(int messageSize, Message.Header header) {}
+    public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit) {}
 
     public void process(Message message)
     {
-        verifier.onProcessed(message);
-    }
-
-    public void onProcessed(int messageSize, Message.Header header)
-    {
+        verifier.process(message);
     }
 
     public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
     {
         controller.fail(messageSize);
-        verifier.onProcessedExpired(header.id, messageSize, timeElapsed, timeUnit);
+        verifier.onProcessExpired(header.id, messageSize, timeElapsed, timeUnit);
     }
 
     public void onArrivedExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
@@ -183,20 +242,25 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         return inboundHandlers.countersFor(outbound.type());
     }
 
-    public void onSendFrame(int messageCount, int payloadSizeInBytes)
+    public void onSendSmallFrame(int messageCount, int payloadSizeInBytes)
     {
         verifier.onSendFrame(messageCount, payloadSizeInBytes);
     }
 
-    public void onSentFrame(int messageCount, int payloadSizeInBytes)
+    public void onSentSmallFrame(int messageCount, int payloadSizeInBytes)
     {
         verifier.onSentFrame(messageCount, payloadSizeInBytes);
     }
 
-    public void onFailedFrame(int messageCount, int payloadSizeInBytes)
+    public void onFailedSmallFrame(int messageCount, int payloadSizeInBytes)
     {
         controller.fail(payloadSizeInBytes);
         verifier.onFailedFrame(messageCount, payloadSizeInBytes);
+    }
+
+    public void onConnect(int messagingVersion, OutboundConnectionSettings settings)
+    {
+        verifier.onConnect(messagingVersion, settings);
     }
 
     public void onOverloaded(Message<?> message)
@@ -211,16 +275,17 @@ class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks
         verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
-    public void onFailedSerialize(Message<?> message)
+    public void onFailedSerialize(Message<?> message, int messagingVersion)
     {
-        controller.fail(message.serializedSize(current_version));
+        controller.fail(message.serializedSize(messagingVersion));
         verifier.onFailedSerialize(message.id());
     }
 
-    public void onClosed(Message<?> message)
+    public void onDiscardOnClose(Message<?> message)
     {
         controller.fail(message.serializedSize(current_version));
         verifier.onFailedClosing(message.id());
     }
+
 }
 

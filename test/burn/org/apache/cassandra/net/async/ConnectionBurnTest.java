@@ -53,6 +53,7 @@ import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
+import org.apache.cassandra.utils.Pair;
 import org.apache.cassandra.utils.vint.VIntCoding;
 
 import static java.lang.Math.min;
@@ -107,27 +108,21 @@ public class ConnectionBurnTest
     {
         private final IVersionedSerializer<byte[]> serializer = new IVersionedSerializer<byte[]>()
         {
-            public void serialize(byte[] t, DataOutputPlus out, int version) throws IOException
+            public void serialize(byte[] payload, DataOutputPlus out, int version) throws IOException
             {
-                long id = MessageGenerator.getId(t);
-                forId(id).onSerialize(id, version);
-                out.writeUnsignedVInt(t.length);
-                out.write(t);
+                long id = MessageGenerator.getId(payload);
+                forId(id).serialize(id, payload, out, version);
             }
 
             public byte[] deserialize(DataInputPlus in, int version) throws IOException
             {
-                int length = Ints.checkedCast(in.readUnsignedVInt());
-                byte[] result = new byte[length];
-                in.readFully(result);
-                long id = MessageGenerator.getId(result);
-                forId(id).onDeserialize(id, version);
-                return result;
+                MessageGenerator.Header header = MessageGenerator.readHeader(in, version);
+                return forId(header.id).deserialize(header, in, version);
             }
 
-            public long serializedSize(byte[] t, int version)
+            public long serializedSize(byte[] payload, int version)
             {
-                return t.length + VIntCoding.computeUnsignedVIntSize(t.length);
+                return MessageGenerator.serializedSize(payload, version);
             }
         };
 
@@ -158,6 +153,7 @@ public class ConnectionBurnTest
         final Connection[] connections;
         final long[] connectionMessageIds;
         final ExecutorService executor = Executors.newCachedThreadPool();
+        final Map<Pair<InetAddressAndPort, InetAddressAndPort>, Connection> connectionLookup = new HashMap<>();
 
         private Test(int simulateEndpoints, MessageGenerators messageGenerators, GlobalInboundSettings inboundSettings, OutboundConnectionSettings outboundTemplate, long runForNanos)
         {
@@ -183,6 +179,7 @@ public class ConnectionBurnTest
                         Connection connection = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
                         this.connections[i] = connection;
                         this.connectionMessageIds[i] = minId;
+                        connectionLookup.put(Pair.create(sender, recipient), connection);
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
                         ++i;
@@ -236,13 +233,13 @@ public class ConnectionBurnTest
                 });
 
                 executor.execute(() -> {
-                    Thread.currentThread().setName("Test-SetInFlight");
+                    Thread.currentThread().setName("Test-Reconnect");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
                     while (true)
                     {
                         try
                         {
-                            Thread.sleep(random.nextInt(1000));
+                            Thread.sleep(random.nextInt(30000));
                         }
                         catch (InterruptedException e)
                         {

@@ -29,7 +29,7 @@ import org.apache.cassandra.net.async.FrameEncoder.PayloadAllocator;
 
 import static org.junit.Assert.assertEquals;
 
-public class AsyncMessagingOutputPlusTest
+public class AsyncMessageOutputPlusTest
 {
 
     static
@@ -42,7 +42,7 @@ public class AsyncMessagingOutputPlusTest
     {
         EmbeddedChannel channel = new TestChannel(4);
         ByteBuf read;
-        try (AsyncMessagingOutputPlus out = new AsyncMessagingOutputPlus(channel, 32, PayloadAllocator.simple))
+        try (AsyncMessageOutputPlus out = new AsyncMessageOutputPlus(channel, 32, Integer.MAX_VALUE, PayloadAllocator.simple))
         {
             out.writeInt(1);
             assertEquals(0, out.flushed());
