@@ -193,8 +193,8 @@ public class ConnectionTest
     static final AcceptVersions legacy = new AcceptVersions(VERSION_30, VERSION_30);
 
     static final List<Function<Settings, Settings>> MODIFIERS = ImmutableList.of(
-//        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
-//                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
+        settings -> settings.outbound(outbound -> outbound.withAcceptVersions(legacy))
+                            .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
         settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
                             .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
         settings -> settings.outbound(outbound -> outbound.withCompression(true))

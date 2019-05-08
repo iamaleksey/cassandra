@@ -477,6 +477,7 @@ public class Verifier
     {
         try
         {
+            long lastEventAt = ApproximateTime.nanoTime();
             while ((now = ApproximateTime.nanoTime()) < deadlineNanos)
             {
                 Event next = events.await(nextMessageId, 100L, TimeUnit.MILLISECONDS);
@@ -499,21 +500,19 @@ public class Verifier
                     {
                         // if we have waited 100ms since beginning a sync, with no events, and ANY of our queues are
                         // non-empty, something is probably wrong; however, let's give ourselves a little bit longer
-                        // TODO
-                        boolean done = true;
-                        if (!currentConnection.serializing.isEmpty())
-                        {
-
-                        }
-                        if (enqueueing.isEmpty())
-                        {
-                            // should have finished sync
-                        }
+                        boolean done =
+                            currentConnection.serializing.isEmpty()
+                        &&  currentConnection.arriving.isEmpty()
+                        &&  currentConnection.deserializingOnEventLoop.isEmpty()
+                        &&  currentConnection.deserializingOffEventLoop.isEmpty()
+                        &&  currentConnection.framesInFlight.isEmpty()
+                        &&  enqueueing.isEmpty();
                     }
 
                     continue;
                 }
                 events.clear(nextMessageId); // TODO: simplify collection if we end up using it exclusively as a queue, as we are now
+                lastEventAt = now;
 
                 switch (next.type)
                 {
