@@ -36,7 +36,7 @@ public abstract class ResourceLimits
         public final Limit endpoint;
         public final Limit global;
 
-        public EndpointAndGlobal(Limit endpoint, Limit global)
+        EndpointAndGlobal(Limit endpoint, Limit global)
         {
             this.endpoint = endpoint;
             this.global = global;
@@ -44,7 +44,14 @@ public abstract class ResourceLimits
 
         Outcome tryAllocate(long amount)
         {
-            return ResourceLimits.tryAllocate(endpoint, global, amount);
+            if (!global.tryAllocate(amount))
+                return Outcome.INSUFFICIENT_GLOBAL;
+
+            if (endpoint.tryAllocate(amount))
+                return Outcome.SUCCESS;
+
+            global.release(amount);
+            return Outcome.INSUFFICIENT_ENDPOINT;
         }
 
         void release(long amount)
@@ -54,18 +61,6 @@ public abstract class ResourceLimits
     }
 
     public enum Outcome { SUCCESS, INSUFFICIENT_ENDPOINT, INSUFFICIENT_GLOBAL }
-
-    static Outcome tryAllocate(Limit endpoint, Limit global, long amount)
-    {
-        if (!global.tryAllocate(amount))
-            return Outcome.INSUFFICIENT_GLOBAL;
-
-        if (endpoint.tryAllocate(amount))
-            return Outcome.SUCCESS;
-
-        global.release(amount);
-        return Outcome.INSUFFICIENT_ENDPOINT;
-    }
 
     public static void release(Limit endpoint, Limit global, long amount)
     {
