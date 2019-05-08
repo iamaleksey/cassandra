@@ -18,25 +18,19 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.EOFException;
 import java.nio.BufferOverflowException;
-import java.util.Arrays;
 import java.util.Set;
 
 import com.google.common.collect.ImmutableSet;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.classic.spi.LoggingEvent;
-import ch.qos.logback.classic.spi.ThrowableProxy;
 import ch.qos.logback.core.filter.Filter;
 import ch.qos.logback.core.spi.FilterReply;
 
 public class LogbackFilter extends Filter
 {
-    private static final Logger logger = LoggerFactory.getLogger(LogbackFilter.class);
-
     public FilterReply decide(Object o)
     {
         if (!(o instanceof LoggingEvent))
@@ -57,7 +51,8 @@ public class LogbackFilter extends Filter
         Connection.IntentionalIOException.class.getName(),
         Connection.IntentionalRuntimeException.class.getName(),
         InvalidSerializedSizeException.class.getName(),
-        BufferOverflowException.class.getName()
+        BufferOverflowException.class.getName(),
+        EOFException.class.getName()
     );
 
     public static boolean isIntentional(IThrowableProxy t)

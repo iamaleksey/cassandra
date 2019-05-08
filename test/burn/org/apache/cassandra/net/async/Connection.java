@@ -22,10 +22,8 @@ import java.io.IOException;
 import java.nio.channels.ClosedChannelException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -33,16 +31,15 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.async.Verifier.Destiny;
 import org.apache.cassandra.utils.ApproximateTime;
+import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
 public class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks, OutboundDebugCallbacks
 {
-    public static class IntentionalIOException extends IOException {}
-    public static class IntentionalRuntimeException extends RuntimeException {}
-
-    private static final Logger logger = LoggerFactory.getLogger(Connection.class);
+    static class IntentionalIOException extends IOException {}
+    static class IntentionalRuntimeException extends RuntimeException {}
 
     final InetAddressAndPort sender;
     final InetAddressAndPort recipient;
@@ -55,6 +52,8 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     final String linkId;
     final long minId;
     final long maxId;
+    final AtomicInteger isSending = new AtomicInteger();
+    final WaitQueue waitingForSendersToUnregister = new WaitQueue();
 
     private final AtomicLong nextSendId = new AtomicLong();
 
@@ -86,20 +85,33 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         executor.execute(runWithThreadName(() -> verifier.run(onFailure, deadlineNanos), "Verify-" + linkId));
     }
 
-    private void send(Runnable onFailure, long deadlineNanos)
+    boolean isSending()
     {
-        try
+        return isSending.get() >= 0;
+    }
+
+    boolean registerSender()
+    {
+        return isSending.updateAndGet(i -> i < 0 ? i : i + 1) > 0;
+    }
+
+    void unregisterSender()
+    {
+        isSending.updateAndGet(i -> i < 0 ? i + 1 : i - 1);
+    }
+
+    void sync() throws InterruptedException
+    {
+        assert isSending.get() >= 0;
+        isSending.updateAndGet(i -> -1 -i);
+        controller.setInFlightByteBounds(0, Long.MAX_VALUE);
+        if (isSending.get() != 0)
         {
-            while (ApproximateTime.nanoTime() < deadlineNanos && !Thread.currentThread().isInterrupted())
-                sendOne();
+            WaitQueue.Signal signal = waitingForSendersToUnregister.register();
+            if (isSending.get() != 0) signal.await();
+            else signal.cancel();
         }
-        catch (Throwable t)
-        {
-            if (t instanceof InterruptedException)
-                return;
-            logger.error("Unexpected exception", t);
-            onFailure.run();
-        }
+        verifier.onInitiateSync(() -> isSending.set(0));
     }
 
     void sendOne() throws InterruptedException
@@ -149,7 +161,6 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
                 {
                     case 0: throw new IntentionalIOException();
                     case 1: throw new IntentionalRuntimeException();
-//                    case 2: throw new AssertionError("INTENTIONAL FAILURE");
                 }
                 break;
             case 2:
@@ -169,37 +180,36 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     {
         verifier.onDeserialize(header.id, messagingVersion);
         int length = header.length;
-//        switch (header.info)
-//        {
-//            case 4:
-//                switch ((int) (header.id & 1))
-//                {
-//                    case 0: throw new IntentionalExceptions.IntentionalIOException();
-//                    case 1: throw new IntentionalExceptions.IntentionalRuntimeException();
-////                    case 2: throw new AssertionError("INTENTIONAL FAILURE");
-//                }
-//                break;
-//            case 5: {
-//                length -= (int)header.id % header.length;
-//                break;
-//            }
-//            case 6: {
-//                length += (int)header.id & 65535;
-//                break;
-//            }
-//        }
+        switch (header.info)
+        {
+            case 4:
+                switch ((int) (header.id & 1))
+                {
+                    case 0: throw new IntentionalIOException();
+                    case 1: throw new IntentionalRuntimeException();
+                }
+                break;
+            case 5: {
+                length -= (int)header.id % header.length;
+                break;
+            }
+            case 6: {
+                length += (int)header.id & 65535;
+                break;
+            }
+        }
         byte[] result = header.read(in, Math.min(header.length, length), messagingVersion);
-//        if (length > header.length)
-//        {
-//            length -= header.length;
-//            while (length >= 8)
-//            {
-//                in.readLong();
-//                length -= 8;
-//            }
-//            while (length-- > 0)
-//                in.readByte();
-//        }
+        if (length > header.length)
+        {
+            length -= header.length;
+            while (length >= 8)
+            {
+                in.readLong();
+                length -= 8;
+            }
+            while (length-- > 0)
+                in.readByte();
+        }
         return result;
     }
 

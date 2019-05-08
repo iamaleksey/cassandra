@@ -229,6 +229,9 @@ public class ConnectionBurnTest
                             while (ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
                             {
                                 Connection connection = connections[random.nextInt(connections.length)];
+                                if (!connection.isSending())
+                                    continue;
+
                                 Thread.currentThread().setName("Generate-" + connection.linkId);
                                 int count = 0;
                                 switch (random.nextInt() & 3)
@@ -238,7 +241,11 @@ public class ConnectionBurnTest
                                     case 2: count = random.nextInt(1000, 2000); break;
                                     case 3: count = random.nextInt(2000, 10000); break;
                                 }
-                                while (count-- > 0 && ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
+
+                                while (connection.isSending()
+                                       && count-- > 0
+                                       && ApproximateTime.nanoTime() < deadline
+                                       && !Thread.currentThread().isInterrupted())
                                     connection.sendOne();
                             }
                         }

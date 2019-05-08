@@ -97,6 +97,7 @@ public class Verifier
         FAILED_FRAME,
 
         CONNECT,
+        SYNC,               // the connection will stop sending messages, and promptly process any waiting inbound messages
         CONTROLLER_UPDATE
     }
 
@@ -319,6 +320,16 @@ public class Verifier
         }
     }
 
+    static class SyncEvent extends SimpleEvent
+    {
+        final Runnable onCompletion;
+        SyncEvent(long at, Runnable onCompletion)
+        {
+            super(EventType.SYNC, at);
+            this.onCompletion = onCompletion;
+        }
+    }
+
     static class ControllerEvent extends BoundedEvent
     {
         final long minimumBytesInFlight;
@@ -329,6 +340,12 @@ public class Verifier
             this.minimumBytesInFlight = minimumBytesInFlight;
             this.maximumBytesInFlight = maximumBytesInFlight;
         }
+    }
+
+    void onInitiateSync(Runnable onCompletion)
+    {
+        SyncEvent connect = new SyncEvent(nextId(), onCompletion);
+        events.put(connect.at, connect);
     }
 
     void onConnect(int messagingVersion, OutboundConnectionSettings settings)
@@ -449,6 +466,7 @@ public class Verifier
     final Queue<Frame> reuseFrames = new Queue<>();
     final Queue<MessageState> processingOutOfOrder = new Queue<>();
 
+    SyncEvent sync;
     long canonicalBytesInFlight = 0;
     long nextMessageId = 0;
     long now;
@@ -476,6 +494,23 @@ public class Verifier
                         }
                         else break;
                     }
+
+                    if (sync != null)
+                    {
+                        // if we have waited 100ms since beginning a sync, with no events, and ANY of our queues are
+                        // non-empty, something is probably wrong; however, let's give ourselves a little bit longer
+                        // TODO
+                        boolean done = true;
+                        if (!currentConnection.serializing.isEmpty())
+                        {
+
+                        }
+                        if (enqueueing.isEmpty())
+                        {
+                            // should have finished sync
+                        }
+                    }
+
                     continue;
                 }
                 events.clear(nextMessageId); // TODO: simplify collection if we end up using it exclusively as a queue, as we are now
@@ -490,6 +525,9 @@ public class Verifier
                         assert e.message != null;
                         if (nextMessageId == e.start)
                         {
+                            if (sync != null)
+                                fail("Sync in progress - there should be no messages beginning to enqueue");
+
                             canonicalBytesInFlight += e.message.serializedSize(current_version);
                             m = new MessageState(e.message, e.destiny, e.start);
                             messages.put(e.messageId, m);
@@ -879,6 +917,11 @@ public class Verifier
                     {
                         ConnectEvent e = (ConnectEvent) next;
                         currentConnection = new ConnectionState(connectionCounter++, e.messagingVersion);
+                        break;
+                    }
+                    case SYNC:
+                    {
+                        sync = (SyncEvent) next;
                         break;
                     }
                     default:
