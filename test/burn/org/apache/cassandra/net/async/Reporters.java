@@ -46,7 +46,7 @@ class Reporters
             inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        Reporters::prettyPrintMemory),
 
             outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       Reporters::prettyPrintMemory),
-            inboundReporter  (false, "Inbound Pending Bytes",        InboundCounters::pendingBytes,          Reporters::prettyPrintMemory),
+            reporter         (false, "Inbound Pending Bytes",        c -> c.inboundHandlers.usingCapacity(), Reporters::prettyPrintMemory),
 
             outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
             inboundReporter  (true,  "Inbound Expirations",          InboundCounters::expiredCount,          Long::toString),
@@ -82,6 +82,11 @@ class Reporters
     private Reporter inboundReporter(boolean accumulates, String name, ToLongFunction<InboundCounters> get, LongFunction<String> printer)
     {
         return new Reporter(accumulates, name, (conn) -> get.applyAsLong(conn.inboundCounters()), printer);
+    }
+
+    private Reporter reporter(boolean accumulates, String name, ToLongFunction<Connection> get, LongFunction<String> printer)
+    {
+        return new Reporter(accumulates, name, get, printer);
     }
 
     class Reporter

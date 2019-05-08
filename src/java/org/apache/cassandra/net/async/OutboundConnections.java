@@ -58,6 +58,7 @@ public class OutboundConnections
     private final SimpleCondition metricsReady = new SimpleCondition();
     private volatile InternodeOutboundMetrics metrics;
     private final BackPressureState backPressureState;
+    private final ResourceLimits.Limit reserveCapacity;
 
     private OutboundConnectionSettings template;
     public final OutboundConnection small;
@@ -68,8 +69,8 @@ public class OutboundConnections
     {
         this.backPressureState = backPressureState;
         this.template = template = template.withDefaultReserveLimits();
-        ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
+        reserveCapacity = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveCapacity, template.applicationReserveSendQueueGlobalCapacityInBytes);
         this.small = new OutboundConnection(SMALL_MESSAGES, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGES, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT_MESSAGES, template, reserveCapacityInBytes);
@@ -225,6 +226,11 @@ public class OutboundConnections
             default:
                 throw new IllegalArgumentException("unsupported connection type: " + type);
         }
+    }
+
+    public long usingReserveBytes()
+    {
+        return reserveCapacity.using();
     }
 
     public long expiredCallbacks()

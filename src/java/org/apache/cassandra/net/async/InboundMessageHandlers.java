@@ -20,13 +20,9 @@ package org.apache.cassandra.net.async;
 import java.util.Collection;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.function.Consumer;
 import java.util.function.ToLongFunction;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -286,14 +282,24 @@ public final class InboundMessageHandlers
         return sumHandlers(h -> h.throttledNanos) + closedThrottledNanos;
     }
 
-    public int corruptFramesRecovered()
+    public long usingCapacity()
     {
-        return (int) sumHandlers(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
+        return sumHandlers(h -> h.queueSize);
     }
 
-    public int corruptFramesUnrecovered()
+    public long usingReserveCapacity()
     {
-        return (int) sumHandlers(h -> h.corruptFramesUnrecovered) + closedCorruptFramesUnrecovered;
+        return endpointReserveCapacity.using();
+    }
+
+    public long corruptFramesRecovered()
+    {
+        return sumHandlers(h -> h.corruptFramesRecovered) + closedCorruptFramesRecovered;
+    }
+
+    public long corruptFramesUnrecovered()
+    {
+        return sumHandlers(h -> h.corruptFramesUnrecovered) + closedCorruptFramesUnrecovered;
     }
 
     public long errorCount()
@@ -328,12 +334,12 @@ public final class InboundMessageHandlers
 
     public long pendingCount()
     {
-        return sumCounters(InboundCounters::pendingCount);
+        return sumCounters(InboundCounters::scheduledCount);
     }
 
     public long pendingBytes()
     {
-        return sumCounters(InboundCounters::pendingBytes);
+        return sumCounters(InboundCounters::scheduledBytes);
     }
 
     /*
@@ -354,12 +360,12 @@ public final class InboundMessageHandlers
     private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedThrottledNanosUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedThrottledNanos");
 
-    private volatile int closedCorruptFramesRecovered, closedCorruptFramesUnrecovered;
+    private volatile long closedCorruptFramesRecovered, closedCorruptFramesUnrecovered;
 
-    private static final AtomicIntegerFieldUpdater<InboundMessageHandlers> closedCorruptFramesRecoveredUpdater =
-        AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesRecovered");
-    private static final AtomicIntegerFieldUpdater<InboundMessageHandlers> closedCorruptFramesUnrecoveredUpdater =
-        AtomicIntegerFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesUnrecovered");
+    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedCorruptFramesRecoveredUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesRecovered");
+    private static final AtomicLongFieldUpdater<InboundMessageHandlers> closedCorruptFramesUnrecoveredUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundMessageHandlers.class, "closedCorruptFramesUnrecovered");
 
     private void absorbCounters(InboundMessageHandler handler)
     {

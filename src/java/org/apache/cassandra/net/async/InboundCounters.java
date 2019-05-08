@@ -96,33 +96,33 @@ class InboundCounters
         return processedBytes;
     }
 
-    private volatile long pendingCount;
-    private volatile long pendingBytes;
+    private volatile long scheduledCount;
+    private volatile long scheduledBytes;
 
-    private static final AtomicLongFieldUpdater<InboundCounters> pendingCountUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundCounters.class, "pendingCount");
-    private static final AtomicLongFieldUpdater<InboundCounters> pendingBytesUpdater =
-        AtomicLongFieldUpdater.newUpdater(InboundCounters.class, "pendingBytes");
+    private static final AtomicLongFieldUpdater<InboundCounters> scheduledCountUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundCounters.class, "scheduledCount");
+    private static final AtomicLongFieldUpdater<InboundCounters> scheduledBytesUpdater =
+        AtomicLongFieldUpdater.newUpdater(InboundCounters.class, "scheduledBytes");
 
     void addPending(int bytes)
     {
-        pendingCountUpdater.incrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, bytes);
+        scheduledCountUpdater.incrementAndGet(this);
+        scheduledBytesUpdater.addAndGet(this, bytes);
     }
 
     void removePending(int bytes)
     {
-        pendingCountUpdater.decrementAndGet(this);
-        pendingBytesUpdater.addAndGet(this, -bytes);
+        scheduledCountUpdater.decrementAndGet(this);
+        scheduledBytesUpdater.addAndGet(this, -bytes);
     }
 
-    long pendingCount()
+    long scheduledCount()
     {
-        return pendingCount;
+        return scheduledCount;
     }
 
-    long pendingBytes()
+    long scheduledBytes()
     {
-        return pendingBytes;
+        return scheduledBytes;
     }
 }

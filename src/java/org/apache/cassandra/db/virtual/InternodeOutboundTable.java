@@ -42,10 +42,12 @@ final class InternodeOutboundTable extends AbstractVirtualTable
     private static final String DC = "dc";
     private static final String RACK = "rack";
 
-    private static final String SENT_COUNT = "sent_count";
-    private static final String SENT_BYTES = "sent_bytes";
+    private static final String USING_BYTES = "using_bytes";
+    private static final String USING_RESERVE_BYTES = "using_reserve_bytes";
     private static final String PENDING_COUNT = "pending_count";
     private static final String PENDING_BYTES = "pending_bytes";
+    private static final String SENT_COUNT = "sent_count";
+    private static final String SENT_BYTES = "sent_bytes";
     private static final String EXPIRED_COUNT = "expired_count";
     private static final String EXPIRED_BYTES = "expired_bytes";
     private static final String ERROR_COUNT = "error_count";
@@ -65,10 +67,12 @@ final class InternodeOutboundTable extends AbstractVirtualTable
                            .addPartitionKeyColumn(PORT, Int32Type.instance)
                            .addClusteringColumn(DC, UTF8Type.instance)
                            .addClusteringColumn(RACK, UTF8Type.instance)
-                           .addRegularColumn(SENT_COUNT, LongType.instance)
-                           .addRegularColumn(SENT_BYTES, LongType.instance)
+                           .addRegularColumn(USING_BYTES, LongType.instance)
+                           .addRegularColumn(USING_RESERVE_BYTES, LongType.instance)
                            .addRegularColumn(PENDING_COUNT, LongType.instance)
                            .addRegularColumn(PENDING_BYTES, LongType.instance)
+                           .addRegularColumn(SENT_COUNT, LongType.instance)
+                           .addRegularColumn(SENT_BYTES, LongType.instance)
                            .addRegularColumn(EXPIRED_COUNT, LongType.instance)
                            .addRegularColumn(EXPIRED_BYTES, LongType.instance)
                            .addRegularColumn(ERROR_COUNT, LongType.instance)
@@ -110,11 +114,14 @@ final class InternodeOutboundTable extends AbstractVirtualTable
     {
         String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(addressAndPort);
         String rack = DatabaseDescriptor.getEndpointSnitch().getRack(addressAndPort);
+        long pendingBytes = sum(connections, OutboundConnection::pendingBytes);
         dataSet.row(addressAndPort.address, addressAndPort.port, dc, rack)
+               .column(USING_BYTES, pendingBytes)
+               .column(USING_RESERVE_BYTES, connections.usingReserveBytes())
+               .column(PENDING_COUNT, sum(connections, OutboundConnection::pendingCount))
+               .column(PENDING_BYTES, pendingBytes)
                .column(SENT_COUNT, sum(connections, OutboundConnection::sentCount))
                .column(SENT_BYTES, sum(connections, OutboundConnection::sentBytes))
-               .column(PENDING_COUNT, sum(connections, OutboundConnection::pendingCount))
-               .column(PENDING_BYTES, sum(connections, OutboundConnection::pendingBytes))
                .column(EXPIRED_COUNT, sum(connections, OutboundConnection::expiredCount))
                .column(EXPIRED_BYTES, sum(connections, OutboundConnection::expiredBytes))
                .column(ERROR_COUNT, sum(connections, OutboundConnection::errorCount))

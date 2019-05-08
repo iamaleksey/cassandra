@@ -91,7 +91,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private final long queueCapacity;
     @SuppressWarnings("FieldMayBeFinal")
-    private volatile long queueSize = 0L;
+    volatile long queueSize = 0L;
     private static final AtomicLongFieldUpdater<InboundMessageHandler> queueSizeUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandler.class, "queueSize");
 
@@ -111,7 +111,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     /*
      * Counters
      */
-    int corruptFramesRecovered, corruptFramesUnrecovered;
+    long corruptFramesRecovered, corruptFramesUnrecovered;
     long receivedCount, receivedBytes;
     long throttledCount, throttledNanos;
 
