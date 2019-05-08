@@ -48,8 +48,20 @@ abstract class MessageGenerator
     Message.Builder<Object> builder(long id)
     {
         random.setSeed(id ^ seed);
+        long now = System.nanoTime();
+
+        int expiresInMillis;
+        int expiryMask = random.nextInt();
+        if (0 == (expiryMask & 0xfffff)) expiresInMillis = 100;
+        else if (0 == (expiryMask & 0xfff)) expiresInMillis = 1000;
+        else if (0 == (expiryMask & 0xf)) expiresInMillis = 10000;
+        else expiresInMillis = 5 * 60 * 1000;
+
+        long expiresInNanos = TimeUnit.MILLISECONDS.toNanos((expiresInMillis / 2) + random.nextInt(expiresInMillis / 2));
+
         return Message.builder(Verb._TEST_2, null)
-                      .withExpiresAt(System.nanoTime() + TimeUnit.DAYS.toNanos(1L)); // don't expire for now
+                      .withCreatedAt(now)
+                      .withExpiresAt(now + expiresInNanos); // don't expire for now
     }
 
     public int uniformInt(int limit)

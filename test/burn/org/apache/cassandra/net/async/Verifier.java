@@ -64,8 +64,9 @@ import static org.apache.cassandra.net.async.Verifier.EventType.SERIALIZE;
  * TODO: multiple threads sending messages
  * TODO: timeliness of events
  * TODO: periodically stop all activity to/from a given endpoint, until it stops (and verify queues all empty, counters all accurate)
- * TODO: integrate with proxy that corrupts or loses frames
+ * TODO: integrate with proxy that corrupts frames
  * TODO: test _OutboundConnection_ close
+ * TODO: verify that we do not process very expired messages
  */
 @SuppressWarnings("WeakerAccess")
 public class Verifier
