@@ -188,6 +188,16 @@ public class Verifier
         }
     }
 
+    static class FailedSerializeEvent extends SimpleMessageEvent
+    {
+        final Throwable failure;
+        FailedSerializeEvent(long at, long messageId, Throwable failure)
+        {
+            super(FAILED_SERIALIZE, at, messageId);
+            this.failure = failure;
+        }
+    }
+
     static class ExpiredMessageEvent extends SimpleMessageEvent
     {
         enum ExpirationType {ON_SENT, ON_ARRIVED, ON_PROCESSED }
@@ -248,10 +258,10 @@ public class Verifier
         long at = nextId();
         events.put(at, new SerializeMessageEvent(SERIALIZE, at, messageId, messagingVersion));
     }
-    void onFailedSerialize(long messageId)
+    void onFailedSerialize(long messageId, Throwable failure)
     {
         long at = nextId();
-        events.put(at, new SimpleMessageEvent(FAILED_SERIALIZE, at, messageId));
+        events.put(at, new FailedSerializeEvent(at, messageId, failure));
     }
     void onExpiredBeforeSend(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
     {
@@ -357,18 +367,14 @@ public class Verifier
     private final BytesInFlightController controller;
     private final AtomicLong sequenceId = new AtomicLong();
     private final EventSequence events = new EventSequence();
-    private final ConnectionType outboundType;
     private final InboundMessageHandlers inbound;
     private final OutboundConnection outbound;
-    private final InboundCounters inboundCounters;
 
-    Verifier(BytesInFlightController controller, ConnectionType type, InboundMessageHandlers inbound, OutboundConnection outbound)
+    Verifier(BytesInFlightController controller, OutboundConnection outbound, InboundMessageHandlers inbound)
     {
         this.controller = controller;
-        this.outboundType = type;
         this.inbound = inbound;
         this.outbound = outbound;
-        this.inboundCounters = inbound.countersFor(type);
     }
 
     private long nextId()
@@ -427,12 +433,12 @@ public class Verifier
         }
     }
 
-    final LongObjectOpenHashMap<MessageState> messages = new LongObjectOpenHashMap<>();
+    private final LongObjectOpenHashMap<MessageState> messages = new LongObjectOpenHashMap<>();
 
     // messages start here, but may enter in a haphazard (non-sequential) fashion;
     // ENQUEUE_START, ENQUEUE_END both take place here, with the latter imposing bounds on the out-of-order appearance of messages.
     // note that ENQUEUE_END - being concurrent - may not appear before the message's lifespan has completely ended.
-    final Queue<MessageState> enqueueing = new Queue<>();
+    private final Queue<MessageState> enqueueing = new Queue<>();
 
     static final class ConnectionState
     {
@@ -456,6 +462,9 @@ public class Verifier
         final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
                                   deserializingOffEventLoop = new Queue<>();
 
+        private long sentCount, sentBytes;
+        private long receivedCount, receivedBytes;
+
         ConnectionState(long connectionId, int messagingVersion)
         {
             this.connectionId = connectionId;
@@ -469,15 +478,20 @@ public class Verifier
         }
     }
 
-    final Queue<Frame> reuseFrames = new Queue<>();
-    final Queue<MessageState> processingOutOfOrder = new Queue<>();
+    private final Queue<MessageState> processingOutOfOrder = new Queue<>();
 
-    SyncEvent sync;
-    long canonicalBytesInFlight = 0;
-    long nextMessageId = 0;
-    long now;
-    long connectionCounter;
-    ConnectionState currentConnection = new ConnectionState(connectionCounter++, current_version);
+    private SyncEvent sync;
+    private long nextMessageId = 0;
+    private long now;
+    private long connectionCounter;
+    private ConnectionState currentConnection = new ConnectionState(connectionCounter++, current_version);
+
+    private long outboundSentCount, outboundSentBytes;
+    private long outboundSubmittedCount;
+    private long outboundOverloadedCount, outboundOverloadedBytes;
+    private long outboundExpiredCount, outboundExpiredBytes;
+    private long outboundErrorCount, outboundErrorBytes;
+
 
     public void run(Runnable onFailure, long deadlineNanos)
     {
@@ -520,7 +534,13 @@ public class Verifier
                             if (!done)
                                 fail("Unreasonably long period spent waiting for sync");
 
-                            ConnectionUtils.check(outbound).pending(0, 0)
+                            ConnectionUtils.check(outbound)
+                                           .pending(0, 0)
+                                           .error(outboundErrorCount, outboundErrorBytes)
+                                           .submitted(outboundSubmittedCount)
+                                           .expired(outboundExpiredCount, outboundExpiredBytes)
+                                           .overload(outboundOverloadedCount, outboundOverloadedBytes)
+                                           .sent(outboundSentCount, outboundSentBytes)
                                            .check((message, expect, actual) -> fail("%s: expect %d, actual %d", message, expect, actual));
 
                             sync.onCompletion.run();
@@ -545,7 +565,6 @@ public class Verifier
                             if (sync != null)
                                 fail("Sync in progress - there should be no messages beginning to enqueue");
 
-                            canonicalBytesInFlight += e.message.serializedSize(current_version);
                             m = new MessageState(e.message, e.destiny, e.start);
                             messages.put(e.messageId, m);
                             enqueueing.add(m);
@@ -558,6 +577,7 @@ public class Verifier
                             m = messages.get(e.messageId);
                             if (m != null)
                                 m.enqueueEnd = e.end;
+                            outboundSubmittedCount += 1;
                         }
                         break;
                     }
@@ -569,6 +589,8 @@ public class Verifier
                         MessageState m = remove(e.messageId, enqueueing, messages);
                         if (ENQUEUE != m.state)
                             fail("Invalid state at overload of %d: expected message in %s, found %s", m.message.id(), ENQUEUE, m.state);
+                        outboundOverloadedBytes += m.message.serializedSize(current_version);
+                        outboundOverloadedCount += 1;
                         break;
                     }
                     case FAILED_CLOSING:
@@ -596,7 +618,7 @@ public class Verifier
                         if (e.messagingVersion != current_version)
                             controller.adjust(m.message.serializedSize(current_version), m.message.serializedSize(e.messagingVersion));
 
-                        m.processOnEventLoop = willProcessOnEventLoop(outboundType, m.message, e.messagingVersion);
+                        m.processOnEventLoop = willProcessOnEventLoop(outbound.type(), m.message, e.messagingVersion);
                         m.expiresAtNanos = expiresAtNanos(m.message, e.messagingVersion);
                         int mi = enqueueing.indexOf(m);
                         for (int i = 0 ; i < mi ; ++i)
@@ -621,15 +643,21 @@ public class Verifier
                         MessageState m = messages.remove(e.messageId);
                         switch (m.state)
                         {
-                            case ENQUEUE:
-                                enqueueing.remove(m);
+                            case ARRIVE:
+                                // large message that arrives before we fail to complete the serialization successfully
+                                // TODO: we should verify inbound does _not_ process this
+                                m.sentOn.arriving.remove(m);
                                 break;
                             case SERIALIZE:
                                 m.sentOn.serializing.remove(m);
                                 break;
+                            default:
+                                fail("Invalid state of %s (expect %s)", m, SERIALIZE);
                         }
                         if (m.destiny != Destiny.FAIL_TO_SERIALIZE)
                             fail("%s failed to serialize, but its destiny was to %s", m, m.destiny);
+                        outboundErrorBytes += m.messageSize();
+                        outboundErrorCount += 1;
                         break;
                     }
                     case SEND_FRAME:
@@ -637,8 +665,7 @@ public class Verifier
                         FrameEvent e = (FrameEvent) next;
                         assert nextMessageId == e.at;
                         int size = 0;
-                        Frame frame = reuseFrames.poll();
-                        if (frame == null) frame = new Frame();
+                        Frame frame = new Frame();
                         MessageState first = currentConnection.serializing.get(0);
                         int messagingVersion = first.messagingVersion;
                         for (int i = 0 ; i < e.messageCount ; ++i)
@@ -665,7 +692,9 @@ public class Verifier
                     }
                     case SENT_FRAME:
                     {
-                        currentConnection.framesInFlight.supplySendStatus(Frame.Status.SUCCESS);
+                        Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.SUCCESS);
+                        outboundSentBytes += frame.payloadSizeInBytes;
+                        outboundSentCount += frame.messageCount;
                         break;
                     }
                     case FAILED_FRAME:
@@ -673,13 +702,14 @@ public class Verifier
                         // TODO: is it possible for this to be signalled AFTER our reconnect event? probably, in which case this will be wrong
                         // TODO: verify that this was expected
                         Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.FAILED);
-                        if (frame != null && frame.messagingVersion >= VERSION_40)
+                        if (frame.messagingVersion >= VERSION_40)
                         {
                             // the contents cannot be delivered without the whole frame arriving, so clear the contents now
                             clear(frame, messages);
                             currentConnection.framesInFlight.remove(frame);
-                            reuseFrames.add(frame.reset());
                         }
+                        outboundErrorBytes += frame.payloadSizeInBytes;
+                        outboundErrorCount += frame.messageCount;
                         break;
                     }
                     case ARRIVE:
@@ -694,7 +724,7 @@ public class Verifier
                         if (e.messageSize != m.messageSize())
                             fail("onArrived with invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
 
-                        if (outboundType == LARGE_MESSAGES)
+                        if (outbound.type() == LARGE_MESSAGES)
                         {
                             if (m.state != SERIALIZE)
                             {
@@ -705,6 +735,8 @@ public class Verifier
                             for (int i = 0; i < mi; ++i)
                                 fail("Invalid order of events: %s serialized to large stream strictly before %s, but arrived after", m.sentOn.serializing.get(i), m);
                             m.sentOn.serializing.remove(mi);
+                            outboundSentBytes += m.messageSize();
+                            outboundSentCount += 1;
                         }
                         else
                         {
@@ -741,7 +773,6 @@ public class Verifier
                                             failinfo("Containing: %s", skip.get(j));
                                     }
                                     clear(skip, messages);
-                                    reuseFrames.add(skip.reset());
                                 }
                                 m.sentOn.framesInFlight.removeFirst(fi);
                                 failinfo("END: Successfully sent frames were not delivered");
@@ -753,10 +784,7 @@ public class Verifier
 
                             frame.remove(mi);
                             if (frame.isEmpty())
-                            {
                                 m.sentOn.framesInFlight.poll();
-                                reuseFrames.add(frame.reset());
-                            }
                         }
                         m.sentOn.arriving.add(m);
                         m.update(next.type);
@@ -814,6 +842,7 @@ public class Verifier
                         (m.processOnEventLoop ? m.sentOn.deserializingOnEventLoop : m.sentOn.deserializingOffEventLoop).remove(m);
                         if (m.destiny != Destiny.FAIL_TO_DESERIALIZE)
                             fail("%s failed to deserialize, but its destiny was to %s", m, m.destiny);
+
                         break;
                     }
                     case PROCESS:
@@ -829,7 +858,6 @@ public class Verifier
                             fail("Invalid state of %s (expect %s)", m, DESERIALIZE);
                             break;
                         }
-                        canonicalBytesInFlight -= m.message.serializedSize(m.messagingVersion);
                         if (!Arrays.equals((byte[]) e.message.payload, (byte[]) m.message.payload))
                         {
                             fail("Invalid message payload for %d: %s supplied by processor, but %s implied by original message and messaging version",
@@ -883,10 +911,12 @@ public class Verifier
                             case ON_SENT:
                                 if (m.state != ENQUEUE)
                                     fail("Invalid state onExpiry ON_SENT of %s", m);
+                                outboundExpiredBytes += m.message.serializedSize(current_version);
+                                outboundExpiredCount += 1;
                                 break;
                             case ON_ARRIVED:
                                 if (m.state != ARRIVE && // can be deferred and return to expire on arrival
-                                    (outboundType == LARGE_MESSAGES ? m.state != SERIALIZE
+                                    (outbound.type() == LARGE_MESSAGES ? m.state != SERIALIZE
                                                                     : m.state != SEND_FRAME && m.state != SENT_FRAME && m.state != FAILED_FRAME))
                                     fail("Invalid state onExpiry ON_ARRIVED of %s", m);
                                 break;
@@ -914,7 +944,7 @@ public class Verifier
                                 // TODO: this should be robust to re-ordering; should perhaps extract a common method
                                 m.sentOn.framesInFlight.get(0).remove(m);
                                 if (m.sentOn.framesInFlight.get(0).isEmpty())
-                                    m.sentOn.framesInFlight.removeFirst(1);
+                                    m.sentOn.framesInFlight.poll();
                                 break;
                             case SERIALIZE: m.sentOn.serializing.remove(m); break;
                             case ARRIVE: m.sentOn.arriving.remove(m); break;
@@ -1225,12 +1255,6 @@ public class Verifier
             items[end++] = item;
         }
 
-        void clear()
-        {
-            Arrays.fill(items, begin, end, null);
-            begin = end = 0;
-        }
-
         void removeFirst(int count)
         {
             Arrays.fill(items, begin, begin + count, null);
@@ -1277,58 +1301,83 @@ public class Verifier
 
 
 
-    static class FramesInFlight extends Queue<Frame>
+    static class FramesInFlight
     {
         // this may be negative, indicating we have processed a frame whose status we did not know at the time
         // TODO: we should verify the status of these frames by logging the inferred status and verifying it matches
-        private int framesWithStatus;
+        final Queue<Frame> inFlight = new Queue<>();
+        final Queue<Frame> retiredWithoutStatus = new Queue<>();
+        private int withStatus;
 
         Frame supplySendStatus(Frame.Status status)
         {
-            Frame frame = null;
-            if (framesWithStatus >= 0)
-            {
-                frame = get(framesWithStatus);
-                assert frame.sendStatus == Frame.Status.UNKNOWN;
-                frame.sendStatus = status;
-            }
-            ++framesWithStatus;
+            Frame frame;
+            if (withStatus >= 0) frame = inFlight.get(withStatus);
+            else frame = retiredWithoutStatus.poll();
+            if (frame.sendStatus != Frame.Status.UNKNOWN)
+                throw new IllegalStateException();
+            assert frame.sendStatus == Frame.Status.UNKNOWN;
+            frame.sendStatus = status;
+            ++withStatus;
             return frame;
         }
 
-        void remove(int i)
+        boolean isEmpty()
         {
-            if (i > framesWithStatus)
-                throw new IllegalArgumentException();
-            --framesWithStatus;
-            super.remove(i);
+            return inFlight.isEmpty();
         }
 
-        void clear()
+        int size()
         {
-            framesWithStatus -= size();
-            super.clear();
+            return inFlight.size();
+        }
+
+        Frame get(int i)
+        {
+            return inFlight.get(i);
+        }
+
+        void add(Frame frame)
+        {
+            assert frame.sendStatus == Frame.Status.UNKNOWN;
+            inFlight.add(frame);
+        }
+
+        void remove(Frame frame)
+        {
+            int i = inFlight.indexOf(frame);
+            if (i > 0) throw new IllegalStateException();
+            if (i == 0) poll();
         }
 
         void removeFirst(int count)
         {
-            framesWithStatus -= count;
-            super.removeFirst(count);
+            while (count-- > 0)
+                poll();
         }
 
         Frame poll()
         {
-            --framesWithStatus;
-            return super.poll();
+            Frame frame = inFlight.poll();
+            if (--withStatus < 0)
+            {
+                assert frame.sendStatus == Frame.Status.UNKNOWN;
+                retiredWithoutStatus.add(frame);
+            }
+            else
+                assert frame.sendStatus != Frame.Status.UNKNOWN;
+            return frame;
         }
 
         public String toString()
         {
             StringBuilder result = new StringBuilder();
             result.append("[withStatus=");
-            result.append(framesWithStatus);
-            result.append(", ");
-            toString(result);
+            result.append(withStatus);
+            result.append("; ");
+            inFlight.toString(result);
+            result.append("; ");
+            retiredWithoutStatus.toString(result);
             result.append(']');
             return result.toString();
         }

@@ -77,7 +77,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
                                                 .withDebugCallbacks(this);
         this.inbound = inbound;
         this.outbound = new OutboundConnection(type, this.outboundTemplate, reserveCapacityInBytes);
-        this.verifier = new Verifier(controller, type, inbound, outbound);
+        this.verifier = new Verifier(controller, outbound, inbound);
     }
 
     void startVerifier(Runnable onFailure, Executor executor, long deadlineNanos)
@@ -288,10 +288,10 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
-    public void onFailedSerialize(Message<?> message, int messagingVersion)
+    public void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure)
     {
         controller.fail(message.serializedSize(messagingVersion));
-        verifier.onFailedSerialize(message.id());
+        verifier.onFailedSerialize(message.id(), failure);
     }
 
     public void onDiscardOnClose(Message<?> message)

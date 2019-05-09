@@ -29,7 +29,7 @@ public interface OutboundMessageCallbacks
         {
             public void onOverloaded(Message<?> message) { onDrop.accept(message); }
             public void onExpired(Message<?> message) { onDrop.accept(message); }
-            public void onFailedSerialize(Message<?> message, int messagingVersion) { onDrop.accept(message); }
+            public void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure) { onDrop.accept(message); }
             public void onDiscardOnClose(Message<?> message) { onDrop.accept(message); }
         };
     }
@@ -41,7 +41,7 @@ public interface OutboundMessageCallbacks
     void onExpired(Message<?> message);
 
     /** A message was not serialized to a frame because an exception was thrown */
-    void onFailedSerialize(Message<?> message, int messagingVersion);
+    void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure);
 
     /** A message was not sent because the connection was forcibly closed */
     void onDiscardOnClose(Message<?> message);

@@ -131,7 +131,7 @@ public class ConnectionUtils
             }
             if (checkError)
             {
-                testAndFailCheck.accept("error count values dont' match", error, connection.errorCount());
+                testAndFailCheck.accept("error count values don't match", error, connection.errorCount());
                 testAndFailCheck.accept("error bytes values don't match", errorBytes, connection.errorBytes());
             }
         }
