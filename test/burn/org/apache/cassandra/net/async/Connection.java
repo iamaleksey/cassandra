@@ -157,8 +157,10 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     void serialize(long id, byte[] payload, DataOutputPlus out, int messagingVersion) throws IOException
     {
         verifier.onSerialize(id, messagingVersion);
-        int length = payload.length;
-        switch (MessageGenerator.getInfo(payload))
+        boolean willFail = outbound.type() != ConnectionType.LARGE_MESSAGES;
+        int firstWrite = payload.length, remainder = 0;
+        byte info = MessageGenerator.getInfo(payload);
+        switch (info)
         {
             case 1:
                 switch ((int) (id & 1))
@@ -168,16 +170,24 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
                 }
                 break;
             case 2:
-                length -= (int)id % payload.length;
+                willFail = true;
+                firstWrite -= (int)id % payload.length;
                 break;
             case 3:
-                length += (int)id & 65535;
+                willFail = true;
+                remainder = (int)id & 65535;
                 break;
         }
 
-        MessageGenerator.write(payload, Math.min(length, payload.length), out, messagingVersion);
-        while ((length -= payload.length) > 0)
-            out.write(payload, 0, Math.min(length, payload.length));
+        MessageGenerator.writeLength(payload, out, messagingVersion);
+        out.write(payload, 0, firstWrite);
+        while (remainder > 0)
+        {
+            out.write(payload, 0, Math.min(remainder, payload.length));
+            remainder -= payload.length;
+        }
+        if (!willFail)
+            verifier.onFinishSerializeLarge(id);
     }
 
     byte[] deserialize(MessageGenerator.Header header, DataInputPlus in, int messagingVersion) throws IOException

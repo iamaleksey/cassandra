@@ -158,13 +158,12 @@ abstract class MessageGenerator
         return new Header(length, id, info);
     }
 
-    static void write(byte[] payload, int writeBytes, DataOutputPlus out, int messagingVersion) throws IOException
+    static void writeLength(byte[] payload, DataOutputPlus out, int messagingVersion) throws IOException
     {
         if (messagingVersion < VERSION_40)
             out.writeInt(payload.length);
         else
             out.writeUnsignedVInt(payload.length);
-        out.write(payload, 0, writeBytes);
     }
 
     static long serializedSize(byte[] payload, int messagingVersion)

@@ -626,6 +626,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         {
             if (!isSkipping)
             {
+                callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(size, received));
                 releaseCapacity(size);
                 releaseBuffers();
                 isSkipping = true;
