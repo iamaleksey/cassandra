@@ -85,7 +85,7 @@ public class ConnectionBurnTest
             return (timeElapsed, timeUnit) -> {};
         }
         public void recordInternalLatency(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
-        public void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
+        public void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit) {}
     }
 
     static class Inbound

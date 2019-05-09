@@ -275,7 +275,7 @@ public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILa
         {
             if (MessagingService.instance() != null)
             {
-                MessagingService.instance().latency.subscribe(this);
+                MessagingService.instance().latencySubscribers.subscribe(this);
                 registered = true;
             }
 

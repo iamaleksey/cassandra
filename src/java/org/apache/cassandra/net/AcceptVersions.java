@@ -16,14 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.net.async;
+package org.apache.cassandra.net;
 
-import java.util.concurrent.TimeUnit;
-
-import org.apache.cassandra.net.Verb;
-
-public interface VerbLatencyConsumer
+public class AcceptVersions
 {
-    void accept(Verb verb, long timeElapsed, TimeUnit unit);
+    public final int min, max;
+    public AcceptVersions(int min, int max)
+    {
+        this.min = min;
+        this.max = max;
+    }
+    public boolean equals(Object that)
+    {
+        if (!(that instanceof AcceptVersions))
+            return false;
+        return    min == ((AcceptVersions) that).min
+               && max == ((AcceptVersions) that).max;
+    }
 }
-

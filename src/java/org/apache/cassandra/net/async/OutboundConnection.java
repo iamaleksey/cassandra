@@ -47,7 +47,6 @@ import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.ApproximateTime;
@@ -209,7 +208,7 @@ public class OutboundConnection
     {
         // use the best guessed messaging version for a node
         // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
-        this.messagingVersion = MessagingService.instance().versions.get(template.to);
+        this.messagingVersion = template.endpointToVersion().get(template.to);
         this.template = template;
         this.settings = template.withDefaults(type, messagingVersion);
         this.type = type;
@@ -1041,7 +1040,7 @@ public class OutboundConnection
                     // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
                     messagingVersion = result.retry().withMessagingVersion;
                     settings = template.withDefaults(type, messagingVersion);
-                    MessagingService.instance().versions.set(settings.to, messagingVersion);
+                    settings.endpointToVersion.set(settings.to, messagingVersion);
                     attempt();
                     break;
 

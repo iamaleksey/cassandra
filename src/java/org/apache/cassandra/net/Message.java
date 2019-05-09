@@ -909,7 +909,7 @@ public class Message<T>
             IVersionedAsymmetricSerializer<?, T> payloadSerializer = header.verb.serializer();
             if (null == payloadSerializer)
             {
-                CallbackInfo callback = instance().callbacks.get(header.id);
+                RemoteCallbacks.CallbackInfo callback = instance().callbacks.get(header.id);
                 if (null != callback)
                     payloadSerializer = callback.verb.responseVerb.serializer();
             }

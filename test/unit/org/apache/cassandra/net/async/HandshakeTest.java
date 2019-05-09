@@ -31,7 +31,7 @@ import org.junit.Test;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.MessagingService.AcceptVersions;
+import org.apache.cassandra.net.AcceptVersions;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.MessagingSuccess;
 

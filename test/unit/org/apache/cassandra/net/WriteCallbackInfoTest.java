@@ -64,7 +64,7 @@ public class WriteCallbackInfoTest
                          ? new Commit(UUID.randomUUID(), new PartitionUpdate.Builder(metadata, ByteBufferUtil.EMPTY_BYTE_BUFFER, RegularAndStaticColumns.NONE, 1).build())
                          : new Mutation(PartitionUpdate.simpleBuilder(metadata, "").build());
 
-        WriteCallbackInfo wcbi = new WriteCallbackInfo(full(InetAddressAndPort.getByName("192.168.1.1")), null, Message.out(verb, payload), cl, allowHints, Verb.PAXOS_COMMIT_REQ);
+        RemoteCallbacks.WriteCallbackInfo wcbi = new RemoteCallbacks.WriteCallbackInfo(full(InetAddressAndPort.getByName("192.168.1.1")), null, Message.out(verb, payload), cl, allowHints, Verb.PAXOS_COMMIT_REQ);
         Assert.assertEquals(expectHint, wcbi.shouldHint());
         if (expectHint)
         {

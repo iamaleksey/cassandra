@@ -66,12 +66,12 @@ public class StageManager
 
     private static LocalAwareExecutorService tracingExecutor()
     {
-        RejectedExecutionHandler reh = (r, executor) -> MessagingService.instance().metrics.droppedMessages.increment(Verb._TRACE);
+        RejectedExecutionHandler reh = (r, executor) -> MessagingService.instance().metrics.recordSelfDroppedMessage(Verb._TRACE);
         return new TracingExecutor(1,
                                    1,
                                    KEEPALIVE,
                                    TimeUnit.SECONDS,
-                                   new ArrayBlockingQueue<Runnable>(1000),
+                                   new ArrayBlockingQueue<>(1000),
                                    new NamedThreadFactory(Stage.TRACING.getJmxName()),
                                    reh);
     }

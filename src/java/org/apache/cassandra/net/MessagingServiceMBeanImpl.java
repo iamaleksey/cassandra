@@ -52,7 +52,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
         if (!testOnly)
         {
             MBeanWrapper.instance.registerMBean(this, MBEAN_NAME);
-            metrics.droppedMessages.scheduleLogging();
+            metrics.scheduleLogging();
         }
     }
 
@@ -221,7 +221,7 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     @Override
     public Map<String, Integer> getDroppedMessages()
     {
-        return metrics.droppedMessages.getDroppedMessages();
+        return metrics.getDroppedMessages();
     }
 
     @Override

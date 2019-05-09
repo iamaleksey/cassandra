@@ -35,7 +35,6 @@ import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
-import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.async.ConnectionType;
@@ -43,7 +42,6 @@ import org.apache.cassandra.net.async.FutureCombiner;
 import org.apache.cassandra.net.async.InboundConnectionSettings;
 import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.LatencyConsumer;
 import org.apache.cassandra.net.async.OutboundConnectionSettings;
 import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.net.async.SocketFactory;
@@ -58,6 +56,8 @@ import static org.apache.cassandra.utils.Throwables.maybeFail;
 
 public final class MessagingService extends MessagingServiceMBeanImpl
 {
+    private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
+
     // 8 bits version, so don't waste versions
     public static final int VERSION_30 = 10;
     public static final int VERSION_3014 = 11;
@@ -66,24 +66,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public static final int current_version = VERSION_40;
     public static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
     public static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
-
-    public static class AcceptVersions
-    {
-        public final int min, max;
-        public AcceptVersions(int min, int max)
-        {
-            this.min = min;
-            this.max = max;
-        }
-        public boolean equals(Object that)
-        {
-            if (!(that instanceof AcceptVersions))
-                return false;
-            return    min == ((AcceptVersions) that).min
-                   && max == ((AcceptVersions) that).max;
-        }
-    }
-
 
     public static final byte[] ONE_BYTE = new byte[1];
 
@@ -96,32 +78,26 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         return MSHandle.instance;
     }
 
-    private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
-
     public final SocketFactory socketFactory = new SocketFactory();
-    public final LatencySubscribers latency = new LatencySubscribers();
-    public final Callbacks callbacks = new Callbacks(this);
+    public final LatencySubscribers latencySubscribers = new LatencySubscribers();
+    public final RemoteCallbacks callbacks = new RemoteCallbacks(this);
 
-    public final InboundSink inboundSink = new InboundSink(message -> message.header.verb.handler().doVerb((Message<Object>) message))
-    {
-        public void fail(Message.Header header, Throwable failure)
-        {
-            if (header.callBackOnFailure())
-            {
-                Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(failure));
-                sendOneWay(response, header.from);
-            }
-        }
-    };
-    private final InboundMessageHandlers.GlobalResourceLimits globalInboundLimits = new InboundMessageHandlers.GlobalResourceLimits(
+    // a public hook for filtering messages intended for delivery to this node
+    public final InboundSink inboundSink = new InboundSink(this);
+
+    // the inbound global reserve limits and associated wait queue
+    private final InboundMessageHandlers.GlobalResourceLimits inboundGlobalReserveLimits = new InboundMessageHandlers.GlobalResourceLimits(
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes()));
 
-    public final InboundSockets inbound = new InboundSockets(new InboundConnectionSettings()
-                                                             .withHandlers(this::getInbound)
-                                                             .withSocketFactory(socketFactory));
+    // the socket bindings we accept incoming connections on
+    private final InboundSockets inboundSockets = new InboundSockets(new InboundConnectionSettings()
+                                                                     .withHandlers(this::getInbound)
+                                                                     .withSocketFactory(socketFactory));
 
+    // a public hook for filtering messages intended for delivery to another node
     public final OutboundSink outboundSink = new OutboundSink(this::doSendOneWay);
-    public final ResourceLimits.Limit globalOutboundLimits =
+
+    public final ResourceLimits.Limit outboundGlobalReserveLimit =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
     // back-pressure implementation
@@ -420,7 +396,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
             long deadline = System.nanoTime() + units.toNanos(timeout);
             maybeFail(() -> new FutureCombiner(closing).get(timeout, units),
-                      () -> inbound.close().get(),
+                      () -> inboundSockets.close().get(),
                       () -> {
                           if (shutdownExecutors)
                               shutdownExecutors(deadline);
@@ -433,7 +409,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         {
             callbacks.shutdownNow(false);
             List<Future<Void>> closing = new ArrayList<>();
-            closing.add(inbound.close());
+            closing.add(inboundSockets.close());
             for (OutboundConnections pool : channelManagers.values())
                 closing.add(pool.close(false));
 
@@ -474,7 +450,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                                        addr,
                                        DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes(),
                                        DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes(),
-                                       globalInboundLimits, metrics, inboundSink)
+                                       inboundGlobalReserveLimits, metrics, inboundSink)
         );
     }
 
@@ -489,11 +465,11 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     public void listen()
     {
-        inbound.open();
+        inboundSockets.open();
     }
 
     public void waitUntilListening() throws InterruptedException
     {
-        inbound.open().await();
+        inboundSockets.open().await();
     }
 }

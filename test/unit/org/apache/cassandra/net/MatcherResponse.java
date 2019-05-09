@@ -189,7 +189,7 @@ public class MatcherResponse
                         Message<?> response = fnResponse.apply(message, to);
                         if (response != null)
                         {
-                            CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
+                            RemoteCallbacks.CallbackInfo cb = MessagingService.instance().callbacks.get(message.id());
                             if (cb != null)
                                 cb.callback.response(response);
                             else

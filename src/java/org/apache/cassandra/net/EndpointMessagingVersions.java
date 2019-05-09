@@ -89,5 +89,4 @@ public class EndpointMessagingVersions
     {
         return versions.containsKey(endpoint);
     }
-
 }

@@ -53,7 +53,7 @@ public class OutboundSink
 
     private volatile Sink sink;
 
-    public OutboundSink(Sink sink)
+    OutboundSink(Sink sink)
     {
         this.sink = sink;
     }

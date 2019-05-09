@@ -81,7 +81,7 @@ public final class InboundMessageHandlers
     {
         LatencyConsumer internodeLatencyRecorder(InetAddressAndPort to);
         void recordInternalLatency(Verb verb, long timeElapsed, TimeUnit timeUnit);
-        void recordDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit);
+        void recordInternodeDroppedMessage(Verb verb, long timeElapsed, TimeUnit timeUnit);
     }
 
     public InboundMessageHandlers(InetAddressAndPort self,
@@ -188,7 +188,7 @@ public final class InboundMessageHandlers
             {
                 counters.addExpired(messageSize);
 
-                globalMetrics.recordDroppedMessage(header.verb, timeElapsed, unit);
+                globalMetrics.recordInternodeDroppedMessage(header.verb, timeElapsed, unit);
             }
 
             @Override
@@ -240,7 +240,7 @@ public final class InboundMessageHandlers
             {
                 counters.addExpired(messageSize);
 
-                globalMetrics.recordDroppedMessage(header.verb, timeElapsed, unit);
+                globalMetrics.recordInternodeDroppedMessage(header.verb, timeElapsed, unit);
             }
         };
     }

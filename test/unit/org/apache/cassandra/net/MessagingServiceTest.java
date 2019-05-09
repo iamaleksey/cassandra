@@ -23,6 +23,7 @@ package org.apache.cassandra.net;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -97,7 +98,7 @@ public class MessagingServiceTest
     @Before
     public void before() throws UnknownHostException
     {
-        messagingService.metrics.droppedMessages.resetMap(Integer.toString(metricScopeId++));
+        messagingService.metrics.resetDroppedMessages(Integer.toString(metricScopeId++));
         MockBackPressureStrategy.applied = false;
         messagingService.closeOutbound(InetAddressAndPort.getByName("127.0.0.2"));
         messagingService.closeOutbound(InetAddressAndPort.getByName("127.0.0.3"));
@@ -119,9 +120,10 @@ public class MessagingServiceTest
         Verb verb = Verb.READ_REQ;
 
         for (int i = 1; i <= 5000; i++)
-            messagingService.metrics.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
+            messagingService.metrics.recordDroppedMessage(verb, i, MILLISECONDS, i % 2 == 0);
 
-        List<String> logs = messagingService.metrics.droppedMessages.getLogs();
+        List<String> logs = new ArrayList<>();
+        messagingService.metrics.resetAndConsumeDroppedErrors(logs::add);
         assertEquals(1, logs.size());
         Pattern regexp = Pattern.compile("READ_REQ messages were dropped in last 5000 ms: (\\d+) internal and (\\d+) cross node. Mean internal dropped latency: (\\d+) ms and Mean cross-node dropped latency: (\\d+) ms");
         Matcher matcher = regexp.matcher(logs.get(0));
@@ -130,15 +132,17 @@ public class MessagingServiceTest
         assertEquals(2500, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(5000, (int) messagingService.metrics.droppedMessages.getDroppedMessages().get(verb.toString()));
+        assertEquals(5000, (int) messagingService.metrics.getDroppedMessages().get(verb.toString()));
 
-        logs = messagingService.metrics.droppedMessages.getLogs();
+        logs.clear();
+        messagingService.metrics.resetAndConsumeDroppedErrors(logs::add);
         assertEquals(0, logs.size());
 
         for (int i = 0; i < 2500; i++)
-            messagingService.metrics.droppedMessages.incrementWithLatency(verb, i, MILLISECONDS, i % 2 == 0);
+            messagingService.metrics.recordDroppedMessage(verb, i, MILLISECONDS, i % 2 == 0);
 
-        logs = messagingService.metrics.droppedMessages.getLogs();
+        logs.clear();
+        messagingService.metrics.resetAndConsumeDroppedErrors(logs::add);
         assertEquals(1, logs.size());
         matcher = regexp.matcher(logs.get(0));
         assertTrue(matcher.find());
@@ -146,7 +150,7 @@ public class MessagingServiceTest
         assertEquals(1250, Integer.parseInt(matcher.group(2)));
         assertTrue(Integer.parseInt(matcher.group(3)) > 0);
         assertTrue(Integer.parseInt(matcher.group(4)) > 0);
-        assertEquals(7500, (int) messagingService.metrics.droppedMessages.getDroppedMessages().get(verb.toString()));
+        assertEquals(7500, (int) messagingService.metrics.getDroppedMessages().get(verb.toString()));
     }
 
     @Test

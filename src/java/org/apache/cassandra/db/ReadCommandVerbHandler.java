@@ -64,7 +64,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         if (!command.complete())
         {
             Tracing.trace("Discarding partial response to {} (timed out)", message.from());
-            MessagingService.instance().metrics.droppedMessages.incrementWithLatency(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
+            MessagingService.instance().metrics.recordDroppedMessage(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             return;
         }
 
@@ -97,7 +97,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         if (!command.acceptsTransient() && replica.isTransient())
         {
-            MessagingService.instance().metrics.droppedMessages.incrementWithLatency(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
+            MessagingService.instance().metrics.recordDroppedMessage(message, message.elapsedSinceCreated(NANOSECONDS), NANOSECONDS);
             throw new InvalidRequestException(String.format("Attempted to serve %s data request from %s node in %s",
                                                             command.acceptsTransient() ? "transient" : "full",
                                                             replica.isTransient() ? "transient" : "full",

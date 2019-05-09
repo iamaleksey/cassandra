@@ -1779,11 +1779,11 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 else
                 {
-                    MessagingService.instance().metrics.droppedMessages.incrementWithLatency(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
+                    MessagingService.instance().metrics.recordSelfDroppedMessage(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.UNKNOWN);
                 }
 
-                MessagingService.instance().latency.add(FBUtilities.getBroadcastAddressAndPort(), ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
+                MessagingService.instance().latencySubscribers.add(FBUtilities.getBroadcastAddressAndPort(), ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
             }
             catch (Throwable t)
             {
@@ -2444,7 +2444,7 @@ public class StorageProxy implements StorageProxyMBean
             if (approxCurrentTimeNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = approxCurrentTimeNanos - approxCreationTimeNanos;
-                MessagingService.instance().metrics.droppedMessages.incrementWithLatency(verb, timeTakenNanos, NANOSECONDS);
+                MessagingService.instance().metrics.recordSelfDroppedMessage(verb, timeTakenNanos, NANOSECONDS);
                 return;
             }
             try
@@ -2483,7 +2483,7 @@ public class StorageProxy implements StorageProxyMBean
             if (nowNanos > expirationTimeNanos)
             {
                 long timeTakenNanos = nowNanos - approxCreationTimeNanos;
-                MessagingService.instance().metrics.droppedMessages.incrementWithLatency(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
+                MessagingService.instance().metrics.recordSelfDroppedMessage(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
 
                 HintRunnable runnable = new HintRunnable(EndpointsForToken.of(localReplica.range().right, localReplica))
                 {

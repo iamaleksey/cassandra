@@ -65,7 +65,8 @@ public class ReconnectableSnitchHelper implements IEndpointStateChangeSubscriber
     @VisibleForTesting
     static void reconnect(InetAddressAndPort publicAddress, InetAddressAndPort localAddress, IEndpointSnitch snitch, String localDc)
     {
-        if (!new OutboundConnectionSettings(publicAddress, localAddress).withDefaults(SMALL_MESSAGES).authenticate())
+        int version = MessagingService.instance().versions.get(publicAddress);
+        if (!new OutboundConnectionSettings(publicAddress, localAddress).withDefaults(SMALL_MESSAGES, version).authenticate())
         {
             logger.debug("InternodeAuthenticator said don't reconnect to {} on {}", publicAddress, localAddress);
             return;

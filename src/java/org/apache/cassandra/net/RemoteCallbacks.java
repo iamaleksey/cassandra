@@ -34,24 +34,109 @@ import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.net.async.OutboundMessageCallbacks;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
+import org.apache.cassandra.service.paxos.Commit;
 import org.apache.cassandra.utils.ExpiringMap;
+import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
 
-public class Callbacks
+public class RemoteCallbacks
 {
+    public static class CallbackInfo
+    {
+        protected final InetAddressAndPort target;
+        protected final IAsyncCallback callback;
+        @Deprecated // for 3.0 compatibility purposes only
+        public final Verb verb;
+
+        private CallbackInfo(InetAddressAndPort target, IAsyncCallback callback, Verb verb)
+        {
+            this.target = target;
+            this.callback = callback;
+            this.verb = verb;
+        }
+
+        boolean shouldHint()
+        {
+            return false;
+        }
+        boolean isFailureCallback()
+        {
+            return callback instanceof IAsyncCallbackWithFailure<?>;
+        }
+
+        public String toString()
+        {
+            return "CallbackInfo(" + "target=" + target + ", callback=" + callback + ", failureCallback=" + isFailureCallback() + ')';
+        }
+    }
+
+    static class WriteCallbackInfo extends CallbackInfo
+    {
+        // either a Mutation, or a Paxos Commit (MessageOut)
+        private final Object mutation;
+        private final Replica replica;
+
+        @VisibleForTesting
+        WriteCallbackInfo(Replica replica,
+                                 IAsyncCallbackWithFailure<?> callback,
+                                 Message message,
+                                 ConsistencyLevel consistencyLevel,
+                                 boolean allowHints,
+                                 Verb verb)
+        {
+            super(replica.endpoint(), callback, verb);
+            assert message != null;
+            this.mutation = shouldHint(allowHints, message, consistencyLevel);
+            //Local writes shouldn't go through messaging service (https://issues.apache.org/jira/browse/CASSANDRA-10477)
+            assert (!target.equals(FBUtilities.getBroadcastAddressAndPort()));
+            this.replica = replica;
+        }
+
+        public boolean shouldHint()
+        {
+            return mutation != null && StorageProxy.shouldHint(replica);
+        }
+
+        public Replica getReplica()
+        {
+            return replica;
+        }
+
+        public Mutation mutation()
+        {
+            return getMutation(mutation);
+        }
+
+        private static Mutation getMutation(Object object)
+        {
+            assert object instanceof Commit || object instanceof Mutation : object;
+            return object instanceof Commit ? ((Commit) object).makeMutation()
+                                            : (Mutation) object;
+        }
+
+        private static Object shouldHint(boolean allowHints, Message sentMessage, ConsistencyLevel consistencyLevel)
+        {
+            return allowHints
+                   && sentMessage.verb() != Verb.COUNTER_MUTATION_REQ
+                   && consistencyLevel != ConsistencyLevel.ANY
+                   ? sentMessage.payload : null;
+        }
+    }
+
+
     /* This records all the results mapped by message Id */
     private final ExpiringMap<Long, CallbackInfo> callbacks;
-    private final OutboundMessageCallbacks onDrop;
+    private final OutboundMessageCallbacks expireDroppedMessages;
 
-    public Callbacks(MessagingService messagingService)
+    RemoteCallbacks(MessagingService messagingService)
     {
         BiConsumer<Long, ExpiringMap.CacheableObject<CallbackInfo>> timeoutReporter = (id, cachedObject) ->
         {
             final CallbackInfo expiredCallbackInfo = cachedObject.value;
 
-            messagingService.latency.maybeAdd(expiredCallbackInfo.callback, expiredCallbackInfo.target, cachedObject.timeout(), NANOSECONDS);
+            messagingService.latencySubscribers.maybeAdd(expiredCallbackInfo.callback, expiredCallbackInfo.target, cachedObject.timeout(), NANOSECONDS);
 
             InternodeOutboundMetrics.totalExpiredCallbacks.mark();
             messagingService.markExpiredCallback(expiredCallbackInfo.target);
@@ -78,7 +163,7 @@ public class Callbacks
         };
 
         callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2, NANOSECONDS, timeoutReporter);
-        onDrop = OutboundMessageCallbacks.invokeOnDrop(message -> callbacks.removeAndExpire(message.id()));
+        expireDroppedMessages = OutboundMessageCallbacks.invokeOnDrop(message -> callbacks.removeAndExpire(message.id()));
     }
 
     public long addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
@@ -117,12 +202,7 @@ public class Callbacks
 
     public OutboundMessageCallbacks expireDroppedMessages()
     {
-        return onDrop;
-    }
-
-    public void removeAndExpire(long id)
-    {
-        callbacks.removeAndExpire(id);
+        return expireDroppedMessages;
     }
 
     public CallbackInfo get(long messageId)

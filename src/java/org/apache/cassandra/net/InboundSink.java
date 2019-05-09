@@ -27,11 +27,12 @@ import org.slf4j.LoggerFactory;
 
 import net.openhft.chronicle.core.util.ThrowingConsumer;
 import org.apache.cassandra.db.filter.TombstoneOverwhelmingException;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
 import org.apache.cassandra.utils.NoSpamLogger;
 
-public abstract class InboundSink implements InboundMessageHandlers.MessageConsumer
+public class InboundSink implements InboundMessageHandlers.MessageConsumer
 {
     private static final NoSpamLogger noSpamLogger =
         NoSpamLogger.getLogger(LoggerFactory.getLogger(InboundSink.class), 1L, TimeUnit.SECONDS);
@@ -56,11 +57,22 @@ public abstract class InboundSink implements InboundMessageHandlers.MessageConsu
     private static final AtomicReferenceFieldUpdater<InboundSink, ThrowingConsumer> sinkUpdater
     = AtomicReferenceFieldUpdater.newUpdater(InboundSink.class, ThrowingConsumer.class, "sink");
 
+    private final MessagingService messaging;
     private volatile ThrowingConsumer<Message<?>, IOException> sink;
 
-    public InboundSink(ThrowingConsumer<Message<?>, IOException> sink)
+    InboundSink(MessagingService messaging)
     {
-        this.sink = sink;
+        this.messaging = messaging;
+        this.sink = message -> message.header.verb.handler().doVerb((Message<Object>) message);
+    }
+
+    public void fail(Message.Header header, Throwable failure)
+    {
+        if (header.callBackOnFailure())
+        {
+            Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(failure));
+            messaging.sendOneWay(response, header.from);
+        }
     }
 
     public void accept(Message<?> message)
@@ -126,8 +138,12 @@ public abstract class InboundSink implements InboundMessageHandlers.MessageConsu
     private static boolean allows(ThrowingConsumer<Message<?>, IOException> sink, Message<?> message)
     {
         while (sink instanceof Filtered)
-            if (!((Filtered) sink).condition.test(message))
+        {
+            Filtered filtered = (Filtered) sink;
+            if (!filtered.condition.test(message))
                 return false;
+            sink = filtered.next;
+        }
         return true;
     }
 
