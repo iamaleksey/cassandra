@@ -58,8 +58,8 @@ public class InternodeInboundMetrics
         register(errorCount = factory.createMetricName("ErrorCount"), handlers::errorCount);
         register(expiredBytes = factory.createMetricName("ExpiredBytes"), handlers::expiredBytes);
         register(expiredCount = factory.createMetricName("ExpiredCount"), handlers::expiredCount);
-        register(pendingBytes = factory.createMetricName("PendingBytes"), handlers::pendingBytes);
-        register(pendingCount = factory.createMetricName("PendingCount"), handlers::pendingCount);
+        register(pendingBytes = factory.createMetricName("ScheduledBytes"), handlers::scheduledBytes);
+        register(pendingCount = factory.createMetricName("ScheduledCount"), handlers::scheduledCount);
         register(processedBytes = factory.createMetricName("ProcessedBytes"), handlers::processedBytes);
         register(processedCount = factory.createMetricName("ProcessedCount"), handlers::processedCount);
         register(receivedBytes = factory.createMetricName("ReceivedBytes"), handlers::receivedBytes);

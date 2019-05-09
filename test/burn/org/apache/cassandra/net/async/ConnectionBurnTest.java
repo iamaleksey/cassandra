@@ -229,24 +229,34 @@ public class ConnectionBurnTest
                             while (ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
                             {
                                 Connection connection = connections[random.nextInt(connections.length)];
-                                if (!connection.isSending())
+                                if (!connection.registerSender())
                                     continue;
 
-                                Thread.currentThread().setName("Generate-" + connection.linkId);
-                                int count = 0;
-                                switch (random.nextInt() & 3)
+                                try
                                 {
-                                    case 0: count = random.nextInt(100, 200); break;
-                                    case 1: count = random.nextInt(200, 1000); break;
-                                    case 2: count = random.nextInt(1000, 2000); break;
-                                    case 3: count = random.nextInt(2000, 10000); break;
-                                }
+                                    Thread.currentThread().setName("Generate-" + connection.linkId);
+                                    int count = 0;
+                                    switch (random.nextInt() & 3)
+                                    {
+                                        case 0: count = random.nextInt(100, 200); break;
+                                        case 1: count = random.nextInt(200, 1000); break;
+                                        case 2: count = random.nextInt(1000, 2000); break;
+                                        case 3: count = random.nextInt(2000, 10000); break;
+                                    }
 
-                                while (connection.isSending()
-                                       && count-- > 0
-                                       && ApproximateTime.nanoTime() < deadline
-                                       && !Thread.currentThread().isInterrupted())
-                                    connection.sendOne();
+                                    if (connection.outbound.type() == ConnectionType.LARGE_MESSAGES)
+                                        count /= 2;
+
+                                    while (connection.isSending()
+                                           && count-- > 0
+                                           && ApproximateTime.nanoTime() < deadline
+                                           && !Thread.currentThread().isInterrupted())
+                                        connection.sendOne();
+                                }
+                                finally
+                                {
+                                    connection.unregisterSender();
+                                }
                             }
                         }
                         catch (Throwable t)
@@ -280,14 +290,15 @@ public class ConnectionBurnTest
                     }
                 });
 
+                // TODO: slowly modify the pattern of interrupts, from often to infrequent
                 executor.execute(() -> {
                     Thread.currentThread().setName("Test-Reconnect");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
-                    while (true)
+                    while (deadline > System.nanoTime())
                     {
                         try
                         {
-                            Thread.sleep(random.nextInt(30000));
+                            Thread.sleep(random.nextInt(60000));
                         }
                         catch (InterruptedException e)
                         {
@@ -298,6 +309,26 @@ public class ConnectionBurnTest
                         template = ConnectionTest.SETTINGS.get(random.nextInt(ConnectionTest.SETTINGS.size()))
                                    .outbound.apply(template);
                         connection.reconnect(template);
+                    }
+                });
+
+                executor.execute(() -> {
+                    Thread.currentThread().setName("Test-Sync");
+                    ThreadLocalRandom random = ThreadLocalRandom.current();
+                    while (deadline > System.nanoTime())
+                    {
+                        try
+                        {
+                            Thread.sleep(random.nextInt(10000));
+                            CountDownLatch latch = new CountDownLatch(1);
+                            Connection connection = connections[random.nextInt(connections.length)];
+                            connection.sync(latch::countDown);
+                            latch.await();
+                        }
+                        catch (InterruptedException e)
+                        {
+                            break;
+                        }
                     }
                 });
 

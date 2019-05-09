@@ -342,7 +342,7 @@ public class Verifier
         }
     }
 
-    void onInitiateSync(Runnable onCompletion)
+    void onSync(Runnable onCompletion)
     {
         SyncEvent connect = new SyncEvent(nextId(), onCompletion);
         events.put(connect.at, connect);
@@ -358,11 +358,17 @@ public class Verifier
     private final AtomicLong sequenceId = new AtomicLong();
     private final EventSequence events = new EventSequence();
     private final ConnectionType outboundType;
+    private final InboundMessageHandlers inbound;
+    private final OutboundConnection outbound;
+    private final InboundCounters inboundCounters;
 
-    Verifier(BytesInFlightController controller, ConnectionType outboundType)
+    Verifier(BytesInFlightController controller, ConnectionType type, InboundMessageHandlers inbound, OutboundConnection outbound)
     {
         this.controller = controller;
-        this.outboundType = outboundType;
+        this.outboundType = type;
+        this.inbound = inbound;
+        this.outbound = outbound;
+        this.inboundCounters = inbound.countersFor(type);
     }
 
     private long nextId()
@@ -506,9 +512,21 @@ public class Verifier
                         &&  currentConnection.deserializingOnEventLoop.isEmpty()
                         &&  currentConnection.deserializingOffEventLoop.isEmpty()
                         &&  currentConnection.framesInFlight.isEmpty()
-                        &&  enqueueing.isEmpty();
-                    }
+                        &&  enqueueing.isEmpty()
+                        &&  processingOutOfOrder.isEmpty();
 
+                        if (done || now - lastEventAt > TimeUnit.SECONDS.toNanos(5L))
+                        {
+                            if (!done)
+                                fail("Unreasonably long period spent waiting for sync");
+
+                            ConnectionUtils.check(outbound).pending(0, 0)
+                                           .check((message, expect, actual) -> fail("%s: expect %d, actual %d", message, expect, actual));
+
+                            sync.onCompletion.run();
+                            sync = null;
+                        }
+                    }
                     continue;
                 }
                 events.clear(nextMessageId); // TODO: simplify collection if we end up using it exclusively as a queue, as we are now
@@ -873,7 +891,7 @@ public class Verifier
                                     fail("Invalid state onExpiry ON_ARRIVED of %s", m);
                                 break;
                             case ON_PROCESSED:
-                                if (m.state != ARRIVE)
+                                if (m.state != DESERIALIZE)
                                     fail("Invalid state onExpiry ON_PROCESSED of %s", m);
                                 break;
                         }

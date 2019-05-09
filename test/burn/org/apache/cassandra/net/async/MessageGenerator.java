@@ -53,11 +53,11 @@ abstract class MessageGenerator
 
         int expiresInMillis;
         int expiryMask = random.nextInt();
-        if (0 == (expiryMask & 0xffff)) expiresInMillis = 10;
-        else if (0 == (expiryMask & 0xfff)) expiresInMillis = 100;
-        else if (0 == (expiryMask & 0xff)) expiresInMillis = 1000;
-        else if (0 == (expiryMask & 0xf)) expiresInMillis = 10000;
-        else expiresInMillis = 5 * 60 * 1000;
+        if (0 == (expiryMask & 0xffff)) expiresInMillis = 2;
+        else if (0 == (expiryMask & 0xfff)) expiresInMillis = 10;
+        else if (0 == (expiryMask & 0xff)) expiresInMillis = 100;
+        else if (0 == (expiryMask & 0xf)) expiresInMillis = 1000;
+        else expiresInMillis = 60 * 1000;
 
         long expiresInNanos = TimeUnit.MILLISECONDS.toNanos((expiresInMillis / 2) + random.nextInt(expiresInMillis / 2));
 

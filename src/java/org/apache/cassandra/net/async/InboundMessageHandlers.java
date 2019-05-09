@@ -332,12 +332,12 @@ public final class InboundMessageHandlers
         return sumCounters(InboundCounters::processedBytes);
     }
 
-    public long pendingCount()
+    public long scheduledCount()
     {
         return sumCounters(InboundCounters::scheduledCount);
     }
 
-    public long pendingBytes()
+    public long scheduledBytes()
     {
         return sumCounters(InboundCounters::scheduledBytes);
     }

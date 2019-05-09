@@ -43,8 +43,8 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     final InetAddressAndPort sender;
     final InetAddressAndPort recipient;
-    final InboundMessageHandlers inboundHandlers;
     final BytesInFlightController controller;
+    final InboundMessageHandlers inbound;
     final OutboundConnection outbound;
     final OutboundConnectionSettings outboundTemplate;
     final Verifier verifier;
@@ -58,7 +58,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     private final AtomicLong nextSendId = new AtomicLong();
 
     Connection(InetAddressAndPort sender, InetAddressAndPort recipient, ConnectionType type,
-               InboundMessageHandlers inboundHandlers,
+               InboundMessageHandlers inbound,
                OutboundConnectionSettings outboundTemplate, ResourceLimits.EndpointAndGlobal reserveCapacityInBytes,
                MessageGenerator generator,
                long minId, long maxId)
@@ -69,15 +69,15 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         this.sendGenerator = generator.copy();
         this.minId = minId;
         this.maxId = maxId;
-        this.inboundHandlers = inboundHandlers;
         this.nextSendId.set(minId);
         this.linkId = sender.toString(false) + "->" + recipient.toString(false) + "-" + type;
-        this.verifier = new Verifier(controller, type);
         this.outboundTemplate = outboundTemplate.toEndpoint(recipient)
                                                 .withFrom(sender)
                                                 .withCallbacks(this)
                                                 .withDebugCallbacks(this);
+        this.inbound = inbound;
         this.outbound = new OutboundConnection(type, this.outboundTemplate, reserveCapacityInBytes);
+        this.verifier = new Verifier(controller, type, inbound, outbound);
     }
 
     void startVerifier(Runnable onFailure, Executor executor, long deadlineNanos)
@@ -87,7 +87,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     boolean isSending()
     {
-        return isSending.get() >= 0;
+        return isSending.get() > 0;
     }
 
     boolean registerSender()
@@ -97,21 +97,25 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     void unregisterSender()
     {
-        isSending.updateAndGet(i -> i < 0 ? i + 1 : i - 1);
+        if (isSending.updateAndGet(i -> i < 0 ? i + 1 : i - 1) == -1)
+            waitingForSendersToUnregister.signalAll();
     }
 
-    void sync() throws InterruptedException
+    synchronized void sync(Runnable onCompletion) throws InterruptedException
     {
         assert isSending.get() >= 0;
         isSending.updateAndGet(i -> -1 -i);
         controller.setInFlightByteBounds(0, Long.MAX_VALUE);
-        if (isSending.get() != 0)
+        while (isSending.get() != -1)
         {
             WaitQueue.Signal signal = waitingForSendersToUnregister.register();
-            if (isSending.get() != 0) signal.await();
+            if (isSending.get() != -1) signal.await();
             else signal.cancel();
         }
-        verifier.onInitiateSync(() -> isSending.set(0));
+        verifier.onSync(() -> {
+            isSending.set(0);
+            onCompletion.run();
+        });
     }
 
     void sendOne() throws InterruptedException
@@ -248,7 +252,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     InboundCounters inboundCounters()
     {
-        return inboundHandlers.countersFor(outbound.type());
+        return inbound.countersFor(outbound.type());
     }
 
     public void onSendSmallFrame(int messageCount, int payloadSizeInBytes)

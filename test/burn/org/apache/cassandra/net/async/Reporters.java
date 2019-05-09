@@ -46,7 +46,7 @@ class Reporters
             inboundReporter  (true,  "Inbound Throughput",           InboundCounters::processedBytes,        Reporters::prettyPrintMemory),
 
             outboundReporter (false, "Outbound Pending Bytes",       OutboundConnection::pendingBytes,       Reporters::prettyPrintMemory),
-            reporter         (false, "Inbound Pending Bytes",        c -> c.inboundHandlers.usingCapacity(), Reporters::prettyPrintMemory),
+            reporter         (false, "Inbound Pending Bytes",        c -> c.inbound.usingCapacity(), Reporters::prettyPrintMemory),
 
             outboundReporter (true,  "Outbound Expirations",         OutboundConnection::expiredCount,       Long::toString),
             inboundReporter  (true,  "Inbound Expirations",          InboundCounters::expiredCount,          Long::toString),
