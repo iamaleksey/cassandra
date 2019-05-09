@@ -57,7 +57,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -716,49 +715,6 @@ public class ConnectionTest
             latch.await(10, SECONDS);
             Assert.assertEquals(latch.getCount(), 0);
             Assert.assertEquals(counter.get(), 6);
-        });
-    }
-
-    @Test
-    public void testUnrecoverableCorruptedMessageDelivery() throws Throwable
-    {
-        test((inbound, outbound, endpoint) -> {
-            int version = outbound.settings().acceptVersions.max;
-            if (version < VERSION_40)
-                return;
-
-            AtomicInteger counter = new AtomicInteger();
-            unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
-            {
-                public void serialize(Object o, DataOutputPlus out, int version) throws IOException
-                {
-                    out.writeInt((Integer) o);
-                }
-
-                public Object deserialize(DataInputPlus in, int version) throws IOException
-                {
-                    if (counter.getAndIncrement() == 3)
-                        throw new RuntimeException();
-
-                    return in.readInt();
-                }
-
-                public long serializedSize(Object o, int version)
-                {
-                    return Integer.BYTES;
-                }
-            });
-
-            connect(outbound);
-            for (int i = 0; i < 5; i++)
-                outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
-            CompletableFuture.runAsync(() -> {
-                while (outbound.isConnected() && !Thread.interrupted()) {}
-            }).get(10, SECONDS);
-            Assert.assertFalse(outbound.isConnected());
-            Assert.assertEquals(inbound.errorCount(), 1);
-
-            connect(outbound);
         });
     }
 
