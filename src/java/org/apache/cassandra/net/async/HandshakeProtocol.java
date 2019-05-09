@@ -130,8 +130,10 @@ public class HandshakeProtocol
                 flags |= 1 << 4;
 
             flags |= (requestMessagingVersion << 8);
-            if (acceptVersions.max < VERSION_40)
+
+            if (requestMessagingVersion < VERSION_40 || acceptVersions.max < VERSION_40)
                 return flags; // for testing, permit serializing as though we are pre40
+
             flags |= (acceptVersions.min << 16);
             flags |= (acceptVersions.max << 24);
             return flags;
