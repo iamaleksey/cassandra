@@ -25,11 +25,11 @@ import java.util.function.Consumer;
  * A concurrent many-producers-to-single-consumer linked queue.
  *
  * Based roughly on {@link java.util.concurrent.ConcurrentLinkedQueue}, except with simpler/cheaper consumer-side
- * method implementations ({@link #poll()}, {@link #remove()}, {@link #drain(Consumer)}, and padding added
+ * method implementations ({@link #poll()}, {@link #remove()}, {@link #drain(Consumer)}), and padding added
  * to prevent false sharing.
  *
- * {@link #offer(Object)} provides volatile visibility semantics, and both {@link #offer(Object)} and {@link #poll()}
- * are non-blocking.
+ * {@link #offer(Object)} provides volatile visibility semantics. {@link #offer(Object)} is lock-free, {@link #poll()}
+ * and all related consumer methods are wait-free.
  */
 class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHead<E>
 {
@@ -97,15 +97,17 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         internalOffer(e); return true;
     }
 
+    /**
+     * Adds the element to the queue and returns the item of the previous tail node.
+     * It's possible for the returned item to already have been consumed.
+     *
+     * @return previously last tail item in the queue, potentially stale
+     */
     E relaxedPeekLastAndOffer(E e)
     {
         return internalOffer(e);
     }
 
-    /*
-     * Adds the element to the queue and returns the item of the previous tail node.
-     * It's possible for the returned item to be already consumed.
-     */
     private E internalOffer(E e)
     {
         if (null == e)
