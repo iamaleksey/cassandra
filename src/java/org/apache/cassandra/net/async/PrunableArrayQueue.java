@@ -17,14 +17,26 @@
  */
 package org.apache.cassandra.net.async;
 
-/*
+import java.util.function.Predicate;
+
+/**
  * A growing array-based queue that allows efficient bulk in-place removal.
+ *
+ * Can think of this queue as if it were an {@link java.util.ArrayDeque} with {@link #prune(Pruner)} method - an efficient
+ * way to prune the queue in-place that is more expressive, and faster than {@link java.util.ArrayDeque#removeIf(Predicate)}.
+ * The latter has to perform O(n*n) shifts, whereas {@link #prune(Pruner)} only needs O(n) shifts at worst.
  */
 final class PrunableArrayQueue<E>
 {
     public interface Pruner<E>
     {
+        /**
+         * @return whether the element should be pruned
+         *  if {@code true},  the element will be removed from the queue, and {@link #onPruned(Object)} will be invoked,
+         *  if {@code false}, the element will be kept, and {@link #onKept(Object)} will be invoked.
+         */
         boolean shouldPrune(E e);
+
         void onPruned(E e);
         void onKept(E e);
     }
@@ -42,6 +54,7 @@ final class PrunableArrayQueue<E>
         buffer = (E[]) new Object[capacity];
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     boolean offer(E e)
     {
         buffer[tail] = e;
@@ -77,7 +90,12 @@ final class PrunableArrayQueue<E>
         return head == tail;
     }
 
-    void prune(Pruner<E> pruner)
+    /**
+     * Prunes the queue using the specified {@link Pruner}
+     *
+     * @return count of removed elements.
+     */
+    int prune(Pruner<E> pruner)
     {
         E e;
         int removed = 0;
@@ -87,8 +105,10 @@ final class PrunableArrayQueue<E>
             int size = size();
             for (int i = 0; i < size; i++)
             {
-                // we start at the tail and work backwards to minimise the number of copies
-                // as we expect to primarily prune from the front
+                /*
+                 * We start at the tail and work backwards to minimise the number of copies
+                 * as we expect to primarily prune from the front.
+                 */
                 int k = (tail - 1 - i) & (capacity - 1);
                 e = buffer[k];
 
@@ -113,6 +133,8 @@ final class PrunableArrayQueue<E>
         {
             head = (head + removed) & (capacity - 1);
         }
+
+        return removed;
     }
 
     @SuppressWarnings("unchecked")

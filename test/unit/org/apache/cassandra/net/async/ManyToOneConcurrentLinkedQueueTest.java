@@ -44,6 +44,19 @@ public class ManyToOneConcurrentLinkedQueueTest
     }
 
     @Test
+    public void testEmptyPeek()
+    {
+        assertNull(queue.peek());
+    }
+
+    @Test
+    public void testNonEmptyPeek()
+    {
+        queue.offer(0);
+        assertEquals(0, (int) queue.peek());
+    }
+
+    @Test
     public void testEmptyPoll()
     {
         assertNull(queue.poll());
