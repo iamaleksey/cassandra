@@ -22,7 +22,6 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
-import org.junit.Assert;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -196,7 +195,8 @@ public class ManyToOneConcurrentLinkedQueueTest
                 case PEEK_AND_REMOVE:
                     //noinspection StatementWithEmptyBody
                     while ((item = queue.peek()) == null) ;
-                    Assert.assertEquals(item, queue.remove());
+                    assertFalse(queue.relaxedIsEmpty());
+                    assertEquals(item, queue.remove());
                     itemsPolled.set(item);
                     break;
                 case POLL:
