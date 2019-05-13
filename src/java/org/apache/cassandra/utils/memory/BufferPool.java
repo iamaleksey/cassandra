@@ -1056,4 +1056,13 @@ public class BufferPool
         shutdownNow(of(EXEC));
         awaitTermination(timeout, unit, of(EXEC));
     }
+
+    public static long unsafeGetBytesInUse()
+    {
+        long totalMemory = globalPool.memoryUsage.get();
+        long availableMemory = 0;
+        for (Chunk chunk : globalPool.chunks)
+            availableMemory += chunk.capacity();
+        return totalMemory - availableMemory;
+    }
 }

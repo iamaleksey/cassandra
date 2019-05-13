@@ -60,7 +60,9 @@ public class BytesInFlightController
             while (!(isInterrupted = Thread.currentThread().isInterrupted())
                    && waitUntilReceived - receivedBytes >= 0
                    && waitingToSend.get(waitUntilReceived) != null)
+            {
                 LockSupport.park();
+            }
             waitingToSend.remove(waitUntilReceived);
 
             if (isInterrupted)
@@ -68,11 +70,14 @@ public class BytesInFlightController
         }
     }
 
+    public long minimumInFlightBytes() { return minimumInFlightBytes; }
+    public long maximumInFlightBytes() { return maximumInFlightBytes; }
+
     void adjust(int predictedSentBytes, int actualSentBytes)
     {
         receivedBytesUpdater.addAndGet(this, predictedSentBytes - actualSentBytes);
-        if (predictedSentBytes > actualSentBytes)
-            wakeupSenders();
+        if (predictedSentBytes > actualSentBytes) wakeupSenders();
+        else maybeProcessDeferred();
     }
 
     public void fail(int bytes)
@@ -96,17 +101,18 @@ public class BytesInFlightController
             if (receivedBytesUpdater.compareAndSet(this, received, newReceived))
             {
                 releaseBytes.accept(bytes);
-                wakeupSenders();
                 break;
             }
         }
+        maybeProcessDeferred();
+        wakeupSenders();
     }
 
     void setInFlightByteBounds(long minimumInFlightBytes, long maximumInFlightBytes)
     {
         this.minimumInFlightBytes = minimumInFlightBytes;
         this.maximumInFlightBytes = maximumInFlightBytes;
-        maybeProcessDeferred(maximumInFlightBytes);
+        maybeProcessDeferred();
     }
 
     // unlike the rest of the class, this method does not handle wrap-around of sent/received;
@@ -119,6 +125,7 @@ public class BytesInFlightController
         {
             if (next.getKey() - receivedBytes >= 0)
                 break;
+
             if (waitingToSend.remove(next.getKey(), next.getValue()))
                 LockSupport.unpark(next.getValue());
         }
@@ -126,15 +133,11 @@ public class BytesInFlightController
 
     private void maybeProcessDeferred()
     {
-        maybeProcessDeferred(minimumInFlightBytes);
-    }
-    private void maybeProcessDeferred(long untilMinimumInFlightBytes)
-    {
-        while (!deferredBytes.isEmpty())
+        while (true)
         {
             long sent = sentBytes;
             long received = receivedBytes;
-            if (sent - received > untilMinimumInFlightBytes && ThreadLocalRandom.current().nextFloat() > 0.5f)
+            if (sent - received <= minimumInFlightBytes)
                 break;
 
             Pair<Integer, IntConsumer> next = deferredBytes.poll();
@@ -155,10 +158,10 @@ public class BytesInFlightController
 
                 sent = sentBytes;
                 received = receivedBytes;
-                if (sent - received > minimumInFlightBytes)
+                if (sent - received <= minimumInFlightBytes)
                 {
                     deferredBytes.add(next);
-                    return;
+                    break; // continues with outer loop to maybe process it if minimumInFlightBytes has changed meanwhile
                 }
             }
         }

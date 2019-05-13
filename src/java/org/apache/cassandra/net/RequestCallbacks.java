@@ -337,7 +337,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     }
 
     @Override
-    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, Throwable failure)
+    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable failure)
     {
         removeAndExpire(message.id(), peer);
     }

@@ -23,9 +23,11 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.locks.LockSupport;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -36,6 +38,7 @@ import org.apache.cassandra.net.async.Verifier.ExpiredMessageEvent.ExpirationTyp
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
+import static java.util.concurrent.TimeUnit.*;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
@@ -110,7 +113,7 @@ public class Verifier
         FAILED_CLOSING(SEND),
         FAILED_FRAME(SEND),
 
-        CONNECT(OTHER),
+        CONNECT_OUTBOUND(OTHER),
         SYNC(OTHER),               // the connection will stop sending messages, and promptly process any waiting inbound messages
         CONTROLLER_UPDATE(OTHER);
 
@@ -139,6 +142,7 @@ public class Verifier
             super(type);
             this.at = at;
         }
+        public String toString() { return type.toString(); }
     }
 
     static class BoundedEvent extends Event
@@ -187,6 +191,7 @@ public class Verifier
             this.message = message;
             this.destiny = destiny;
         }
+        public String toString() { return String.format("%s{%s}", type, destiny); }
     }
 
     static class SerializeMessageEvent extends SimpleMessageEvent
@@ -197,6 +202,7 @@ public class Verifier
             super(type, at, messageId);
             this.messagingVersion = messagingVersion;
         }
+        public String toString() { return String.format("%s{ver=%d}", type, messagingVersion); }
     }
 
     static class SimpleMessageEventWithSize extends SimpleMessageEvent
@@ -207,17 +213,20 @@ public class Verifier
             super(type, at, messageId);
             this.messageSize = messageSize;
         }
+        public String toString() { return String.format("%s{size=%d}", type, messageSize); }
     }
 
     static class FailedSerializeEvent extends SimpleMessageEvent
     {
+        final boolean wasPartiallyWrittenToNetwork;
         final Throwable failure;
-        FailedSerializeEvent(long at, long messageId, Throwable failure)
+        FailedSerializeEvent(long at, long messageId, boolean wasPartiallyWrittenToNetwork, Throwable failure)
         {
             super(FAILED_SERIALIZE, at, messageId);
+            this.wasPartiallyWrittenToNetwork = wasPartiallyWrittenToNetwork;
             this.failure = failure;
         }
-        public String toString() { return String.format("FAILED_SERIALIZE{failure=%s}", failure); }
+        public String toString() { return String.format("FAILED_SERIALIZE{written=%b, failure=%s}", wasPartiallyWrittenToNetwork, failure); }
     }
 
     static class ExpiredMessageEvent extends SimpleMessageEvent
@@ -286,10 +295,10 @@ public class Verifier
         long at = nextId();
         events.put(at, new SimpleMessageEvent(FINISH_SERIALIZE_LARGE, at, messageId));
     }
-    void onFailedSerialize(long messageId, Throwable failure)
+    void onFailedSerialize(long messageId, boolean wasPartiallyWrittenToNetwork, Throwable failure)
     {
         long at = nextId();
-        events.put(at, new FailedSerializeEvent(at, messageId, failure));
+        events.put(at, new FailedSerializeEvent(at, messageId, wasPartiallyWrittenToNetwork, failure));
     }
     void onExpiredBeforeSend(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
     {
@@ -346,15 +355,28 @@ public class Verifier
 
 
 
-    static class ConnectEvent extends SimpleEvent
+    static class ConnectOutboundEvent extends SimpleEvent
     {
         final int messagingVersion;
         final OutboundConnectionSettings settings;
-        ConnectEvent(long at, int messagingVersion, OutboundConnectionSettings settings)
+        ConnectOutboundEvent(long at, int messagingVersion, OutboundConnectionSettings settings)
         {
-            super(EventType.CONNECT, at);
+            super(EventType.CONNECT_OUTBOUND, at);
             this.messagingVersion = messagingVersion;
             this.settings = settings;
+        }
+    }
+
+    // TODO: do we need this?
+    static class ConnectInboundEvent extends SimpleEvent
+    {
+        final int messagingVersion;
+        final InboundMessageHandler handler;
+        ConnectInboundEvent(long at, int messagingVersion, InboundMessageHandler handler)
+        {
+            super(EventType.CONNECT_OUTBOUND, at);
+            this.messagingVersion = messagingVersion;
+            this.handler = handler;
         }
     }
 
@@ -386,9 +408,15 @@ public class Verifier
         events.put(connect.at, connect);
     }
 
-    void onConnect(int messagingVersion, OutboundConnectionSettings settings)
+    void onConnectOutbound(int messagingVersion, OutboundConnectionSettings settings)
     {
-        ConnectEvent connect = new ConnectEvent(nextId(), messagingVersion, settings);
+        ConnectOutboundEvent connect = new ConnectOutboundEvent(nextId(), messagingVersion, settings);
+        events.put(connect.at, connect);
+    }
+
+    void onConnectInbound(int messagingVersion, InboundMessageHandler handler)
+    {
+        ConnectInboundEvent connect = new ConnectInboundEvent(nextId(), messagingVersion, handler);
         events.put(connect.at, connect);
     }
 
@@ -408,6 +436,11 @@ public class Verifier
     private long nextId()
     {
         return sequenceId.getAndIncrement();
+    }
+
+    public void logFailure(String message, Object ... params)
+    {
+        fail(message, params);
     }
 
     private void fail(String message, Object ... params)
@@ -432,6 +465,7 @@ public class Verifier
         long enqueueStart, enqueueEnd, serialize, arrive, deserialize;
         boolean processOnEventLoop, processOutOfOrder;
         Event sendState, receiveState;
+        long lastUpdateAt;
         long lastUpdateNanos;
         ConnectionState sentOn;
         boolean doneSend, doneReceive;
@@ -449,16 +483,21 @@ public class Verifier
             this.expiresAtNanos = message.expiresAtNanos();
         }
 
-        void update(Event state, long now)
+        void update(SimpleEvent event, long now)
         {
+            update(event, event.at, now);
+        }
+        void update(Event event, long at, long now)
+        {
+            lastUpdateAt = at;
             lastUpdateNanos = now;
-            switch (state.type.category)
+            switch (event.type.category)
             {
                 case SEND:
-                    sendState = state;
+                    sendState = event;
                     break;
                 case RECEIVE:
-                    receiveState = state;
+                    receiveState = event;
                     break;
                 default: throw new IllegalStateException();
             }
@@ -504,8 +543,8 @@ public class Verifier
 
         public String toString()
         {
-            return String.format("{id:%d, ver:%d, state:[%s,%s], enqueue:[%d,%d], ser:%d, arr:%d, deser:%d, expires:%d, sentOn: %d}",
-                                 message.id(), messagingVersion, sendState, receiveState, enqueueStart, enqueueEnd, serialize, arrive, deserialize, ApproximateTime.toCurrentTimeMillis(expiresAtNanos), sentOn == null ? -1 : sentOn.connectionId);
+            return String.format("{id:%d, state:[%s,%s], upd:%d, ver:%d, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d, expires:%d, sentOn: %d}",
+                                 message.id(), sendState, receiveState, lastUpdateAt, messagingVersion, enqueueStart, enqueueEnd, serialize, arrive, deserialize, ApproximateTime.toCurrentTimeMillis(expiresAtNanos), sentOn == null ? -1 : sentOn.connectionId);
         }
     }
 
@@ -538,8 +577,10 @@ public class Verifier
         final Queue<MessageState> deserializingOnEventLoop = new Queue<>(),
                                   deserializingOffEventLoop = new Queue<>();
 
-        private long sentCount, sentBytes;
-        private long receivedCount, receivedBytes;
+        InboundMessageHandler inbound;
+
+        long sentCount, sentBytes;
+        long receivedCount, receivedBytes;
 
         ConnectionState(long connectionId, int messagingVersion)
         {
@@ -576,14 +617,14 @@ public class Verifier
             long lastEventAt = ApproximateTime.nanoTime();
             while ((now = ApproximateTime.nanoTime()) < deadlineNanos)
             {
-                Event next = events.await(nextMessageId, 100L, TimeUnit.MILLISECONDS);
+                Event next = events.await(nextMessageId, 100L, MILLISECONDS);
                 if (next == null)
                 {
                     // decide if we have any messages waiting too long to proceed
                     while (!processingOutOfOrder.isEmpty())
                     {
                         MessageState m = processingOutOfOrder.get(0);
-                        if (now - m.lastUpdateNanos > TimeUnit.SECONDS.toNanos(10L))
+                        if (now - m.lastUpdateNanos > SECONDS.toNanos(10L))
                         {
                             fail("Unreasonably long period spent waiting for out-of-order deser/delivery of received message %d", m.message.id());
                             maybeRemove(m.message.id(), PROCESS);
@@ -596,6 +637,7 @@ public class Verifier
                     {
                         // if we have waited 100ms since beginning a sync, with no events, and ANY of our queues are
                         // non-empty, something is probably wrong; however, let's give ourselves a little bit longer
+
                         boolean done =
                             currentConnection.serializing.isEmpty()
                         &&  currentConnection.arriving.isEmpty()
@@ -606,23 +648,34 @@ public class Verifier
                         &&  processingOutOfOrder.isEmpty()
                         &&  messages.isEmpty();
 
-                        if (done || now - lastEventAt > TimeUnit.SECONDS.toNanos(1L))
+                        //outbound.pendingCount() > 0 ? 5L : 2L
+                        if (!done && now - lastEventAt > SECONDS.toNanos(5L))
                         {
-                            if (!done)
-                            {
-                                fail("Unreasonably long period spent waiting for sync");
-                                messages.forEach((k, v) -> failinfo("%s", v));
-                                currentConnection.serializing.clear();
-                                currentConnection.arriving.clear();
-                                currentConnection.deserializingOnEventLoop.clear();
-                                currentConnection.deserializingOffEventLoop.clear();
-                                enqueueing.clear();
-                                processingOutOfOrder.clear();
-                                messages.clear();
-                                while (!currentConnection.framesInFlight.isEmpty())
-                                    currentConnection.framesInFlight.poll();
-                            }
+                            // TODO: even 2s or 5s are unreasonable periods of time without _any_ movement on a message waiting to arrive
+                            //       this seems to happen regularly on MacOS, but we should confirm this does not happen on Linux
+                            fail("Unreasonably long period spent waiting for sync (%dms)", NANOSECONDS.toMillis(now - lastEventAt));
+                            final AtomicBoolean test = new AtomicBoolean(false);
+                            messages.forEach((k, v) -> {
+                                failinfo("%s", v);
+                                if (v.sendState != null && v.sendState.type != FAILED_SERIALIZE)
+                                    test.set(true);
+                            });
+                            if (test.get())
+                                System.out.println();
+                            currentConnection.serializing.clear();
+                            currentConnection.arriving.clear();
+                            currentConnection.deserializingOnEventLoop.clear();
+                            currentConnection.deserializingOffEventLoop.clear();
+                            enqueueing.clear();
+                            processingOutOfOrder.clear();
+                            messages.clear();
+                            while (!currentConnection.framesInFlight.isEmpty())
+                                currentConnection.framesInFlight.poll();
+                            done = true;
+                        }
 
+                        if (done)
+                        {
                             ConnectionUtils.check(outbound)
                                            .pending(0, 0)
                                            .error(outboundErrorCount, outboundErrorBytes)
@@ -657,7 +710,7 @@ public class Verifier
                             m = new MessageState(e.message, e.destiny, e.start);
                             messages.put(e.messageId, m);
                             enqueueing.add(m);
-                            m.update(e, now);
+                            m.update(e, e.start, now);
                         }
                         else
                         {
@@ -698,7 +751,7 @@ public class Verifier
                         // into a linear sequence of events we expect to occur on arrival
                         SerializeMessageEvent e = (SerializeMessageEvent) next;
                         assert nextMessageId == e.at;
-                        MessageState m = messages.get(e.messageId);
+                        MessageState m = get(e);
                         assert m.is(ENQUEUE);
                         m.serialize = e.at;
                         m.messagingVersion = e.messagingVersion;
@@ -747,12 +800,17 @@ public class Verifier
                         else
                             assert e.failure instanceof InvalidSerializedSizeException || e.failure instanceof Connection.IntentionalIOException || e.failure instanceof Connection.IntentionalRuntimeException || e.failure instanceof BufferOverflowException;
 
+                        if (!e.wasPartiallyWrittenToNetwork)
+                            messages.remove(m.message.id());
+
                         InvalidSerializedSizeException ex;
                         if (outbound.type() != LARGE_MESSAGES
                             || !(e.failure instanceof InvalidSerializedSizeException)
                             || ((ex = (InvalidSerializedSizeException) e.failure).expectedSize <= DEFAULT_BUFFER_SIZE && ex.actualSizeAtLeast <= DEFAULT_BUFFER_SIZE)
                             || (ex.expectedSize > DEFAULT_BUFFER_SIZE && ex.actualSizeAtLeast < DEFAULT_BUFFER_SIZE))
-                            messages.remove(m.message.id()); // should not be possible to arrive on other node
+                        {
+                            assert !e.wasPartiallyWrittenToNetwork;
+                        }
 
                         m.require(FAILED_SERIALIZE, this, SERIALIZE);
                         m.sentOn.serializing.remove(m);
@@ -800,6 +858,8 @@ public class Verifier
                     case SENT_FRAME:
                     {
                         Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.SUCCESS);
+                        frame.forEach(m -> m.update((SimpleEvent) next, now));
+
                         outboundSentBytes += frame.payloadSizeInBytes;
                         outboundSentCount += frame.messageCount;
                         break;
@@ -809,6 +869,7 @@ public class Verifier
                         // TODO: is it possible for this to be signalled AFTER our reconnect event? probably, in which case this will be wrong
                         // TODO: verify that this was expected
                         Frame frame = currentConnection.framesInFlight.supplySendStatus(Frame.Status.FAILED);
+                        frame.forEach(m -> m.update((SimpleEvent) next, now));
                         if (frame.messagingVersion >= VERSION_40)
                         {
                             // the contents cannot be delivered without the whole frame arriving, so clear the contents now
@@ -823,7 +884,7 @@ public class Verifier
                     {
                         SimpleMessageEventWithSize e = (SimpleMessageEventWithSize) next;
                         assert nextMessageId == e.at;
-                        MessageState m = messages.get(e.messageId);
+                        MessageState m = get(e);
 
                         m.arrive = e.at;
                         if (e.messageSize != m.messageSize())
@@ -835,7 +896,7 @@ public class Verifier
                         }
                         else
                         {
-                            if (!m.is(SEND_FRAME))
+                            if (!m.is(SEND_FRAME, SENT_FRAME))
                             {
                                 fail("Invalid order of events: %s arrived before being sent in a frame", m);
                                 break;
@@ -891,7 +952,7 @@ public class Verifier
                         // we currently require that this event be issued before any possible error is thrown
                         SimpleMessageEvent e = (SimpleMessageEvent) next;
                         assert nextMessageId == e.at;
-                        MessageState m = messages.get(e.messageId);
+                        MessageState m = get(e);
                         m.require(DESERIALIZE, this, ARRIVE);
                         m.deserialize = e.at;
                         // deserialize may be off-loaded, so we can only impose meaningful ordering constraints
@@ -1067,9 +1128,9 @@ public class Verifier
                     {
                         break;
                     }
-                    case CONNECT:
+                    case CONNECT_OUTBOUND:
                     {
-                        ConnectEvent e = (ConnectEvent) next;
+                        ConnectOutboundEvent e = (ConnectOutboundEvent) next;
                         currentConnection = new ConnectionState(connectionCounter++, e.messagingVersion);
                         break;
                     }
@@ -1094,13 +1155,26 @@ public class Verifier
         }
     }
 
+    private MessageState get(SimpleMessageEvent onEvent)
+    {
+        MessageState m = messages.get(onEvent.messageId);
+        if (m == null)
+            throw new IllegalStateException("Missing " + onEvent + ": " + onEvent.messageId);
+        return m;
+    }
     private MessageState maybeRemove(SimpleMessageEvent onEvent)
     {
-        return maybeRemove(onEvent.messageId, onEvent.type);
+        return maybeRemove(onEvent.messageId, onEvent.type, onEvent);
     }
     private MessageState maybeRemove(long messageId, EventType onEvent)
     {
+        return maybeRemove(messageId, onEvent, onEvent);
+    }
+    private MessageState maybeRemove(long messageId, EventType onEvent, Object id)
+    {
         MessageState m = messages.get(messageId);
+        if (m == null)
+            throw new IllegalStateException("Missing " + id + ": " + messageId);
         switch (onEvent.category)
         {
             case SEND:
@@ -1175,7 +1249,7 @@ public class Verifier
             }
             void set(long sequenceId, Event event)
             {
-                set((int)(sequenceId - this.sequenceId), event);
+                lazySet((int)(sequenceId - this.sequenceId), event);
             }
         }
 
@@ -1299,6 +1373,7 @@ public class Verifier
         {
             long chunkSequenceId = sequenceId & -CHUNK_SIZE;
             Chunk chunk = chunkList.get(chunkSequenceId);
+            chunk.set(sequenceId, null);
             if (++chunk.removed == CHUNK_SIZE)
             {
                 chunkList.remove(chunkSequenceId);
@@ -1404,6 +1479,12 @@ public class Verifier
             if (begin == end)
                 begin = end = 0;
             return result;
+        }
+
+        void forEach(Consumer<T> consumer)
+        {
+            for (int i = 0 ; i < size() ; ++i)
+                consumer.accept(get(i));
         }
 
         boolean isEmpty()

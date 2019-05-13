@@ -26,7 +26,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -34,18 +34,21 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import com.google.common.primitives.Ints;
+import com.google.common.collect.ImmutableList;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.channel.Channel;
+import net.openhft.chronicle.core.util.ThrowingBiConsumer;
+import net.openhft.chronicle.core.util.ThrowingRunnable;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
@@ -58,12 +61,15 @@ import org.apache.cassandra.net.async.MessageGenerator.UniformPayloadGenerator;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.Pair;
-import org.apache.cassandra.utils.vint.VIntCoding;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
+import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.LEGACY_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.async.ConnectionType.URGENT_MESSAGES;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
-import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
 public class ConnectionBurnTest
 {
@@ -112,6 +118,34 @@ public class ConnectionBurnTest
         }
     }
 
+    private static class ConnectionKey
+    {
+        final InetAddressAndPort from;
+        final InetAddressAndPort to;
+        final ConnectionType type;
+
+        private ConnectionKey(InetAddressAndPort from, InetAddressAndPort to, ConnectionType type)
+        {
+            this.from = from;
+            this.to = to;
+            this.type = type;
+        }
+
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            ConnectionKey that = (ConnectionKey) o;
+            return Objects.equals(from, that.from) &&
+                   Objects.equals(to, that.to) &&
+                   type == that.type;
+        }
+
+        public int hashCode()
+        {
+            return Objects.hash(from, to, type);
+        }
+    }
 
     private static class Test implements InboundMessageHandlers.HandlerProvider, InboundMessageHandlers.MessageConsumer
     {
@@ -162,7 +196,7 @@ public class ConnectionBurnTest
         final Connection[] connections;
         final long[] connectionMessageIds;
         final ExecutorService executor = Executors.newCachedThreadPool();
-        final Map<Pair<InetAddressAndPort, InetAddressAndPort>, Connection> connectionLookup = new HashMap<>();
+        final Map<ConnectionKey, Connection> connectionLookup = new HashMap<>();
 
         private Test(int simulateEndpoints, MessageGenerators messageGenerators, GlobalInboundSettings inboundSettings, OutboundConnectionSettings outboundTemplate, long runForNanos)
         {
@@ -188,7 +222,7 @@ public class ConnectionBurnTest
                         Connection connection = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
                         this.connections[i] = connection;
                         this.connectionMessageIds[i] = minId;
-                        connectionLookup.put(Pair.create(sender, recipient), connection);
+                        connectionLookup.put(new ConnectionKey(sender, recipient, type), connection);
                         minId = maxId + 1;
                         maxId += messageIdsPerConnection;
                         ++i;
@@ -204,6 +238,21 @@ public class ConnectionBurnTest
             Connection connection = connections[i];
             assert connection.minId <= messageId && connection.maxId >= messageId;
             return connection;
+        }
+
+        List<Connection> getConnections(InetAddressAndPort endpoint, boolean inbound)
+        {
+            List<Connection> result = new ArrayList<>();
+            for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
+            {
+                for (InetAddressAndPort other : endpoints)
+                {
+                    result.add(connectionLookup.get(inbound ? new ConnectionKey(other, endpoint, type)
+                                                            : new ConnectionKey(endpoint, other, type)));
+                }
+            }
+            result.forEach(c -> {assert endpoint.equals(inbound ? c.recipient : c.sender); });
+            return result;
         }
 
         public void run() throws ExecutionException, InterruptedException, NoSuchFieldException, IllegalAccessException, TimeoutException
@@ -223,6 +272,7 @@ public class ConnectionBurnTest
                 for (int i = 0 ; i < 2 * connections.length ; ++i)
                 {
                     executor.execute(() -> {
+                        String threadName = Thread.currentThread().getName();
                         try
                         {
                             ThreadLocalRandom random = ThreadLocalRandom.current();
@@ -244,7 +294,7 @@ public class ConnectionBurnTest
                                         case 3: count = random.nextInt(2000, 10000); break;
                                     }
 
-                                    if (connection.outbound.type() == ConnectionType.LARGE_MESSAGES)
+                                    if (connection.outbound.type() == LARGE_MESSAGES)
                                         count /= 2;
 
                                     while (connection.isSending()
@@ -255,6 +305,7 @@ public class ConnectionBurnTest
                                 }
                                 finally
                                 {
+                                    Thread.currentThread().setName(threadName);
                                     connection.unregisterSender();
                                 }
                             }
@@ -282,10 +333,11 @@ public class ConnectionBurnTest
                             int average = total / (i + 1);
                             int max = random.nextInt(1, min(2 * average, total - 2));
                             int min = random.nextInt(0, max);
-                            connections.get(i).controller.setInFlightByteBounds(min, max);
+                            connections.get(i).setInFlightByteBounds(min, max);
                             total -= max;
                         }
-                        connections.get(0).controller.setInFlightByteBounds(random.nextInt(0, total), total);
+                        // note that setInFlightByteBounds might not
+                        connections.get(0).setInFlightByteBounds(random.nextInt(0, total), total);
                         Uninterruptibles.sleepUninterruptibly(1L, TimeUnit.SECONDS);
                     }
                 });
@@ -315,15 +367,85 @@ public class ConnectionBurnTest
                 executor.execute(() -> {
                     Thread.currentThread().setName("Test-Sync");
                     ThreadLocalRandom random = ThreadLocalRandom.current();
+                    BiConsumer<InetAddressAndPort, List<Connection>> checkStoppedTo = (to, from) -> {
+                        InboundMessageHandlers handlers = from.get(0).inbound;
+                        long using = handlers.usingCapacity();
+                        long usingReserve = handlers.usingEndpointReserveCapacity();
+                        if (using != 0 || usingReserve != 0)
+                        {
+                            String message = to + " inbound using %d capacity and %d reserve; should be zero";
+                            from.get(0).verifier.logFailure(message, using, usingReserve);
+                        }
+                    };
+                    BiConsumer<InetAddressAndPort, List<Connection>> checkStoppedFrom = (from, to) -> {
+                        long using = to.stream().map(c -> c.outbound).mapToLong(OutboundConnection::pendingBytes).sum();
+                        long usingReserve = to.get(0).outbound.unsafeGetEndpointReserveLimits().using();
+                        if (using != 0 || usingReserve != 0)
+                        {
+                            String message = from + " outbound using %d capacity and %d reserve; should be zero";
+                            to.get(0).verifier.logFailure(message, using, usingReserve);
+                        }
+                    };
+                    ThrowingBiConsumer<List<Connection>, ThrowingRunnable<InterruptedException>, InterruptedException> sync =
+                    (connections, exec) -> {
+                        final CountDownLatch ready = new CountDownLatch(connections.size());
+                        final CountDownLatch done = new CountDownLatch(1);
+                        for (Connection connection : connections)
+                        {
+                            connection.sync(() -> {
+                                ready.countDown();
+                                try { done.await(); }
+                                catch (InterruptedException e) { Thread.interrupted(); }
+                            });
+                        }
+                        ready.await();
+                        try
+                        {
+                            exec.run();
+                        }
+                        finally
+                        {
+                            done.countDown();
+                        }
+                    };
+
+                    int count = 0;
                     while (deadline > System.nanoTime())
                     {
+
                         try
                         {
                             Thread.sleep(random.nextInt(10000));
-                            CountDownLatch latch = new CountDownLatch(1);
-                            Connection connection = connections[random.nextInt(connections.length)];
-                            connection.sync(latch::countDown);
-                            latch.await();
+
+                            if (++count % 10 == 0)
+//                            {
+//                                boolean checkInbound = random.nextBoolean();
+//                                BiConsumer<InetAddressAndPort, List<Connection>> verifier = checkInbound ? checkStoppedTo : checkStoppedFrom;
+//                                InetAddressAndPort endpoint = endpoints.get(random.nextInt(endpoints.size()));
+//                                List<Connection> connections = getConnections(endpoint, checkInbound);
+//                                sync.accept(connections, () -> verifier.accept(endpoint, connections));
+//                            }
+//                            else if (count % 100 == 0)
+                            {
+                                sync.accept(ImmutableList.copyOf(connections), () -> {
+
+                                    for (InetAddressAndPort endpoint : endpoints)
+                                    {
+                                        checkStoppedTo  .accept(endpoint, getConnections(endpoint, true ));
+                                        checkStoppedFrom.accept(endpoint, getConnections(endpoint, false));
+                                    }
+                                    long inUse = BufferPool.unsafeGetBytesInUse();
+                                    if (inUse > 0)
+                                        connections[0].verifier.logFailure("Using %d bytes of BufferPool, but all connections are idle", inUse);
+                                });
+                            }
+                            else
+                            {
+                                CountDownLatch latch = new CountDownLatch(1);
+                                Connection connection = connections[random.nextInt(connections.length)];
+                                connection.sync(latch::countDown);
+                                latch.await();
+                            }
                         }
                         catch (InterruptedException e)
                         {
@@ -454,7 +576,6 @@ public class ConnectionBurnTest
                 }
             };
         }
-
     }
 
     static List<InetAddressAndPort> endpoints(int count)

@@ -22,6 +22,7 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
+import java.util.Collections;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -29,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
+import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -38,9 +40,11 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.channel.unix.Errors;
 import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
@@ -391,14 +395,14 @@ public class OutboundConnection
      *
      * Only to be invoked by the delivery thread
      */
-    private void onFailedSerialize(Message<?> message, int messagingVersion, Throwable t)
+    private void onFailedSerialize(Message<?> message, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable t)
     {
         JVMStabilityInspector.inspectThrowable(t, false);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
         errorBytes += message.serializedSize(messagingVersion);
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
-        callbacks.onFailedSerialize(message, settings.to, messagingVersion, t);
+        callbacks.onFailedSerialize(message, settings.to, messagingVersion, wasPartiallyWrittenToNetwork, t);
     }
 
     /**
@@ -725,7 +729,7 @@ public class OutboundConnection
                     }
                     catch (Throwable t)
                     {
-                        onFailedSerialize(next, messagingVersion, t);
+                        onFailedSerialize(next, messagingVersion, false, t);
 
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
@@ -905,19 +909,25 @@ public class OutboundConnection
             }
             catch (Throwable t)
             {
-                onFailedSerialize(send, messagingVersion, t);
+                boolean tryAgain = true;
 
-                if (out != null) out.discard();
-                if ((out != null && out.flushed() > 0) ||
-                    isCausedBy(t, cause ->    isConnectionReset(cause)
-                                           || cause instanceof Errors.NativeIoException
-                                           || cause instanceof AsyncChannelOutputPlus.FlushException))
+                if (out != null)
                 {
-                    // close the channel; this runs on the event loop, so we wait for this to complete to avoid racing with it
-                    closeChannelNow(channel).awaitUninterruptibly();
-                    return false;
+                    out.discard();
+                    if (out.flushed() > 0 ||
+                        isCausedBy(t, cause ->    isConnectionReset(cause)
+                                               || cause instanceof Errors.NativeIoException
+                                               || cause instanceof AsyncChannelOutputPlus.FlushException))
+                    {
+                        // close the channel; this runs on the event loop, so we wait for this to complete to avoid racing with it
+                        closeChannelNow(channel).awaitUninterruptibly();
+                        tryAgain = false;
+                    }
                 }
-                return true;
+
+                // note: we depend on closeChannelNow().awaitUninterruptibly for correctness of isPartiallyWrittenToNetwork
+                onFailedSerialize(send, messagingVersion, out != null && out.flushedToNetwork() > 0, t);
+                return tryAgain;
             }
         }
 
@@ -1207,15 +1217,25 @@ public class OutboundConnection
      */
     private Future<?> closeChannelNow(Channel closeIfIs)
     {
-        return runOnEventLoop(closeChannelTask(closeIfIs)).addListener(future -> {
+        // TODO: we only really are required to wait until the close completes for Verifier purposes
+        //       however, it might be semantically good to do this anyway, as it means we cannot spin
+        //       a thousand connections that all have failing operations in flight.
+        //       but this is not probably a realistic scenario, and it potentially delays (slightly) reconnection
+        Promise<Object> onClose = AsyncPromise.uncancellable(eventLoop, future -> {
             // ensure we will run delivery again at some point, if we have work
             // (could have multiple rounds of exceptions, with many waiting messages and no new ones)
             if (hasPending())
                 delivery.execute();
         });
+        runOnEventLoop(closeChannelTask(closeIfIs, new PromiseNotifier<>(onClose)));
+        return onClose;
     }
 
     private Runnable closeChannelTask(Channel closeIfIs)
+    {
+        return closeChannelTask(closeIfIs, null);
+    }
+    private Runnable closeChannelTask(Channel closeIfIs, GenericFutureListener<? extends Future<Object>> closeListener)
     {
         return () -> {
             if (closeIfIs != null && channel == closeIfIs)
@@ -1226,10 +1246,12 @@ public class OutboundConnection
                 channel = null;
                 payloadAllocator = null;
                 scheduleMaintenanceWhileDisconnected();
-                close.close().addListener(future -> {
+                Future<?> closeFuture = close.close().addListener(future -> {
                     if (!future.isSuccess())
                         logger.info("Problem closing channel {}", channel, future.cause());
                 });
+                if (closeListener != null)
+                    closeFuture.addListener(closeListener);
             }
         };
     }
@@ -1571,4 +1593,8 @@ public class OutboundConnection
         releaseCapacity(1, amount);
     }
 
+    ResourceLimits.Limit unsafeGetEndpointReserveLimits()
+    {
+        return reserveCapacityInBytes.endpoint;
+    }
 }

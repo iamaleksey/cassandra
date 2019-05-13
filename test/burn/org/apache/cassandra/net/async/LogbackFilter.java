@@ -21,6 +21,7 @@ package org.apache.cassandra.net.async;
 import java.io.EOFException;
 import java.nio.BufferOverflowException;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 import com.google.common.collect.ImmutableSet;
 
@@ -31,12 +32,18 @@ import ch.qos.logback.core.spi.FilterReply;
 
 public class LogbackFilter extends Filter
 {
+    private static final Pattern ignore = Pattern.compile("(successfully connected|connection established), version =");
+
     public FilterReply decide(Object o)
     {
         if (!(o instanceof LoggingEvent))
             return FilterReply.NEUTRAL;
 
-        IThrowableProxy t = ((LoggingEvent) o).getThrowableProxy();
+        LoggingEvent e = (LoggingEvent) o;
+        if (ignore.matcher(e.getMessage()).find())
+            return FilterReply.DENY;
+
+        IThrowableProxy t = e.getThrowableProxy();
         if (t == null)
             return FilterReply.NEUTRAL;
 

@@ -58,8 +58,10 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
 
     /** the number of bytes we have begun flushing, written exclusively by the writer */
     private volatile long flushing;
-    /** the number of bytes we have finished flushing, written exclusively by the channel eventLoop */
+    /** the number of bytes we have finished flushing, successfully or otherwise, written exclusively by the channel eventLoop */
     private volatile long flushed;
+    /** the number of bytes we have finished flushing to the network, written exclusively by the channel eventLoop */
+    private          long flushedToNetwork;
     /** any error that has been thrown during a flush */
     private volatile Throwable flushFailed;
 
@@ -94,6 +96,7 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
         return AsyncChannelPromise.withListener(channel, future -> {
             if (future.isSuccess() && null == flushFailed)
             {
+                flushedToNetwork += byteCount;
                 releaseSpace(byteCount);
             }
             else if (null == flushFailed)
@@ -209,7 +212,7 @@ public abstract class AsyncChannelOutputPlus extends BufferedDataOutputStreamPlu
 
     public long flushedToNetwork()
     {
-        return flushed;
+        return flushedToNetwork;
     }
 
     /**

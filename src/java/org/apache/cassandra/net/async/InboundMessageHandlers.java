@@ -287,7 +287,7 @@ public final class InboundMessageHandlers
         return sumHandlers(h -> h.queueSize);
     }
 
-    public long usingReserveCapacity()
+    public long usingEndpointReserveCapacity()
     {
         return endpointReserveCapacity.using();
     }

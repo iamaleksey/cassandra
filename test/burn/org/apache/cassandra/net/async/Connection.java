@@ -24,6 +24,8 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -53,7 +55,8 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     final long minId;
     final long maxId;
     final AtomicInteger isSending = new AtomicInteger();
-    final WaitQueue waitingForSendersToUnregister = new WaitQueue();
+    private volatile Runnable onSync;
+    final Lock managementLock = new ReentrantLock();
 
     private final AtomicLong nextSendId = new AtomicLong();
 
@@ -98,24 +101,57 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     void unregisterSender()
     {
         if (isSending.updateAndGet(i -> i < 0 ? i + 1 : i - 1) == -1)
-            waitingForSendersToUnregister.signalAll();
+        {
+            Runnable onSync = this.onSync;
+            this.onSync = null;
+            verifier.onSync(() -> {
+                onSync.run();
+                isSending.set(0);
+            });
+        }
     }
 
-    synchronized void sync(Runnable onCompletion) throws InterruptedException
+    boolean setInFlightByteBounds(long minBytes, long maxBytes)
     {
-        assert isSending.get() >= 0;
-        isSending.updateAndGet(i -> -1 -i);
-        controller.setInFlightByteBounds(0, Long.MAX_VALUE);
-        while (isSending.get() != -1)
+        if (managementLock.tryLock())
         {
-            WaitQueue.Signal signal = waitingForSendersToUnregister.register();
-            if (isSending.get() != -1) signal.await();
-            else signal.cancel();
+            try
+            {
+                if (isSending.get() >= 0)
+                {
+                    controller.setInFlightByteBounds(minBytes, maxBytes);
+                    return true;
+                }
+            }
+            finally
+            {
+                managementLock.unlock();
+            }
         }
-        verifier.onSync(() -> {
-            isSending.set(0);
-            onCompletion.run();
-        });
+        return false;
+    }
+
+    void sync(Runnable onCompletion)
+    {
+        managementLock.lock();
+        try
+        {
+            assert onSync == null;
+            assert isSending.get() >= 0;
+            isSending.updateAndGet(i -> -2 -i);
+            long previousMin = controller.minimumInFlightBytes();
+            long previousMax = controller.maximumInFlightBytes();
+            controller.setInFlightByteBounds(0, Long.MAX_VALUE);
+            onSync = () -> {
+                controller.setInFlightByteBounds(previousMin, previousMax);
+                onCompletion.run();
+            };
+            unregisterSender();
+        }
+        finally
+        {
+            managementLock.unlock();
+        }
     }
 
     void sendOne() throws InterruptedException
@@ -283,7 +319,12 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     public void onConnect(int messagingVersion, OutboundConnectionSettings settings)
     {
-        verifier.onConnect(messagingVersion, settings);
+        verifier.onConnectOutbound(messagingVersion, settings);
+    }
+
+    public void onConnectInbound(int messagingVersion, InboundMessageHandler handler)
+    {
+        verifier.onConnectInbound(messagingVersion, handler);
     }
 
     public void onOverloaded(Message<?> message, InetAddressAndPort peer)
@@ -298,10 +339,11 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
-    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, Throwable failure)
+    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable failure)
     {
-        controller.fail(message.serializedSize(messagingVersion));
-        verifier.onFailedSerialize(message.id(), failure);
+        if (!wasPartiallyWrittenToNetwork)
+            controller.fail(message.serializedSize(messagingVersion));
+        verifier.onFailedSerialize(message.id(), wasPartiallyWrittenToNetwork, failure);
     }
 
     public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
