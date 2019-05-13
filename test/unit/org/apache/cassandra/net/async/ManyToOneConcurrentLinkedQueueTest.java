@@ -22,6 +22,7 @@ import java.util.NoSuchElementException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
+import org.junit.Assert;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
@@ -142,8 +143,24 @@ public class ManyToOneConcurrentLinkedQueueTest
         assertTrue(queue.relaxedIsEmpty());
     }
 
+    enum Strategy
+    {
+        PEEK_AND_REMOVE, POLL
+    }
+
     @Test
-    public void testOfferConcurrently()
+    public void testConcurrentlyWithPoll()
+    {
+        testConcurrently(Strategy.POLL);
+    }
+
+    @Test
+    public void testConcurrentlyWithPeekAndRemove()
+    {
+        testConcurrently(Strategy.PEEK_AND_REMOVE);
+    }
+
+    private void testConcurrently(Strategy strategy)
     {
         int numThreads = 4;
         int numItems = 1_000_000 * numThreads;
@@ -174,9 +191,20 @@ public class ManyToOneConcurrentLinkedQueueTest
         for (int i = 0; i < numItems; i++)
         {
             Integer item;
-            //noinspection StatementWithEmptyBody
-            while ((item = queue.poll()) == null);
-            itemsPolled.set(item);
+            switch (strategy)
+            {
+                case PEEK_AND_REMOVE:
+                    //noinspection StatementWithEmptyBody
+                    while ((item = queue.peek()) == null) ;
+                    Assert.assertEquals(item, queue.remove());
+                    itemsPolled.set(item);
+                    break;
+                case POLL:
+                    //noinspection StatementWithEmptyBody
+                    while ((item = queue.poll()) == null) ;
+                    itemsPolled.set(item);
+                    break;
+            }
         }
 
         assertEquals(numItems, itemsPolled.cardinality());

@@ -133,7 +133,7 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
             else if (p == q)
             {
                 /*
-                 * We have fallen off list (p was. If tail is unchanged, it will also be off-list, in which case we need to
+                 * We have fallen off list. If tail is unchanged, it will also be off-list, in which case we need to
                  * jump to head, from which all live nodes are always reachable. Else the new tail is a better bet.
                  */
                 p = (t != (t = tail)) ? t : head;
