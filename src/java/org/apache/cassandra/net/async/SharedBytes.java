@@ -142,6 +142,11 @@ class SharedBytes
             BufferPool.put(bytes, false);
     }
 
+    boolean isReleased()
+    {
+        return owner.count == RELEASED;
+    }
+
     /**
      * Create a slice over the next {@code length} bytes, consuming them from our buffer, and incrementing the owner count
      */

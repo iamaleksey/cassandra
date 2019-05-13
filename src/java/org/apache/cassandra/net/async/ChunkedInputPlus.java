@@ -24,6 +24,14 @@ import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.io.util.RebufferingInputStream;
 
+/**
+ * A specialised {@link org.apache.cassandra.io.util.DataInputPlus} implementation for deserializing large messages
+ * that are split over multiple {@link org.apache.cassandra.net.async.FrameDecoder.Frame}s.
+ *
+ * Ensures that every underlying {@link SharedBytes} frame is released, and promptly so, as frames are consumed.
+ *
+ * {@link #close()} <em>MUST</em> be invoked in the end.
+ */
 class ChunkedInputPlus extends RebufferingInputStream
 {
     private final PeekingIterator<SharedBytes> iter;
@@ -34,6 +42,11 @@ class ChunkedInputPlus extends RebufferingInputStream
         this.iter = iter;
     }
 
+    /**
+     * Creates a {@link ChunkedInputPlus} from the provided {@link SharedBytes} buffers.
+     *
+     * The provided iterable <em>must</em> contain at least one buffer.
+     */
     static ChunkedInputPlus of(Iterable<SharedBytes> buffers)
     {
         PeekingIterator<SharedBytes> iter = Iterators.peekingIterator(buffers.iterator());
@@ -63,15 +76,20 @@ class ChunkedInputPlus extends RebufferingInputStream
     }
 
     /**
-     * Returns the number of unconsumed bytes, destructively. Should only be used for sanity checking, once the input is no longer needed.
+     * Returns the number of unconsumed bytes. Will release any outstanding buffers and consume the underlying iterator.
+     *
+     * Should only be used for sanity checking, once the input is no longer needed, as it will implicitly close the input.
      */
     int remainder()
     {
+        buffer = null;
+
         int bytes = 0;
         while (iter.hasNext())
         {
-            bytes += iter.peek().readableBytes();
-            iter.peek().release();
+            SharedBytes chunk = iter.peek();
+            bytes += chunk.readableBytes();
+            chunk.release();
             iter.next();
         }
         return bytes;
