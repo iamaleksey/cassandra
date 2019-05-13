@@ -173,7 +173,7 @@ public enum Verb
     /**
      * Messages we receive from peers have a Verb that tells us what kind of message it is.
      * Most of the time, this is enough to determine how to deserialize the message payload.
-     * The exception is the REQUEST_RSP verb, which just means "a respond to something you told me to do."
+     * The exception is the REQUEST_RSP verb, which just means "a responce to something you told me to do."
      * Traditionally, this was fine since each VerbHandler knew what type of payload it expected, and
      * handled the deserialization itself.  Now that we do that in ITC, to avoid the extra copy to an
      * intermediary byte[] (See CASSANDRA-3716), we need to wire that up to the CallbackInfo object

@@ -54,7 +54,7 @@ public class MockMessagingServiceTest
     @Test
     public void testRequestResponse() throws InterruptedException, ExecutionException
     {
-        // echo message that we like to mock as incoming respond for outgoing echo message
+        // echo message that we like to mock as incoming responce for outgoing echo message
         Message<NoPayload> echoMessage = Message.out(ECHO_REQ, NoPayload.noPayload);
         MockMessagingSpy spy = MockMessagingService
                 .when(
