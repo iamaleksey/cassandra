@@ -289,17 +289,10 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
-                    InetAddressAndPort from = initiate.from;
-                    if (from == null && useMessagingVersion < VERSION_40)
-                    {
-                        InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
-                        from = InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
-                    }
-
                     if (initiate.type.isStreaming())
-                        setupStreamingPipeline(from, ctx);
+                        setupStreamingPipeline(initiate.from, ctx);
                     else
-                        setupMessagingPipeline(from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
+                        setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
                 }
             }
             else
@@ -381,6 +374,14 @@ public class InboundConnectionInitiator
             handshakeTimeout.cancel(true);
 
             ChannelPipeline pipeline = ctx.pipeline();
+            Channel channel = ctx.channel();
+
+            // TODO: cleanup pre40 vs post40
+            if (from == null)
+            {
+                InetSocketAddress address = (InetSocketAddress) channel.remoteAddress();
+                from = InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
+            }
 
             pipeline.replace(this, "streamInbound", new StreamingInboundHandler(from, current_version, null));
 
