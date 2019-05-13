@@ -22,27 +22,19 @@ import java.util.ArrayDeque;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.ScheduledFuture;
-import org.jctools.queues.MpmcArrayQueue;
-import org.jctools.queues.SpscArrayQueue;
 
-@ChannelHandler.Sharable
 public class InboundProxyHandler extends ChannelInboundHandlerAdapter
 {
-    private volatile ForwardStrategy forwardStrategy;
-    private volatile Runnable onRead = () -> {};
-    private volatile Runnable onDisconnect = () -> {};
-
     private final ArrayDeque<Forward> forwardQueue;
     private ScheduledFuture scheduled = null;
-
-    public InboundProxyHandler()
+    private final Controller controller;
+    public InboundProxyHandler(Controller controller)
     {
-        this.forwardStrategy = ForwardNormally.instance;
+        this.controller = controller;
         this.forwardQueue = new ArrayDeque<>(1024);
     }
 
@@ -55,7 +47,7 @@ public class InboundProxyHandler extends ChannelInboundHandlerAdapter
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        onDisconnect.run();
+        controller.onDisconnect.run();
 
         if (scheduled != null)
         {
@@ -73,21 +65,11 @@ public class InboundProxyHandler extends ChannelInboundHandlerAdapter
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg)
     {
-        Forward forward = forwardStrategy.forward(ctx, msg);
+        Forward forward = controller.forwardStrategy.forward(ctx, msg);
         forwardQueue.offer(forward);
         maybeScheduleNext(ctx.channel().eventLoop());
-        onRead.run();
+        controller.onRead.run();
         ctx.channel().read();
-    }
-
-    public void onRead(Runnable onRead)
-    {
-        this.onRead = onRead;
-    }
-
-    public void onDisconnect(Runnable onDisconnect)
-    {
-        this.onDisconnect = onDisconnect;
     }
 
     private void maybeScheduleNext(EventExecutor executor)
@@ -107,26 +89,6 @@ public class InboundProxyHandler extends ChannelInboundHandlerAdapter
                 maybeScheduleNext(executor);
             });
         }
-    }
-
-    public void reset()
-    {
-        this.forwardStrategy = ForwardNormally.instance;
-    }
-
-    public void withLatency(long latency, TimeUnit timeUnit)
-    {
-        this.forwardStrategy = new ForwardWithLatency(latency, timeUnit);
-    }
-
-    public void withCloseAfterRead(Runnable afterClose)
-    {
-        this.forwardStrategy = new CloseAfterRead(afterClose);
-    }
-
-    public <T> void withPayloadTransform(Function<T, T> fn)
-    {
-        this.forwardStrategy = new TransformPayload<>(fn);
     }
 
     private static class Forward
@@ -222,9 +184,51 @@ public class InboundProxyHandler extends ChannelInboundHandlerAdapter
 
         public Forward forward(ChannelHandlerContext ctx, Object msg)
         {
-            return  new Forward(System.currentTimeMillis(),
-                                0,
-                                () -> ctx.fireChannelRead(fn.apply((T) msg)));
+            return new Forward(System.currentTimeMillis(),
+                               0,
+                               () -> ctx.fireChannelRead(fn.apply((T) msg)));
         }
     }
+
+    public static class Controller
+    {
+        private volatile InboundProxyHandler.ForwardStrategy forwardStrategy;
+        private volatile Runnable onRead = () -> {};
+        private volatile Runnable onDisconnect = () -> {};
+
+        public Controller()
+        {
+            this.forwardStrategy = ForwardNormally.instance;
+        }
+        public void onRead(Runnable onRead)
+        {
+            this.onRead = onRead;
+        }
+
+        public void onDisconnect(Runnable onDisconnect)
+        {
+            this.onDisconnect = onDisconnect;
+        }
+
+        public void reset()
+        {
+            this.forwardStrategy = ForwardNormally.instance;
+        }
+
+        public void withLatency(long latency, TimeUnit timeUnit)
+        {
+            this.forwardStrategy = new ForwardWithLatency(latency, timeUnit);
+        }
+
+        public void withCloseAfterRead(Runnable afterClose)
+        {
+            this.forwardStrategy = new CloseAfterRead(afterClose);
+        }
+
+        public <T> void withPayloadTransform(Function<T, T> fn)
+        {
+            this.forwardStrategy = new TransformPayload<>(fn);
+        }
+    }
+
 }

@@ -158,7 +158,7 @@ public class ProxyHandlerTest
 
     private interface DoTest
     {
-        public void doTest(InboundProxyHandler proxy, TestHandler testHandler, Channel channel) throws Throwable;
+        public void doTest(InboundProxyHandler.Controller proxy, TestHandler testHandler, Channel channel) throws Throwable;
     }
 
 
@@ -167,7 +167,8 @@ public class ProxyHandlerTest
         EventLoopGroup serverGroup = new NioEventLoopGroup(1);
         EventLoopGroup clientGroup = new NioEventLoopGroup(1);
 
-        InboundProxyHandler proxyHandler = new InboundProxyHandler();
+        InboundProxyHandler.Controller controller = new InboundProxyHandler.Controller();
+        InboundProxyHandler proxyHandler = new InboundProxyHandler(controller);
         TestHandler testHandler = new TestHandler();
 
         ServerBootstrap sb = new ServerBootstrap();
@@ -200,7 +201,7 @@ public class ProxyHandlerTest
         Channel serverChannel = sb.bind(addr).sync().channel();
 
         Channel clientChannel = cb.connect(addr).sync().channel();
-        test.doTest(proxyHandler, testHandler, clientChannel);
+        test.doTest(controller, testHandler, clientChannel);
 
         clientChannel.close();
         serverChannel.close();

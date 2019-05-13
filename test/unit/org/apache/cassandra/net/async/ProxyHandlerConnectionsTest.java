@@ -27,7 +27,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.function.ToLongFunction;
 
@@ -261,7 +260,11 @@ public class ProxyHandlerConnectionsTest
             });
             tryConnect(outbound, 1, SECONDS, false);
             Assert.assertTrue(!outbound.isConnected());
-            // TODO: validate counts
+            if (settings.right.withCrc())
+            {
+                Assert.assertEquals(2, outbound.connectionAttempts());
+                Assert.assertEquals(0, outbound.successfulConnections());
+            }
         });
     }
 
@@ -327,7 +330,7 @@ public class ProxyHandlerConnectionsTest
     }
     interface ManualSendTest
     {
-        void accept(Pair<InboundConnectionSettings, OutboundConnectionSettings> settings, InboundSockets inbound, OutboundConnection outbound, InetAddressAndPort endpoint, InboundProxyHandler handler) throws Throwable;
+        void accept(Pair<InboundConnectionSettings, OutboundConnectionSettings> settings, InboundSockets inbound, OutboundConnection outbound, InetAddressAndPort endpoint, InboundProxyHandler.Controller handler) throws Throwable;
     }
 
     private void testManual(ManualSendTest test) throws Throwable
@@ -370,9 +373,12 @@ public class ProxyHandlerConnectionsTest
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundSettings, reserveCapacityInBytes);
         try
         {
-            InboundProxyHandler handler = new InboundProxyHandler();
-            inbound.open(pipeline -> pipeline.addLast(handler)).sync();
-            test.accept(Pair.create(inboundSettings, outboundSettings), inbound, outbound, endpoint, handler);
+            InboundProxyHandler.Controller controller = new InboundProxyHandler.Controller();
+            inbound.open(pipeline -> {
+                InboundProxyHandler handler = new InboundProxyHandler(controller);
+                pipeline.addLast(handler);
+            }).sync();
+            test.accept(Pair.create(inboundSettings, outboundSettings), inbound, outbound, endpoint, controller);
         }
         finally
         {
