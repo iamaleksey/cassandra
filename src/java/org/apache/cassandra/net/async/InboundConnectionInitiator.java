@@ -51,6 +51,7 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AcceptVersions;
+import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.async.StreamingInboundHandler;
 
@@ -288,10 +289,17 @@ public class InboundConnectionInitiator
                 }
                 else
                 {
+                    InetAddressAndPort from = initiate.from;
+                    if (from == null && useMessagingVersion < VERSION_40)
+                    {
+                        InetSocketAddress address = (InetSocketAddress) ctx.channel().remoteAddress();
+                        from = InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
+                    }
+
                     if (initiate.type.isStreaming())
-                        setupStreamingPipeline(initiate.from, ctx);
+                        setupStreamingPipeline(from, ctx);
                     else
-                        setupMessagingPipeline(initiate.from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
+                        setupMessagingPipeline(from, useMessagingVersion, initiate.acceptVersions.max, ctx.pipeline());
                 }
             }
             else
@@ -373,14 +381,7 @@ public class InboundConnectionInitiator
             handshakeTimeout.cancel(true);
 
             ChannelPipeline pipeline = ctx.pipeline();
-            Channel channel = ctx.channel();
 
-            // TODO: cleanup pre40 vs post40
-            if (from == null)
-            {
-                InetSocketAddress address = (InetSocketAddress) channel.remoteAddress();
-                from = InetAddressAndPort.getByAddressOverrideDefaults(address.getAddress(), address.getPort());
-            }
             pipeline.replace(this, "streamInbound", new StreamingInboundHandler(from, current_version, null));
 
             // pass a custom recv ByteBuf allocator to the channel. the default recv ByteBuf size is 1k, but in streaming we're
@@ -419,7 +420,6 @@ public class InboundConnectionInitiator
             else
                 frameDecoder = new FrameDecoderLegacy(allocator, useMessagingVersion);
 
-            System.out.println("frameDecoder = " + frameDecoder);
             frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =
