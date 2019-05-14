@@ -150,7 +150,7 @@ public class Config
     public String broadcast_rpc_address;
     public boolean rpc_keepalive = true;
 
-    public int internode_max_message_size_in_bytes = 1 << 25; // 32MiB
+    public Integer internode_max_message_size_in_bytes;
 
     public int internode_send_buff_size_in_bytes = 0;
 

@@ -804,14 +804,27 @@ public class DatabaseDescriptor
         if (conf.otc_coalescing_enough_coalesced_messages <= 0)
             throw new ConfigurationException("otc_coalescing_enough_coalesced_messages must be positive", false);
 
-        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes)
-            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_endpoint_capacity_in_bytes", false);
-        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_receive_queue_global_capacity_in_bytes)
-            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_global_capacity_in_bytes", false);
-        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes)
-            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_endpoint_capacity_in_bytes", false);
-        if (conf.internode_max_message_size_in_bytes > conf.internode_application_reserve_send_queue_global_capacity_in_bytes)
-            throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_global_capacity_in_bytes", false);
+        Integer maxMessageSize = conf.internode_max_message_size_in_bytes;
+        if (maxMessageSize != null)
+        {
+            if (maxMessageSize > conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_endpoint_capacity_in_bytes", false);
+
+            if (maxMessageSize > conf.internode_application_reserve_receive_queue_global_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_global_capacity_in_bytes", false);
+
+            if (maxMessageSize > conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_endpoint_capacity_in_bytes", false);
+
+            if (maxMessageSize > conf.internode_application_reserve_send_queue_global_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_global_capacity_in_bytes", false);
+        }
+        else
+        {
+            conf.internode_max_message_size_in_bytes =
+                Math.min(conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes,
+                         conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes);
+        }
 
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
     }
