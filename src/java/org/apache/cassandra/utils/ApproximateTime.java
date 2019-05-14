@@ -248,6 +248,6 @@ public class ApproximateTime
 
     public static boolean isAfterNanoTime(long approxCurrentTimeNanos, long approxInstantNanos)
     {
-        return approxCurrentTimeNanos > approxInstantNanos + nanoTimePrecision();
+        return approxCurrentTimeNanos - nanoTimePrecision() > approxInstantNanos;
     }
 }

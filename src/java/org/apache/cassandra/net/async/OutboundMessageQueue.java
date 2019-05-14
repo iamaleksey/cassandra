@@ -177,7 +177,7 @@ public class OutboundMessageQueue
 
     private boolean maybePruneExpired(long nowNanos)
     {
-        if (nowNanos > earliestExpiresAt)
+        if (ApproximateTime.isAfterNanoTime(nowNanos, earliestExpiresAt))
             return tryRun(() -> pruneWithLock(nowNanos));
         return false;
     }
