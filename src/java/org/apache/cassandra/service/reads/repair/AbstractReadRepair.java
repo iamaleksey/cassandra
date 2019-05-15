@@ -114,12 +114,9 @@ public abstract class AbstractReadRepair<E extends Endpoints<E>, P extends Repli
             else type = to.isFull() ? "full" : "transient";
             Tracing.trace("Enqueuing {} data read to {}", type, to);
         }
-        Message<ReadCommand> message = command.createMessage();
         // if enabled, request additional info about repaired data from any full replicas
-        if (command.isTrackingRepairedStatus() && to.isFull())
-            message = message.withFlag(MessageFlag.TRACK_REPAIRED_DATA);
-
-        MessagingService.instance().sendRRWithFailure(message, to.endpoint(), readCallback);
+        Message<ReadCommand> message = command.createMessage(command.isTrackingRepairedStatus() && to.isFull());
+        MessagingService.instance().sendWithCallback(message, to.endpoint(), readCallback);
     }
 
     abstract Meter getRepairMeter();

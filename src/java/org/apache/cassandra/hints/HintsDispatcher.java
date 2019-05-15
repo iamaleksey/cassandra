@@ -189,7 +189,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         Callback callback = new Callback(hint.creationTime);
         Message<?> message = Message.out(HINT_REQ, new HintMessage(hostId, hint));
-        MessagingService.instance().sendRRWithFailure(message, address, callback);
+        MessagingService.instance().sendWithCallback(message, address, callback);
         return callback;
     }
 
@@ -201,7 +201,7 @@ final class HintsDispatcher implements AutoCloseable
     {
         HintMessage.Encoded message = new HintMessage.Encoded(hostId, hint, messagingVersion);
         Callback callback = new Callback(message.getHintCreationTime());
-        MessagingService.instance().sendRRWithFailure(Message.out(HINT_REQ, message), address, callback);
+        MessagingService.instance().sendWithCallback(Message.out(HINT_REQ, message), address, callback);
         return callback;
     }
 

@@ -434,7 +434,7 @@ public class StorageProxy implements StorageProxyMBean
     {
         Message<Commit> message = Message.out(PAXOS_COMMIT_REQ, commit);
         for (InetAddressAndPort target : replicas)
-            MessagingService.instance().sendOneWay(message, target);
+            MessagingService.instance().send(message, target);
     }
 
     private static PrepareCallback preparePaxos(Commit toPrepare, ReplicaPlan.ForPaxosWrite replicaPlan, long queryStartNanoTime)
@@ -459,7 +459,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             else
             {
-                MessagingService.instance().sendRR(message, replica.endpoint(), callback);
+                MessagingService.instance().sendWithCallback(message, replica.endpoint(), callback);
             }
         }
         callback.await();
@@ -489,7 +489,7 @@ public class StorageProxy implements StorageProxyMBean
             }
             else
             {
-                MessagingService.instance().sendRR(message, replica.endpoint(), callback);
+                MessagingService.instance().sendWithCallback(message, replica.endpoint(), callback);
             }
         }
         callback.await();
@@ -520,7 +520,7 @@ public class StorageProxy implements StorageProxyMBean
             responseHandler.setSupportsBackPressure(false);
         }
 
-        Message<Commit> message = Message.out(PAXOS_COMMIT_REQ, proposal);
+        Message<Commit> message = Message.outWithFailureCallback(PAXOS_COMMIT_REQ, proposal);
         for (Replica replica : replicaPlan.liveAndDown())
         {
             InetAddressAndPort destination = replica.endpoint();
@@ -533,11 +533,11 @@ public class StorageProxy implements StorageProxyMBean
                     if (replica.isSelf())
                         commitPaxosLocal(replica, message, responseHandler);
                     else
-                        MessagingService.instance().sendWriteRR(message, replica, responseHandler, allowHints && shouldHint(replica));
+                        MessagingService.instance().sendWriteWithCallback(message, replica, responseHandler, allowHints && shouldHint(replica));
                 }
                 else
                 {
-                    MessagingService.instance().sendOneWay(message, destination);
+                    MessagingService.instance().send(message, destination);
                 }
             }
             else
@@ -996,7 +996,7 @@ public class StorageProxy implements StorageProxyMBean
             if (replica.isSelf())
                 performLocally(Stage.MUTATION, replica, () -> BatchlogManager.store(batch), handler);
             else
-                MessagingService.instance().sendRR(message, replica.endpoint(), handler);
+                MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
         }
         handler.get();
     }
@@ -1012,7 +1012,7 @@ public class StorageProxy implements StorageProxyMBean
             if (target.isSelf())
                 performLocally(Stage.MUTATION, target, () -> BatchlogManager.remove(uuid));
             else
-                MessagingService.instance().sendOneWay(message, target.endpoint());
+                MessagingService.instance().send(message, target.endpoint());
         }
     }
 
@@ -1196,7 +1196,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     // belongs on a different server
                     if (message == null)
-                        message = Message.out(MUTATION_REQ, mutation);
+                        message = Message.outWithFailureCallback(MUTATION_REQ, mutation);
 
                     String dc = DatabaseDescriptor.getEndpointSnitch().getDatacenter(destination);
 
@@ -1256,7 +1256,7 @@ public class StorageProxy implements StorageProxyMBean
         if (localDc != null)
         {
             for (Replica destination : localDc)
-                MessagingService.instance().sendWriteRR(message, destination, responseHandler, true);
+                MessagingService.instance().sendWriteWithCallback(message, destination, responseHandler, true);
         }
         if (dcGroups != null)
         {
@@ -1282,32 +1282,36 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
+    // TODO: are targets shuffled? do we want them to be to spread out forwarding burden?
     private static void sendMessagesToNonlocalDC(Message<? extends IMutation> message,
                                                  EndpointsForToken targets,
                                                  AbstractWriteResponseHandler<IMutation> handler)
     {
         Iterator<Replica> iter = targets.iterator();
-        long[] messageIds = new long[targets.size()];
+        assert iter.hasNext();
+
+        // make the first replica responsible for forwarding the message to other replicas in the DC
         Replica target = iter.next();
 
-        int idIdx = 0;
         // Add the other destinations of the same message as a FORWARD_HEADER entry
         while (iter.hasNext())
         {
             Replica destination = iter.next();
-            long id = MessagingService.instance().callbacks.addWithExpiration(handler,
-                                                                             message,
-                                                                             destination,
-                                                                             handler.replicaPlan.consistencyLevel(),
-                                                                             true);
-            messageIds[idIdx++] = id;
-            logger.trace("Adding FWD message to {}@{}", id, destination);
+            MessagingService.instance().callbacks.addWithExpiration(handler,
+                                                                    message,
+                                                                    destination,
+                                                                    handler.replicaPlan.consistencyLevel(),
+                                                                    true);
+            logger.trace("Adding FWD message to {}@{}", message.id(), destination);
         }
 
-        message = message.withParam(ParamType.FORWARD_TO, new ForwardToContainer(targets.endpointList(), messageIds));
-        // send the combined message + forward headers
-        long id = MessagingService.instance().sendWriteRR(message, target, handler, true);
-        logger.trace("Sending message to {}@{}", id, target);
+        // starting with 4.0, use the same message id for all replicas
+        long[] messageIds = new long[targets.size()];
+        Arrays.fill(messageIds, message.id());
+
+        message = message.withForwardingTo(new ForwardToContainer(targets.endpointList(), messageIds));
+        MessagingService.instance().sendWriteWithCallback(message, target, handler, true);
+        logger.trace("Sending message to {}@{}", message.id(), target);
     }
 
     private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable)
@@ -1398,7 +1402,8 @@ public class StorageProxy implements StorageProxyMBean
                                                                                                  WriteType.COUNTER, queryStartNanoTime);
 
             Tracing.trace("Enqueuing counter update to {}", replica);
-            MessagingService.instance().sendWriteRR(cm.makeMutationMessage(), replica, responseHandler, false);
+            Message message = Message.outWithFailureCallback(Verb.COUNTER_MUTATION_REQ, cm);
+            MessagingService.instance().sendWriteWithCallback(message, replica, responseHandler, false);
             return responseHandler;
         }
     }
@@ -2062,10 +2067,8 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     Tracing.trace("Enqueuing request to {}", replica);
                     ReadCommand command = replica.isFull() ? rangeCommand : rangeCommand.copyAsTransientQuery(replica);
-                    Message<ReadCommand> message = command.createMessage();
-                    if (command.isTrackingRepairedStatus() && replica.isFull())
-                        message = message.withFlag(MessageFlag.TRACK_REPAIRED_DATA);
-                    MessagingService.instance().sendRRWithFailure(message, replica.endpoint(), handler);
+                    Message<ReadCommand> message = command.createMessage(command.isTrackingRepairedStatus() && replica.isFull());
+                    MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
                 }
             }
 
@@ -2185,7 +2188,7 @@ public class StorageProxy implements StorageProxyMBean
         // an empty message acts as a request to the SchemaVersionVerbHandler.
         Message message = Message.out(Verb.SCHEMA_VERSION_REQ, noPayload);
         for (InetAddressAndPort endpoint : liveHosts)
-            MessagingService.instance().sendRR(message, endpoint, cb);
+            MessagingService.instance().sendWithCallback(message, endpoint, cb);
 
         try
         {
@@ -2374,7 +2377,7 @@ public class StorageProxy implements StorageProxyMBean
         Tracing.trace("Enqueuing truncate messages to hosts {}", allEndpoints);
         Message<TruncateRequest> message = Message.out(TRUNCATE_REQ, new TruncateRequest(keyspace, cfname));
         for (InetAddressAndPort endpoint : allEndpoints)
-            MessagingService.instance().sendRR(message, endpoint, responseHandler);
+            MessagingService.instance().sendWithCallback(message, endpoint, responseHandler);
 
         // Wait for all
         try

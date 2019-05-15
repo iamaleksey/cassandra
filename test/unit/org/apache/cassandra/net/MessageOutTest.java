@@ -47,7 +47,7 @@ public class MessageOutTest
     @Test
     public void captureTracingInfo_ForceException()
     {
-        Message message = Message.outWithParam(0, INTERNAL_RSP, 0, noPayload, TRACE_SESSION, new byte[9]);
+        Message message = Message.outWithParam(0, INTERNAL_RSP, noPayload, TRACE_SESSION, new byte[9]);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -55,7 +55,7 @@ public class MessageOutTest
     public void captureTracingInfo_UnknownSession()
     {
         UUID uuid = UUID.randomUUID();
-        Message message = Message.outWithParam(0, INTERNAL_RSP, 0, noPayload, TRACE_SESSION, uuid);
+        Message message = Message.outWithParam(0, INTERNAL_RSP, noPayload, TRACE_SESSION, uuid);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 
@@ -63,7 +63,7 @@ public class MessageOutTest
     public void captureTracingInfo_KnownSession()
     {
         Tracing.instance.newSession(new HashMap<>());
-        Message message = Message.outWithParam(0, Verb.REQUEST_RSP, 0, noPayload, null, null);
+        Message message = Message.outWithParam(0, Verb.REQUEST_RSP, noPayload, null, null);
         Tracing.instance.traceOutgoingMessage(message, endpoint);
     }
 }

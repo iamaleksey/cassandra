@@ -113,7 +113,7 @@ final class MigrationTask extends WrappedRunnable
         if (monitoringBootstrapStates.contains(SystemKeyspace.getBootstrapState()))
             inflightTasks.offer(completionLatch);
 
-        MessagingService.instance().sendRR(message, endpoint, cb);
+        MessagingService.instance().sendWithCallback(message, endpoint, cb);
 
         SchemaMigrationDiagnostics.taskRequestSend(endpoint);
     }

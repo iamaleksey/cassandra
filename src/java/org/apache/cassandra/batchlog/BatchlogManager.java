@@ -491,9 +491,9 @@ public class BatchlogManager implements BatchlogManagerMBean
             ReplicaPlan.ForTokenWrite replicaPlan = new ReplicaPlan.ForTokenWrite(keyspace, ConsistencyLevel.ONE,
                     liveRemoteOnly.pending(), liveRemoteOnly.all(), liveRemoteOnly.all(), liveRemoteOnly.all());
             ReplayWriteResponseHandler<Mutation> handler = new ReplayWriteResponseHandler<>(replicaPlan, System.nanoTime());
-            Message<Mutation> message = Message.out(MUTATION_REQ, mutation);
+            Message<Mutation> message = Message.outWithFailureCallback(MUTATION_REQ, mutation);
             for (Replica replica : liveRemoteOnly.all())
-                MessagingService.instance().sendWriteRR(message, replica, handler, false);
+                MessagingService.instance().sendWriteWithCallback(message, replica, handler, false);
             return handler;
         }
 

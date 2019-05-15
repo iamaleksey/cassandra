@@ -15,11 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.concurrent.TimeoutException;
-import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -28,6 +27,7 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
@@ -35,32 +35,49 @@ import org.apache.cassandra.net.async.OutboundMessageCallbacks;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.utils.ExpiringMap;
 import org.apache.cassandra.utils.FBUtilities;
 
+import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
 
 public class RemoteCallbacks
 {
-    public static class CallbackInfo
+    static class CallbackInfo
     {
-        protected final InetAddressAndPort target;
-        protected final IAsyncCallback callback;
-        @Deprecated // for 3.0 compatibility purposes only
-        public final Verb verb;
+        final long createdAtNanos;
+        final long expiresAtNanos;
 
-        private CallbackInfo(InetAddressAndPort target, IAsyncCallback callback, Verb verb)
+        final InetAddressAndPort peer;
+        final IAsyncCallback callback;
+
+        @Deprecated // for 3.0 compatibility purposes only
+        public final Verb responseVerb;
+
+        private CallbackInfo(Message message, InetAddressAndPort peer, IAsyncCallback callback)
         {
-            this.target = target;
+            this.createdAtNanos = message.createdAtNanos();
+            this.expiresAtNanos = message.expiresAtNanos();
+            this.peer = peer;
             this.callback = callback;
-            this.verb = verb;
+            this.responseVerb = message.verb().responseVerb;
+        }
+
+        public long timeout()
+        {
+            return expiresAtNanos - createdAtNanos;
+        }
+
+        boolean isReadyToDieAt(long atNano)
+        {
+            return atNano > expiresAtNanos;
         }
 
         boolean shouldHint()
         {
             return false;
         }
+
         boolean isFailureCallback()
         {
             return callback instanceof IAsyncCallbackWithFailure<?>;
@@ -68,7 +85,7 @@ public class RemoteCallbacks
 
         public String toString()
         {
-            return "CallbackInfo(" + "target=" + target + ", callback=" + callback + ", failureCallback=" + isFailureCallback() + ')';
+            return "CallbackInfo(" + "peer=" + peer + ", callback=" + callback + ", failureCallback=" + isFailureCallback() + ')';
         }
     }
 
@@ -79,18 +96,13 @@ public class RemoteCallbacks
         private final Replica replica;
 
         @VisibleForTesting
-        WriteCallbackInfo(Replica replica,
-                                 IAsyncCallbackWithFailure<?> callback,
-                                 Message message,
-                                 ConsistencyLevel consistencyLevel,
-                                 boolean allowHints,
-                                 Verb verb)
+        WriteCallbackInfo(Message message, Replica replica, IAsyncCallbackWithFailure<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
         {
-            super(replica.endpoint(), callback, verb);
-            assert message != null;
+            super(message, replica.endpoint(), callback);
             this.mutation = shouldHint(allowHints, message, consistencyLevel);
             //Local writes shouldn't go through messaging service (https://issues.apache.org/jira/browse/CASSANDRA-10477)
-            assert (!target.equals(FBUtilities.getBroadcastAddressAndPort()));
+            //noinspection AssertWithSideEffects
+            assert !peer.equals(FBUtilities.getBroadcastAddressAndPort());
             this.replica = replica;
         }
 
@@ -125,102 +137,76 @@ public class RemoteCallbacks
         }
     }
 
-
     /* This records all the results mapped by message Id */
-    private final ExpiringMap<Long, CallbackInfo> callbacks;
+    private final CallbackMap callbacks;
     private final OutboundMessageCallbacks expireDroppedMessages;
 
     RemoteCallbacks(MessagingService messagingService)
     {
-        BiConsumer<Long, ExpiringMap.CacheableObject<CallbackInfo>> timeoutReporter = (id, cachedObject) ->
+        Consumer<CallbackInfo> onExpired = info ->
         {
-            final CallbackInfo expiredCallbackInfo = cachedObject.value;
-
-            messagingService.latencySubscribers.maybeAdd(expiredCallbackInfo.callback, expiredCallbackInfo.target, cachedObject.timeout(), NANOSECONDS);
+            messagingService.latencySubscribers.maybeAdd(info.callback, info.peer, info.timeout(), NANOSECONDS);
 
             InternodeOutboundMetrics.totalExpiredCallbacks.mark();
-            messagingService.markExpiredCallback(expiredCallbackInfo.target);
+            messagingService.markExpiredCallback(info.peer);
 
-            if (expiredCallbackInfo.callback.supportsBackPressure())
-            {
-                messagingService.updateBackPressureOnReceive(expiredCallbackInfo.target, expiredCallbackInfo.callback, true);
-            }
+            if (info.callback.supportsBackPressure())
+                messagingService.updateBackPressureOnReceive(info.peer, info.callback, true);
 
-            if (expiredCallbackInfo.isFailureCallback())
+            if (info.isFailureCallback())
             {
                 StageManager.getStage(INTERNAL_RESPONSE).submit(() ->
-                                                                {
-                                                                    ((IAsyncCallbackWithFailure)expiredCallbackInfo.callback).onFailure(expiredCallbackInfo.target, RequestFailureReason.UNKNOWN);
-                                                                });
+                {
+                    ((IAsyncCallbackWithFailure)info.callback).onFailure(info.peer, RequestFailureReason.UNKNOWN);
+                });
             }
 
-            if (expiredCallbackInfo.shouldHint())
+            if (info.shouldHint())
             {
-                WriteCallbackInfo writeCallbackInfo = ((WriteCallbackInfo) expiredCallbackInfo);
+                WriteCallbackInfo writeCallbackInfo = ((WriteCallbackInfo) info);
                 Mutation mutation = writeCallbackInfo.mutation();
                 StorageProxy.submitHint(mutation, writeCallbackInfo.getReplica(), null);
             }
         };
 
-        callbacks = new ExpiringMap<>(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2, NANOSECONDS, timeoutReporter);
-        expireDroppedMessages = OutboundMessageCallbacks.invokeOnDrop(message -> callbacks.removeAndExpire(message.id()));
+        callbacks = new CallbackMap(DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2, NANOSECONDS, onExpired);
+
+        expireDroppedMessages = OutboundMessageCallbacks.invokeOnDrop((message, peer) -> callbacks.removeAndExpire(message.id(), peer));
     }
 
-    public long addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
+    public void addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
     {
-        assert message.verb() != Verb.MUTATION_REQ; // mutations need to call the overload with a ConsistencyLevel
-
-        long messageId = Message.nextId();
-        CallbackInfo previous = callbacks.put(messageId, new CallbackInfo(to, cb, message.verb()), message.createdAtNanos(), message.expiresAtNanos());
-        assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
-        return messageId;
+        // mutations need to call the overload with a ConsistencyLevel
+        assert message.verb() != Verb.MUTATION_REQ && message.verb() != Verb.COUNTER_MUTATION_REQ && message.verb() != Verb.PAXOS_COMMIT_REQ;
+        CallbackInfo previous = callbacks.put(message.id(), to, new CallbackInfo(message, to, cb));
+        assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to, previous);
     }
 
-    public long addWithExpiration(AbstractWriteResponseHandler<?> cb,
-                                 Message<?> message,
-                                 Replica to,
-                                 ConsistencyLevel consistencyLevel,
-                                 boolean allowHints)
+    public void addWithExpiration(AbstractWriteResponseHandler<?> cb,
+                                  Message<?> message,
+                                  Replica to,
+                                  ConsistencyLevel consistencyLevel,
+                                  boolean allowHints)
     {
-        assert message.verb() == Verb.MUTATION_REQ
-               || message.verb() == Verb.COUNTER_MUTATION_REQ
-               || message.verb() == Verb.PAXOS_COMMIT_REQ;
-
-        long messageId = Message.nextId();
-        CallbackInfo previous = callbacks.put(messageId,
-                                              new WriteCallbackInfo(to,
-                                                                    cb,
-                                                                    message,
-                                                                    consistencyLevel,
-                                                                    allowHints,
-                                                                    message.verb()),
-                                              message.createdAtNanos(),
-                                              message.expiresAtNanos());
-        assert previous == null : String.format("Callback already exists for id %d! (%s)", messageId, previous);
-        return messageId;
+        assert message.verb() == Verb.MUTATION_REQ || message.verb() == Verb.COUNTER_MUTATION_REQ || message.verb() == Verb.PAXOS_COMMIT_REQ;
+        CallbackInfo previous = callbacks.put(message.id(), to.endpoint(), new WriteCallbackInfo(message, to, cb, consistencyLevel, allowHints));
+        assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to.endpoint(), previous);
     }
 
-    public OutboundMessageCallbacks expireDroppedMessages()
+    public CallbackInfo get(long id, InetAddressAndPort peer)
     {
-        return expireDroppedMessages;
+        return callbacks.get(id, peer);
     }
 
-    public CallbackInfo get(long messageId)
+    public CallbackInfo remove(long id, InetAddressAndPort peer)
     {
-        return callbacks.get(messageId);
+        return callbacks.remove(id, peer);
     }
 
-    public CallbackInfo remove(long messageId)
+    <T> IVersionedAsymmetricSerializer<?, T> responseSerializer(long id, InetAddressAndPort peer)
     {
-        return callbacks.remove(messageId);
-    }
-
-    /**
-     * @return System.nanoTime() when callback was created.
-     */
-    public long getCreationTimeNanos(long messageId)
-    {
-        return callbacks.getCreationTimeNanos(messageId);
+        CallbackInfo info = get(id, peer);
+        return info == null ? null : info.responseVerb.serializer();
     }
 
     void shutdownNow(boolean expireCallbacks)
@@ -238,10 +224,14 @@ public class RemoteCallbacks
         callbacks.awaitTerminationUntil(deadlineNanos);
     }
 
+    public OutboundMessageCallbacks expireDroppedMessagesCallbacks()
+    {
+        return expireDroppedMessages;
+    }
+
     @VisibleForTesting
     public void unsafeClear()
     {
         callbacks.reset();
     }
-
 }

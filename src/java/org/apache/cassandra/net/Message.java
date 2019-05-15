@@ -100,36 +100,26 @@ public class Message<T>
             this.params = params;
         }
 
-        public Header withId(long id)
-        {
-            return new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, params);
-        }
-
-        public Header withFlag(MessageFlag flag)
+        Header withFlag(MessageFlag flag)
         {
             return new Header(id, verb, from, createdAtNanos, expiresAtNanos, addFlag(flags, flag), params);
         }
 
-        public Header withParam(ParamType type, Object value)
+        Header withParam(ParamType type, Object value)
         {
             return new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, addParam(params, type, value));
-        }
-
-        public Header withIdAndFlag(long id, MessageFlag flag)
-        {
-            return new Header(id, verb, from, createdAtNanos, expiresAtNanos, addFlag(flags, flag), params);
         }
 
         /*
          * Flags
          */
 
-        public boolean callBackOnFailure()
+        boolean callBackOnFailure()
         {
             return containsFlag(MessageFlag.CALL_BACK_ON_FAILURE);
         }
 
-        public boolean trackRepairedData()
+        boolean trackRepairedData()
         {
             return containsFlag(MessageFlag.TRACK_REPAIRED_DATA);
         }
@@ -154,13 +144,13 @@ public class Message<T>
          */
 
         @Nullable
-        public ForwardToContainer forwardTo()
+        ForwardToContainer forwardTo()
         {
             return (ForwardToContainer) params.get(ParamType.FORWARD_TO);
         }
 
         @Nullable
-        public InetAddressAndPort forwardedFrom()
+        InetAddressAndPort forwardedFrom()
         {
             return (InetAddressAndPort) params.get(ParamType.FORWARDED_FROM);
         }
@@ -223,6 +213,8 @@ public class Message<T>
         private long expiresAtNanos;
         private long id;
 
+        private boolean hasId;
+
         private Builder()
         {
         }
@@ -254,6 +246,12 @@ public class Message<T>
         public Builder<T> withParam(ParamType type, Object value)
         {
             params.put(type, value);
+            return this;
+        }
+
+        public Builder<T> withoutParam(ParamType type)
+        {
+            params.remove(type);
             return this;
         }
 
@@ -290,6 +288,7 @@ public class Message<T>
         public Builder<T> withId(long id)
         {
             this.id = id;
+            hasId = true;
             return this;
         }
 
@@ -302,27 +301,59 @@ public class Message<T>
             if (payload == null)
                 throw new IllegalArgumentException();
 
-            return buildUnsafe();
+            return new Message<>(new Header(hasId ? id : nextId(), verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
         }
+    }
 
-        Message<T> buildUnsafe()
-        {
-            return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, params), payload);
-        }
+    public static <T> Builder<T> builder(Message<T> message)
+    {
+        return new Builder<T>().from(message.from())
+                               .withId(message.id())
+                               .ofVerb(message.verb())
+                               .withCreatedAt(message.createdAtNanos())
+                               .withExpiresAt(message.expiresAtNanos())
+                               .withFlags(message.header.flags)
+                               .withParams(message.header.params)
+                               .withPayload(message.payload);
+    }
+
+    public static <T> Builder<T> builder(Verb verb, T payload)
+    {
+        return new Builder<T>().ofVerb(verb)
+                               .withCreatedAt(ApproximateTime.nanoTime())
+                               .withPayload(payload);
     }
 
     public static <T> Message<T> out(Verb verb, T payload)
     {
-        return outWithParam(verb, payload, null, null);
+        assert !verb.isResponse();
+
+        return outWithParam(nextId(), verb, payload, null, null);
     }
 
-    public static <T> Message<T> outWithParam(Verb verb, T payload, ParamType paramType, Object paramValue)
+    public static <T> Message<T> outWithFailureCallback(Verb verb, T payload)
     {
         assert !verb.isResponse();
-        return outWithParam(0, verb, 0, payload, paramType, paramValue);
+        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, MessageFlag.CALL_BACK_ON_FAILURE), null, null);
     }
 
-    static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
+    public static <T> Message<T> outWithRepairedDataTracking(Verb verb, T payload)
+    {
+        assert !verb.isResponse();
+        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, MessageFlag.TRACK_REPAIRED_DATA), null, null);
+    }
+
+    public static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)
+    {
+        return outWithParam(id, verb, 0, payload, paramType, paramValue);
+    }
+
+    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
+    {
+        return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
+    }
+
+    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
     {
         if (payload == null)
             throw new IllegalArgumentException();
@@ -332,10 +363,10 @@ public class Message<T>
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
-        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, 0, buildParams(paramType, paramValue)), payload);
+        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
     }
 
-    public static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
+    static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
     {
         return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
     }
@@ -343,7 +374,7 @@ public class Message<T>
     public static <T> Message<T> internalResponse(Verb verb, T payload)
     {
         assert verb.isResponse();
-        return outWithParam(0, verb, 0, payload, null, null);
+        return outWithParam(0, verb, payload, null, null);
     }
 
     public <T> Message<T> responseWith(T payload)
@@ -359,25 +390,6 @@ public class Message<T>
     public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
     {
         return failureResponse(id(), expiresAtNanos(), reason);
-    }
-
-    public static <T> Builder<T> builder(Message<T> message)
-    {
-        return new Builder<T>().from(message.from())
-                               .withFlags(message.header.flags)
-                               .withPayload(message.payload)
-                               .ofVerb(message.verb())
-                               .withId(message.id())
-                               .withExpiresAt(message.expiresAtNanos())
-                               .withCreatedAt(message.createdAtNanos())
-                               .withParams(message.header.params);
-    }
-
-    public static <T> Builder<T> builder(Verb verb, T payload)
-    {
-        return new Builder<T>().ofVerb(verb)
-                               .withCreatedAt(ApproximateTime.nanoTime())
-                               .withPayload(payload);
     }
 
     private static Map<ParamType, Object> buildParams(ParamType type, Object value)
@@ -406,34 +418,26 @@ public class Message<T>
         return params;
     }
 
-    public Message<T> withFlag(MessageFlag flag)
+    Message<T> withCallBackOnFailure()
     {
-        return new Message<>(header.withFlag(flag), payload);
+        return new Message<>(header.withFlag(MessageFlag.CALL_BACK_ON_FAILURE), payload);
     }
 
-    public Message<T> withParam(ParamType type, Object value)
+    public Message<T> withForwardingTo(ForwardToContainer peers)
     {
-        return new Message<>(header.withParam(type, value), payload);
+        return new Message<>(header.withParam(ParamType.FORWARD_TO, peers), payload);
     }
 
-    static long nextId()
+    private static long nextId()
     {
         long id;
         do
         {
             id = nextId.incrementAndGet();
-        } while (id == NO_ID);
+        }
+        while (id == NO_ID);
+
         return id;
-    }
-
-    public Message<T> withId(long id)
-    {
-        return new Message<>(header.withId(id), payload);
-    }
-
-    public Message<T> withIdAndFlag(long id, MessageFlag flag)
-    {
-        return new Message<>(header.withIdAndFlag(id, flag), payload);
     }
 
     /**
@@ -908,11 +912,7 @@ public class Message<T>
 
             IVersionedAsymmetricSerializer<?, T> payloadSerializer = header.verb.serializer();
             if (null == payloadSerializer)
-            {
-                RemoteCallbacks.CallbackInfo callback = instance().callbacks.get(header.id);
-                if (null != callback)
-                    payloadSerializer = callback.verb.responseVerb.serializer();
-            }
+                payloadSerializer = instance().callbacks.responseSerializer(header.id, header.from);
             int payloadSize = in.readInt();
             T payload = deserializePayloadPre40(in, version, payloadSerializer, payloadSize);
 

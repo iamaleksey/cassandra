@@ -17,32 +17,48 @@
  */
 package org.apache.cassandra.net.async;
 
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 
 public interface OutboundMessageCallbacks
 {
-    static OutboundMessageCallbacks invokeOnDrop(Consumer<Message<?>> onDrop)
+    static OutboundMessageCallbacks invokeOnDrop(BiConsumer<Message<?>, InetAddressAndPort> onDrop)
     {
         return new OutboundMessageCallbacks()
         {
-            public void onOverloaded(Message<?> message) { onDrop.accept(message); }
-            public void onExpired(Message<?> message) { onDrop.accept(message); }
-            public void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure) { onDrop.accept(message); }
-            public void onDiscardOnClose(Message<?> message) { onDrop.accept(message); }
+            public void onOverloaded(Message<?> message, InetAddressAndPort peer)
+            {
+                onDrop.accept(message, peer);
+            }
+
+            public void onExpired(Message<?> message, InetAddressAndPort peer)
+            {
+                onDrop.accept(message, peer);
+            }
+
+            public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, Throwable failure)
+            {
+                onDrop.accept(message, peer);
+            }
+
+            public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
+            {
+                onDrop.accept(message, peer);
+            }
         };
     }
 
     /** A message was not enqueued to the link because too many messages are already waiting to send */
-    void onOverloaded(Message<?> message);
+    void onOverloaded(Message<?> message, InetAddressAndPort peer);
 
     /** A message was not serialized to a frame because it had expired */
-    void onExpired(Message<?> message);
+    void onExpired(Message<?> message, InetAddressAndPort peer);
 
     /** A message was not serialized to a frame because an exception was thrown */
-    void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure);
+    void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, Throwable failure);
 
     /** A message was not sent because the connection was forcibly closed */
-    void onDiscardOnClose(Message<?> message);
+    void onDiscardOnClose(Message<?> message, InetAddressAndPort peer);
 }

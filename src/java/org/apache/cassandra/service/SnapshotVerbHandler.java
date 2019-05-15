@@ -41,6 +41,6 @@ public class SnapshotVerbHandler implements IVerbHandler<SnapshotCommand>
             Keyspace.open(command.keyspace).getColumnFamilyStore(command.column_family).snapshot(command.snapshot_name);
 
         logger.debug("Enqueuing response to snapshot request {} to {}", command.snapshot_name, message.from());
-        MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
+        MessagingService.instance().send(message.emptyResponse(), message.from());
     }
 }

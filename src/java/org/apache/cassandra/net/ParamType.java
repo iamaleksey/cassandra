@@ -35,7 +35,7 @@ import static java.lang.Math.max;
  */
 public enum ParamType
 {
-    FORWARD_TO          (0, "FORWARD_TO",    ForwardToSerializer.instance),
+    FORWARD_TO          (0, "FORWARD_TO",    ForwardToContainer.serializer),
     FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
 
     @Deprecated

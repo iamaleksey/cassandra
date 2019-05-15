@@ -87,7 +87,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                                                                              prepareMessage.timestamp,
                                                                              prepareMessage.isGlobal,
                                                                              prepareMessage.previewKind);
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
+                    MessagingService.instance().send(message.emptyResponse(), message.from());
                     break;
 
                 case SNAPSHOT:
@@ -111,7 +111,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                         repairManager.snapshot(desc.parentSessionId.toString(), desc.ranges, true);
                     }
                     logger.debug("Enqueuing response to snapshot request {} to {}", desc.sessionId, message.from());
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
+                    MessagingService.instance().send(message.emptyResponse(), message.from());
                     break;
 
                 case VALIDATION_REQUEST:
@@ -122,7 +122,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     if (store == null)
                     {
                         logger.error("Table {}.{} was dropped during snapshot phase of repair", desc.keyspace, desc.columnFamily);
-                        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc)), message.from());
+                        MessagingService.instance().send(Message.out(REPAIR_REQ, new ValidationComplete(desc)), message.from());
                         return;
                     }
 
@@ -166,7 +166,7 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
                     logger.debug("cleaning up repair");
                     CleanupMessage cleanup = (CleanupMessage) message.payload;
                     ActiveRepairService.instance.removeParentRepairSession(cleanup.parentRepairSession);
-                    MessagingService.instance().sendResponse(message.emptyResponse(), message.from());
+                    MessagingService.instance().send(message.emptyResponse(), message.from());
                     break;
 
                 case CONSISTENT_REQUEST:
@@ -221,6 +221,6 @@ public class RepairMessageVerbHandler implements IVerbHandler<RepairMessage>
     {
         logger.error(errorMessage);
         Message reply = respondTo.failureResponse(RequestFailureReason.UNKNOWN);
-        MessagingService.instance().sendResponse(reply, respondTo.from());
+        MessagingService.instance().send(reply, respondTo.from());
     }
 }

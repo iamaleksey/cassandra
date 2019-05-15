@@ -346,9 +346,11 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return Transformation.apply(iter, new CacheFilter());
     }
 
-    public Message<ReadCommand> createMessage()
+    public Message<ReadCommand> createMessage(boolean trackRepairedData)
     {
-        return Message.out(Verb.RANGE_REQ, this);
+        return trackRepairedData
+             ? Message.outWithRepairedDataTracking(Verb.RANGE_REQ, this)
+             : Message.out(Verb.RANGE_REQ, this);
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)

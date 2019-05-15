@@ -51,7 +51,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTrees;
-import org.apache.cassandra.utils.ObjectSizes;
 
 import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
@@ -406,7 +405,7 @@ public class Validator implements Runnable
     {
         logger.error("Failed creating a merkle tree for {}, {} (see log for details)", desc, initiator);
         // send fail message only to nodes >= version 2.0
-        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc)), initiator);
+        MessagingService.instance().send(Message.out(REPAIR_REQ, new ValidationComplete(desc)), initiator);
     }
 
     /**
@@ -420,6 +419,6 @@ public class Validator implements Runnable
             logger.info("{} Sending completed merkle tree to {} for {}.{}", previewKind.logPrefix(desc.sessionId), initiator, desc.keyspace, desc.columnFamily);
             Tracing.traceRepair("Sending completed merkle tree to {} for {}.{}", initiator, desc.keyspace, desc.columnFamily);
         }
-        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, new ValidationComplete(desc, trees)), initiator);
+        MessagingService.instance().send(Message.out(REPAIR_REQ, new ValidationComplete(desc, trees)), initiator);
     }
 }

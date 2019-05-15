@@ -56,7 +56,6 @@ import org.slf4j.LoggerFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.repair.KeyspaceRepairManager;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.db.marshal.UTF8Type;
@@ -496,7 +495,7 @@ public class LocalSessions
     {
         logger.trace("sending {} to {}", message, destination);
         Message<RepairMessage> messageOut = Message.out(REPAIR_REQ, message);
-        MessagingService.instance().sendOneWay(messageOut, destination);
+        MessagingService.instance().send(messageOut, destination);
     }
 
     private void setStateAndSave(LocalSession session, ConsistentSession.State state)

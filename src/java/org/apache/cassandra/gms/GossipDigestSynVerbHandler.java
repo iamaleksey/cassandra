@@ -81,8 +81,8 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
             logger.debug("Received a shadow round syn from {}. Gossip is disabled but " +
                          "currently also in shadow round, responding with a minimal ack", from);
             MessagingService.instance()
-                            .sendOneWay(Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(new ArrayList<>(), new HashMap<>())),
-                                        from);
+                            .send(Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(Collections.emptyList(), Collections.emptyMap())),
+                                  from);
             return;
         }
 
@@ -104,7 +104,7 @@ public class GossipDigestSynVerbHandler extends GossipVerbHandler<GossipDigestSy
         Message<GossipDigestAck> gDigestAckMessage = Message.out(GOSSIP_DIGEST_ACK, new GossipDigestAck(deltaGossipDigestList, deltaEpStateMap));
         if (logger.isTraceEnabled())
             logger.trace("Sending a GossipDigestAckMessage to {}", from);
-        MessagingService.instance().sendOneWay(gDigestAckMessage, from);
+        MessagingService.instance().send(gDigestAckMessage, from);
 
         super.doVerb(message);
     }

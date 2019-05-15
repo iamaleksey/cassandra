@@ -54,7 +54,7 @@ public class ValidationTask extends AbstractFuture<TreeResponse> implements Runn
     public void run()
     {
         ValidationRequest request = new ValidationRequest(desc, nowInSec);
-        MessagingService.instance().sendOneWay(Message.out(REPAIR_REQ, request), endpoint);
+        MessagingService.instance().send(Message.out(REPAIR_REQ, request), endpoint);
     }
 
     /**

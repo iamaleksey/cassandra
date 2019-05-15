@@ -2820,12 +2820,14 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             logger.debug("Notifying {} of replication completion\n", remote);
         while (failureDetector.isAlive(remote))
         {
-            AsyncOneResponse iar = MessagingService.instance().sendRR(msg, remote);
-            if (!iar.awaitUninterruptibly(DatabaseDescriptor.getRpcTimeout(NANOSECONDS), NANOSECONDS))
+            AsyncOneResponse ior = new AsyncOneResponse();
+            MessagingService.instance().sendWithCallback(msg, remote, ior);
+
+            if (!ior.awaitUninterruptibly(DatabaseDescriptor.getRpcTimeout(NANOSECONDS), NANOSECONDS))
                 continue; // try again if we timeout
 
-            if (!iar.isSuccess())
-                throw new AssertionError(iar.cause());
+            if (!ior.isSuccess())
+                throw new AssertionError(ior.cause());
 
             return;
         }

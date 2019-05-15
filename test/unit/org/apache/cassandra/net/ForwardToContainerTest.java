@@ -61,16 +61,16 @@ public class ForwardToContainerTest
         ByteBuffer buffer;
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
-            ForwardToSerializer.instance.serialize(ftc, dob, version);
+            ForwardToContainer.serializer.serialize(ftc, dob, version);
             buffer = dob.buffer();
         }
 
-        assertEquals(buffer.remaining(), ForwardToSerializer.instance.serializedSize(ftc, version));
+        assertEquals(buffer.remaining(), ForwardToContainer.serializer.serializedSize(ftc, version));
 
         ForwardToContainer deserialized;
         try (DataInputBuffer dib = new DataInputBuffer(buffer, false))
         {
-            deserialized = ForwardToSerializer.instance.deserialize(dib, version);
+            deserialized = ForwardToContainer.serializer.deserialize(dib, version);
         }
 
         assertTrue(Arrays.equals(ftc.messageIds, deserialized.messageIds));

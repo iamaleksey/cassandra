@@ -34,8 +34,7 @@ public class ResponseVerbHandler implements IVerbHandler
 
     public void doVerb(Message message)
     {
-        long latencyNanos = ApproximateTime.nanoTime() - MessagingService.instance().callbacks.getCreationTimeNanos(message.id());
-        RemoteCallbacks.CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id());
+        RemoteCallbacks.CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id(), message.from());
         if (callbackInfo == null)
         {
             String msg = "Callback already removed for {} (from {})";
@@ -44,6 +43,7 @@ public class ResponseVerbHandler implements IVerbHandler
             return;
         }
 
+        long latencyNanos = ApproximateTime.nanoTime() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
         IAsyncCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())

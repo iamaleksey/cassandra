@@ -167,7 +167,7 @@ public class RemoveTest
             Message msg = Message.builder(REPLICATION_DONE_REQ, noPayload)
                                  .from(host)
                                  .build();
-            MessagingService.instance().sendRR(msg, FBUtilities.getBroadcastAddressAndPort());
+            MessagingService.instance().send(msg, FBUtilities.getBroadcastAddressAndPort());
         }
 
         remover.join();

@@ -70,7 +70,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
 
         Tracing.trace("Enqueuing response to {}", message.from());
         Message<ReadResponse> reply = message.responseWith(response);
-        MessagingService.instance().sendResponse(reply, message.from());
+        MessagingService.instance().send(reply, message.from());
     }
 
     private void validateTransientStatus(Message<ReadCommand> message)

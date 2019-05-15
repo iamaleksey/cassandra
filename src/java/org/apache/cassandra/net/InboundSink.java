@@ -71,7 +71,7 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
         if (header.callBackOnFailure())
         {
             Message response = Message.failureResponse(header.id, header.expiresAtNanos, RequestFailureReason.forException(failure));
-            messaging.sendOneWay(response, header.from);
+            messaging.send(response, header.from);
         }
     }
 

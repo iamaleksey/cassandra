@@ -434,7 +434,7 @@ public class MessagingServiceTest
 
         //Should tolerate null
         ms.closeOutbound(address);
-        ms.sendOneWay(messageOut, address);
+        ms.send(messageOut, address);
     }
 
 //    @Test
