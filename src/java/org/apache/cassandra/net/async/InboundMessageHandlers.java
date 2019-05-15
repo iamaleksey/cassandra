@@ -184,7 +184,23 @@ public final class InboundMessageHandlers
         return new InboundMessageCallbacks()
         {
             @Override
+            public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                // do not log latency if we are within error bars of zero
+                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
+                    internodeLatency.accept(timeElapsed, unit);
+            }
+
+            @Override
             public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                counters.addExpired(messageSize);
+
+                globalMetrics.recordInternodeDroppedMessage(header.verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 counters.addExpired(messageSize);
 
@@ -201,14 +217,6 @@ public final class InboundMessageHandlers
                  * instead of waiting for the callback on the other end to expire.
                  */
                 messageConsumer.fail(header, t);
-            }
-
-            @Override
-            public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
-            {
-                // do not log latency if we are within error bars of zero
-                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
-                    internodeLatency.accept(timeElapsed, unit);
             }
 
             @Override
@@ -233,14 +241,6 @@ public final class InboundMessageHandlers
             public void onProcessed(int messageSize, Header header)
             {
                 counters.addProcessed(messageSize);
-            }
-
-            @Override
-            public void onExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
-            {
-                counters.addExpired(messageSize);
-
-                globalMetrics.recordInternodeDroppedMessage(header.verb, timeElapsed, unit);
             }
         };
     }
