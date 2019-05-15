@@ -18,7 +18,6 @@
 package org.apache.cassandra.repair;
 
 import java.util.concurrent.RunnableFuture;
-import java.util.concurrent.TimeUnit;
 
 import com.google.common.util.concurrent.AbstractFuture;
 
@@ -29,7 +28,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SnapshotMessage;
 
-import static java.util.concurrent.TimeUnit.HOURS;
 import static org.apache.cassandra.net.Verb.REPAIR_REQ;
 
 /**
@@ -48,9 +46,9 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
 
     public void run()
     {
-        MessagingService.instance().sendRR(Message.out(REPAIR_REQ, new SnapshotMessage(desc)),
-                                           endpoint,
-                                           new SnapshotCallback(this));
+        MessagingService.instance().sendWithCallback(Message.out(REPAIR_REQ, new SnapshotMessage(desc)),
+                                                     endpoint,
+                                                     new SnapshotCallback(this));
     }
 
     /**

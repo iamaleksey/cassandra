@@ -370,7 +370,7 @@ public class ConnectionTest
 
             CountDownLatch done = new CountDownLatch(1);
             Message<?> message = Message.out(Verb._TEST_1, new Object());
-            long id = MessagingService.instance().callbacks.addWithExpiration(new IAsyncCallbackWithFailure()
+            MessagingService.instance().callbacks.addWithExpiration(new IAsyncCallbackWithFailure()
             {
                 public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
                 {
@@ -387,7 +387,6 @@ public class ConnectionTest
                     return false;
                 }
             }, message, endpoint);
-            message = message.withId(id);
             AtomicInteger delivered = new AtomicInteger();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()
             {

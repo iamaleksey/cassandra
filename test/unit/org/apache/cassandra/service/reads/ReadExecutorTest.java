@@ -209,7 +209,7 @@ public class ReadExecutorTest
         }
 
         @Override
-        public Message createMessage()
+        public Message createMessage(boolean trackRepairedData)
         {
             return Message.out(Verb.ECHO_REQ, NoPayload.noPayload);
         }

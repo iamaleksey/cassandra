@@ -368,7 +368,7 @@ public class OutboundConnection
                           FBUtilities.prettyPrintMemory(pendingBytes()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
-        callbacks.onOverloaded(message);
+        callbacks.onOverloaded(message, settings.to);
     }
 
     /**
@@ -382,7 +382,7 @@ public class OutboundConnection
         expiredCount += 1;
         expiredBytes += canonicalSize(message);
         noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), message.verb());
-        callbacks.onExpired(message);
+        callbacks.onExpired(message, settings.to);
         return true;
     }
 
@@ -398,7 +398,7 @@ public class OutboundConnection
         errorCount += 1;
         errorBytes += message.serializedSize(messagingVersion);
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
-        callbacks.onFailedSerialize(message, messagingVersion, t);
+        callbacks.onFailedSerialize(message, settings.to, messagingVersion, t);
     }
 
     /**
@@ -409,7 +409,7 @@ public class OutboundConnection
     private void onClosed(Message<?> message)
     {
         releaseCapacity(1, canonicalSize(message));
-        callbacks.onDiscardOnClose(message);
+        callbacks.onDiscardOnClose(message, settings.to);
     }
 
     /**

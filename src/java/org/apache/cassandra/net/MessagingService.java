@@ -1,4 +1,4 @@
-    /*
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -95,7 +95,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                                                                      .withSocketFactory(socketFactory));
 
     // a public hook for filtering messages intended for delivery to another node
-    public final OutboundSink outboundSink = new OutboundSink(this::doSendOneWay);
+    public final OutboundSink outboundSink = new OutboundSink(this::doSend);
 
     public final ResourceLimits.Limit outboundGlobalReserveLimit =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
@@ -250,11 +250,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         return null;
     }
 
-    public long sendRRWithFailure(Message message, InetAddressAndPort to, IAsyncCallbackWithFailure cb)
-    {
-        return sendRR(message, to, cb);
-    }
-
     /**
      * Send a non-mutation message to a given endpoint. This method specifies a callback
      * which is invoked with the actual response.
@@ -263,20 +258,19 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param to      endpoint to which the message needs to be sent
      * @param cb      callback interface which is used to pass the responses or
      *                suggest that a timeout occurred to the invoker of the send().
-     * @return an reference to message id used to match with the result
      */
-    public long sendRR(Message message, InetAddressAndPort to, IAsyncCallback cb)
+    public void sendWithCallback(Message message, InetAddressAndPort to, IAsyncCallback cb)
     {
-        return sendRR(message, to, cb, null);
+        sendWithCallback(message, to, cb, null);
     }
 
-    public long sendRR(Message message, InetAddressAndPort to, IAsyncCallback cb, ConnectionType specifyConnection)
+    public void sendWithCallback(Message message, InetAddressAndPort to, IAsyncCallback cb, ConnectionType specifyConnection)
     {
-        long id = callbacks.addWithExpiration(cb, message, to);
+        callbacks.addWithExpiration(cb, message, to);
         updateBackPressureOnSend(to, cb, message);
-        sendOneWay(cb instanceof IAsyncCallbackWithFailure<?> ? message.withIdAndFlag(id, MessageFlag.CALL_BACK_ON_FAILURE)
-                                                              : message.withId(id), to, specifyConnection);
-        return id;
+        if (cb instanceof IAsyncCallbackWithFailure && !message.callBackOnFailure())
+            message = message.withCallBackOnFailure();
+        send(message, to, specifyConnection);
     }
 
     /**
@@ -289,36 +283,13 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param to      endpoint to which the message needs to be sent
      * @param handler callback interface which is used to pass the responses or
      *                suggest that a timeout occurred to the invoker of the send().
-     * @return an reference to message id used to match with the result
      */
-    public long sendWriteRR(Message<?> message,
-                           Replica to,
-                           AbstractWriteResponseHandler<?> handler,
-                           boolean allowHints)
+    public void sendWriteWithCallback(Message message, Replica to, AbstractWriteResponseHandler<?> handler, boolean allowHints)
     {
-        return sendWriteRR(message, to, handler, allowHints, null);
-    }
-
-    public long sendWriteRR(Message<?> message,
-                           Replica to,
-                           AbstractWriteResponseHandler<?> handler,
-                           boolean allowHints,
-                           ConnectionType specifyConnection)
-    {
-        long id = callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
+        assert message.callBackOnFailure();
+        callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
         updateBackPressureOnSend(to.endpoint(), handler, message);
-        sendOneWay(message.withIdAndFlag(id, MessageFlag.CALL_BACK_ON_FAILURE), to.endpoint(), specifyConnection);
-        return id;
-    }
-
-    public void sendResponse(Message message, InetAddressAndPort to)
-    {
-        sendResponse(message, to, null);
-    }
-
-    public void sendResponse(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
-    {
-        sendOneWay(message, to, specifyConnection);
+        send(message, to.endpoint(), null);
     }
 
     /**
@@ -328,11 +299,12 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param message messages to be sent.
      * @param to      endpoint to which the message needs to be sent
      */
-    public void sendOneWay(Message message, InetAddressAndPort to)
+    public void send(Message message, InetAddressAndPort to)
     {
-        sendOneWay(message, to, null);
+        send(message, to, null);
     }
-    public void sendOneWay(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
+
+    public void send(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
         if (logger.isTraceEnabled())
             logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
@@ -343,7 +315,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         outboundSink.accept(message, to, specifyConnection);
     }
 
-    private void doSendOneWay(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
+    private void doSend(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
     {
         // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
         while (true)
@@ -363,13 +335,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                 channelManagers.remove(to, connections);
             }
         }
-    }
-
-    public <T> AsyncOneResponse<T> sendRR(Message message, InetAddressAndPort to)
-    {
-        AsyncOneResponse<T> iar = new AsyncOneResponse<>();
-        sendRR(message, to, iar);
-        return iar;
     }
 
     /**

@@ -317,12 +317,6 @@ public class MigrationManager
             announce(mutations);
     }
 
-    private static void pushSchemaMutation(InetAddressAndPort endpoint, Collection<Mutation> schema)
-    {
-        Message<Collection<Mutation>> msg = Message.out(SCHEMA_PUSH_REQ, schema);
-        MessagingService.instance().sendOneWay(msg, endpoint);
-    }
-
     // Returns a future on the local application of the schema
     private static void announce(Collection<Mutation> schema)
     {
@@ -330,11 +324,12 @@ public class MigrationManager
 
         Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
         Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
+        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, schema);
         for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
         {
             if (shouldPushSchemaTo(endpoint))
             {
-                pushSchemaMutation(endpoint, schema);
+                MessagingService.instance().send(message, endpoint);
                 schemaDestinationEndpoints.add(endpoint);
             }
             else
@@ -363,11 +358,12 @@ public class MigrationManager
 
         Set<InetAddressAndPort> schemaDestinationEndpoints = new HashSet<>();
         Set<InetAddressAndPort> schemaEndpointsIgnored = new HashSet<>();
+        Message<Collection<Mutation>> message = Message.out(SCHEMA_PUSH_REQ, result.mutations);
         for (InetAddressAndPort endpoint : Gossiper.instance.getLiveMembers())
         {
             if (shouldPushSchemaTo(endpoint))
             {
-                pushSchemaMutation(endpoint, result.mutations);
+                MessagingService.instance().send(message, endpoint);
                 schemaDestinationEndpoints.add(endpoint);
             }
             else

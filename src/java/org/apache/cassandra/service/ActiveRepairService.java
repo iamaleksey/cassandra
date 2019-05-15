@@ -60,7 +60,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
 import org.apache.cassandra.net.IAsyncCallbackWithFailure;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.CommonRange;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -427,7 +426,7 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
             {
                 PrepareMessage message = new PrepareMessage(parentRepairSession, tableIds, options.getRanges(), options.isIncremental(), repairedAt, options.isGlobal(), options.getPreviewKind());
                 Message<RepairMessage> msg = Message.out(REPAIR_REQ, message);
-                MessagingService.instance().sendRR(msg, neighbour, callback);
+                MessagingService.instance().sendWithCallback(msg, neighbour, callback);
             }
             else
             {

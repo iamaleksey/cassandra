@@ -1037,9 +1037,11 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                              nowInSec());
     }
 
-    public Message<ReadCommand> createMessage()
+    public Message<ReadCommand> createMessage(boolean trackRepairedData)
     {
-        return Message.out(Verb.READ_REQ, this);
+        return trackRepairedData
+             ? Message.outWithRepairedDataTracking(Verb.READ_REQ, this)
+             : Message.out(Verb.READ_REQ, this);
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)

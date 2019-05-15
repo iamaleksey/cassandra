@@ -66,7 +66,7 @@ public class MockMessagingServiceTest
                 .respond(echoMessage);
 
         Message<NoPayload> echoMessageOut = Message.out(ECHO_REQ, NoPayload.noPayload);
-        MessagingService.instance().sendRR(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new IAsyncCallback()
+        MessagingService.instance().sendWithCallback(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new IAsyncCallback()
         {
             public void response(Message msg)
             {

@@ -134,7 +134,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
                     realDestiny = (byte) (1 + sendGenerator.uniformInt(6));
                     destiny = realDestiny <= 3 ? Destiny.FAIL_TO_SERIALIZE : Destiny.FAIL_TO_DESERIALIZE;
                 }
-                msg = sendGenerator.generate(id, realDestiny).withId(id);
+                msg = sendGenerator.generate(id, realDestiny);
             }
 
             controller.send(msg.serializedSize(current_version));
@@ -286,25 +286,25 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onConnect(messagingVersion, settings);
     }
 
-    public void onOverloaded(Message<?> message)
+    public void onOverloaded(Message<?> message, InetAddressAndPort peer)
     {
         controller.fail(message.serializedSize(current_version));
         verifier.onOverloaded(message.id());
     }
 
-    public void onExpired(Message<?> message)
+    public void onExpired(Message<?> message, InetAddressAndPort peer)
     {
         controller.fail(message.serializedSize(current_version));
         verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
-    public void onFailedSerialize(Message<?> message, int messagingVersion, Throwable failure)
+    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, Throwable failure)
     {
         controller.fail(message.serializedSize(messagingVersion));
         verifier.onFailedSerialize(message.id(), failure);
     }
 
-    public void onDiscardOnClose(Message<?> message)
+    public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
     {
         controller.fail(message.serializedSize(current_version));
         verifier.onFailedClosing(message.id());

@@ -62,6 +62,7 @@ abstract class MessageGenerator
         long expiresInNanos = TimeUnit.MILLISECONDS.toNanos((expiresInMillis / 2) + random.nextInt(expiresInMillis / 2));
 
         return Message.builder(Verb._TEST_2, null)
+                      .withId(id)
                       .withCreatedAt(now)
                       .withExpiresAt(now + expiresInNanos); // don't expire for now
     }

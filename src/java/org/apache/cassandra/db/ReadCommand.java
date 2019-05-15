@@ -663,7 +663,7 @@ public abstract class ReadCommand extends AbstractReadQuery
     /**
      * Creates a message for this command.
      */
-    public abstract Message<ReadCommand> createMessage();
+    public abstract Message<ReadCommand> createMessage(boolean trackRepairedData);
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 

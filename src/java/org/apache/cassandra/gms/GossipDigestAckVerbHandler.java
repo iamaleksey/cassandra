@@ -93,7 +93,7 @@ public class GossipDigestAckVerbHandler extends GossipVerbHandler<GossipDigestAc
         Message<GossipDigestAck2> gDigestAck2Message = Message.out(GOSSIP_DIGEST_ACK2, new GossipDigestAck2(deltaEpStateMap));
         if (logger.isTraceEnabled())
             logger.trace("Sending a GossipDigestAck2Message to {}", from);
-        MessagingService.instance().sendOneWay(gDigestAck2Message, from);
+        MessagingService.instance().send(gDigestAck2Message, from);
 
         super.doVerb(message);
     }

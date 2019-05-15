@@ -17,8 +17,6 @@
  */
 package org.apache.cassandra.service.reads;
 
-import java.util.concurrent.TimeUnit;
-
 import com.google.common.base.Preconditions;
 
 import com.google.common.base.Predicates;
@@ -147,8 +145,8 @@ public abstract class AbstractReadExecutor
 
             if (traceState != null)
                 traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            Message<ReadCommand> message = readCommand.createMessage();
-            MessagingService.instance().sendRRWithFailure(message, endpoint, handler);
+            Message<ReadCommand> message = readCommand.createMessage(false);
+            MessagingService.instance().sendWithCallback(message, endpoint, handler);
         }
 
         // We delay the local (potentially blocking) read till the end to avoid stalling remote requests.
@@ -309,7 +307,7 @@ public abstract class AbstractReadExecutor
                 if (traceState != null)
                     traceState.trace("speculating read retry on {}", extraReplica);
                 logger.trace("speculating read retry on {}", extraReplica);
-                MessagingService.instance().sendRRWithFailure(retryCommand.createMessage(), extraReplica.endpoint(), handler);
+                MessagingService.instance().sendWithCallback(retryCommand.createMessage(false), extraReplica.endpoint(), handler);
             }
         }
 

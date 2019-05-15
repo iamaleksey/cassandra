@@ -794,7 +794,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             logger.trace("Sending a GossipDigestSyn to {} ...", to);
         if (firstSynSendAt == 0)
             firstSynSendAt = System.nanoTime();
-        MessagingService.instance().sendOneWay(message, to);
+        MessagingService.instance().send(message, to);
 
         boolean isSeed = seeds.contains(to);
         GossiperDiagnostics.sendGossipDigestSyn(this, to);
@@ -1164,7 +1164,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             }
         };
 
-        MessagingService.instance().sendRR(echoMessage, addr, echoHandler);
+        MessagingService.instance().sendWithCallback(echoMessage, addr, echoHandler);
 
         GossiperDiagnostics.markedAlive(this, addr, localState);
     }
@@ -1599,14 +1599,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
                     logger.trace("Sending shadow round GOSSIP DIGEST SYN to seeds {}", seeds);
 
                     for (InetAddressAndPort seed : seeds)
-                        MessagingService.instance().sendOneWay(message, seed);
+                        MessagingService.instance().send(message, seed);
 
                     // Send to any peers we already know about, but only if a seed didn't respond.
                     if (includePeers)
                     {
                         logger.trace("Sending shadow round GOSSIP DIGEST SYN to known peers {}", peers);
                         for (InetAddressAndPort peer : peers)
-                            MessagingService.instance().sendOneWay(message, peer);
+                            MessagingService.instance().send(message, peer);
                     }
                     includePeers = true;
                 }
@@ -1803,7 +1803,7 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
             addLocalApplicationState(ApplicationState.STATUS, StorageService.instance.valueFactory.shutdown(true));
             Message message = Message.out(Verb.GOSSIP_SHUTDOWN, noPayload);
             for (InetAddressAndPort ep : liveEndpoints)
-                MessagingService.instance().sendOneWay(message, ep);
+                MessagingService.instance().send(message, ep);
             Uninterruptibles.sleepUninterruptibly(Integer.getInteger("cassandra.shutdown_announce_in_ms", 2000), TimeUnit.MILLISECONDS);
         }
         else

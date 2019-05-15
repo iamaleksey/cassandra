@@ -141,7 +141,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
     @VisibleForTesting
     protected void sendRR(Message<Mutation> message, InetAddressAndPort endpoint)
     {
-        MessagingService.instance().sendRR(message, endpoint, this);
+        MessagingService.instance().sendWithCallback(message, endpoint, this);
     }
 
     public void sendInitialRepairs()

@@ -143,7 +143,7 @@ public class CoordinatorSession extends ConsistentSession
     {
         logger.trace("Sending {} to {}", message, destination);
         Message<RepairMessage> messageOut = Message.out(Verb.REPAIR_REQ, message);
-        MessagingService.instance().sendOneWay(messageOut, destination);
+        MessagingService.instance().send(messageOut, destination);
     }
 
     public ListenableFuture<Boolean> prepare()

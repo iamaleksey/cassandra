@@ -42,6 +42,6 @@ public final class SchemaPullVerbHandler implements IVerbHandler<NoPayload>
     {
         logger.trace("Received schema pull request from {}", message.from());
         Message<Collection<Mutation>> response = message.responseWith(SchemaKeyspace.convertSchemaToMutations());
-        MessagingService.instance().sendResponse(response, message.from());
+        MessagingService.instance().send(response, message.from());
     }
 }

@@ -35,6 +35,6 @@ public class ReplicationDoneVerbHandler implements IVerbHandler
     {
         StorageService.instance.confirmReplication(msg.from());
         logger.debug("Replying to {}@{}", msg.id(), msg.from());
-        MessagingService.instance().sendResponse(msg.emptyResponse(), msg.from());
+        MessagingService.instance().send(msg.emptyResponse(), msg.from());
     }
 }
