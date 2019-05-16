@@ -144,11 +144,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         if (info.callback.supportsBackPressure())
             messagingService.updateBackPressureOnReceive(info.peer, info.callback, true);
 
-        if (info.isFailureCallback())
-        {
-            StageManager.getStage(INTERNAL_RESPONSE).submit(() ->
-                ((RequestCallbackWithFailure) info.callback).onFailure(info.peer, RequestFailureReason.UNKNOWN));
-        }
+        if (info.invokeOnFailure())
+            StageManager.getStage(INTERNAL_RESPONSE).submit(() -> info.callback.onFailure(info.peer, RequestFailureReason.UNKNOWN));
 
         if (info.shouldHint())
         {
@@ -263,14 +260,14 @@ public class RequestCallbacks implements OutboundMessageCallbacks
             return false;
         }
 
-        boolean isFailureCallback()
+        boolean invokeOnFailure()
         {
-            return callback instanceof RequestCallbackWithFailure<?>;
+            return callback.invokeOnFailure();
         }
 
         public String toString()
         {
-            return "{peer:" + peer + ", callback:" + callback + ", isFailureCallback:" + isFailureCallback() + '}';
+            return "{peer:" + peer + ", callback:" + callback + ", invokeOnFailure:" + invokeOnFailure() + '}';
         }
     }
 
@@ -281,7 +278,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         private final Replica replica;
 
         @VisibleForTesting
-        WriteCallbackInfo(Message message, Replica replica, RequestCallbackWithFailure<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
+        WriteCallbackInfo(Message message, Replica replica, RequestCallback<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
         {
             super(message, replica.endpoint(), callback);
             this.mutation = shouldHint(allowHints, message, consistencyLevel) ? message.payload : null;

@@ -268,7 +268,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         callbacks.addWithExpiration(cb, message, to);
         updateBackPressureOnSend(to, cb, message);
-        if (cb instanceof RequestCallbackWithFailure && !message.callBackOnFailure())
+        if (cb.invokeOnFailure() && !message.callBackOnFailure())
             message = message.withCallBackOnFailure();
         send(message, to, specifyConnection);
     }

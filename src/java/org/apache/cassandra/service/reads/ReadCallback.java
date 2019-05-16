@@ -35,7 +35,7 @@ import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.tracing.Tracing;
@@ -43,7 +43,7 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 
-public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> implements RequestCallbackWithFailure<ReadResponse>
+public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>> implements RequestCallback<ReadResponse>
 {
     protected static final Logger logger = LoggerFactory.getLogger( ReadCallback.class );
 
@@ -151,7 +151,9 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
         onResponse(message);
     }
 
-    public boolean isLatencyForSnitch()
+
+    @Override
+    public boolean trackLatencyForSnitch()
     {
         return true;
     }
@@ -167,5 +169,11 @@ public class ReadCallback<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<
 
         if (blockFor + n > replicaPlan().contacts().size())
             condition.signalAll();
+    }
+
+    @Override
+    public boolean invokeOnFailure()
+    {
+        return true;
     }
 }

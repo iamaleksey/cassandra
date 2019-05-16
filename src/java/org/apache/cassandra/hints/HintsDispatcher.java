@@ -27,11 +27,11 @@ import com.google.common.util.concurrent.RateLimiter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
-import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -205,7 +205,7 @@ final class HintsDispatcher implements AutoCloseable
         return callback;
     }
 
-    private static final class Callback implements RequestCallbackWithFailure
+    private static final class Callback implements RequestCallback
     {
         enum Outcome { SUCCESS, TIMEOUT, FAILURE, INTERRUPTED }
 
@@ -235,12 +235,20 @@ final class HintsDispatcher implements AutoCloseable
             return timedOut ? Outcome.TIMEOUT : outcome;
         }
 
+        @Override
+        public boolean invokeOnFailure()
+        {
+            return true;
+        }
+
+        @Override
         public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
         {
             outcome = Outcome.FAILURE;
             condition.signalAll();
         }
 
+        @Override
         public void onResponse(Message msg)
         {
             HintsServiceMetrics.updateDelayMetrics(msg.from(), ApproximateTime.currentTimeMillis() - this.hintCreationTime);

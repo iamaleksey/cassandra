@@ -58,7 +58,7 @@ import org.apache.cassandra.gms.IFailureDetectionEventListener;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.TokenMetadata;
-import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.CommonRange;
@@ -396,18 +396,26 @@ public class ActiveRepairService implements IEndpointStateChangeSubscriber, IFai
         final CountDownLatch prepareLatch = new CountDownLatch(endpoints.size());
         final AtomicBoolean status = new AtomicBoolean(true);
         final Set<String> failedNodes = Collections.synchronizedSet(new HashSet<String>());
-        RequestCallbackWithFailure callback = new RequestCallbackWithFailure()
+        RequestCallback callback = new RequestCallback()
         {
+            @Override
             public void onResponse(Message msg)
             {
                 prepareLatch.countDown();
             }
 
+            @Override
             public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
             {
                 status.set(false);
                 failedNodes.add(from.toString());
                 prepareLatch.countDown();
+            }
+
+            @Override
+            public boolean invokeOnFailure()
+            {
+                return true;
             }
         };
 

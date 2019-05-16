@@ -54,14 +54,14 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
             cleanup.ackMutation();
     }
 
-    public boolean isLatencyForSnitch()
-    {
-        return wrapped.isLatencyForSnitch();
-    }
-
     public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
     {
         wrapped.onFailure(from, failureReason);
+    }
+
+    public boolean invokeOnFailure()
+    {
+        return wrapped.invokeOnFailure();
     }
 
     public void get() throws WriteTimeoutException, WriteFailureException

@@ -48,7 +48,7 @@ public class ResponseVerbHandler implements IVerbHandler
         RequestCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((RequestCallbackWithFailure) cb).onFailure(message.from(), (RequestFailureReason) message.payload);
+            cb.onFailure(message.from(), (RequestFailureReason) message.payload);
         }
         else
         {

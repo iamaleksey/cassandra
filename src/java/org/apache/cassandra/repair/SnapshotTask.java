@@ -23,7 +23,7 @@ import com.google.common.util.concurrent.AbstractFuture;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SnapshotMessage;
@@ -38,7 +38,7 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
     private final RepairJobDesc desc;
     private final InetAddressAndPort endpoint;
 
-    public SnapshotTask(RepairJobDesc desc, InetAddressAndPort endpoint)
+    SnapshotTask(RepairJobDesc desc, InetAddressAndPort endpoint)
     {
         this.desc = desc;
         this.endpoint = endpoint;
@@ -54,7 +54,7 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
     /**
      * Callback for snapshot request. Run on INTERNAL_RESPONSE stage.
      */
-    static class SnapshotCallback implements RequestCallbackWithFailure
+    static class SnapshotCallback implements RequestCallback
     {
         final SnapshotTask task;
 
@@ -68,11 +68,19 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
          *
          * @param msg response received.
          */
+        @Override
         public void onResponse(Message msg)
         {
             task.set(task.endpoint);
         }
 
+        @Override
+        public boolean invokeOnFailure()
+        {
+            return true;
+        }
+
+        @Override
         public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
         {
             //listener.failedSnapshot();

@@ -39,7 +39,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -47,7 +47,7 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 
-public abstract class AbstractWriteResponseHandler<T> implements RequestCallbackWithFailure<T>
+public abstract class AbstractWriteResponseHandler<T> implements RequestCallback<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractWriteResponseHandler.class);
 
@@ -250,6 +250,12 @@ public abstract class AbstractWriteResponseHandler<T> implements RequestCallback
 
         if (blockFor() + n > candidateReplicaCount())
             signal();
+    }
+
+    @Override
+    public boolean invokeOnFailure()
+    {
+        return true;
     }
 
     @Override
