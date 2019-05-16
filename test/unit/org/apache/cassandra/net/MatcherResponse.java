@@ -20,7 +20,6 @@ package org.apache.cassandra.net;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Queue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -189,9 +188,9 @@ public class MatcherResponse
                         Message<?> response = fnResponse.apply(message, to);
                         if (response != null)
                         {
-                            RemoteCallbacks.CallbackInfo cb = MessagingService.instance().callbacks.get(message.id(), to);
+                            RequestCallbacks.CallbackInfo cb = MessagingService.instance().callbacks.get(message.id(), to);
                             if (cb != null)
-                                cb.callback.response(response);
+                                cb.callback.onResponse(response);
                             else
                                 processResponse(response);
 

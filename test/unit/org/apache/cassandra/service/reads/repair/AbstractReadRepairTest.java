@@ -1,6 +1,5 @@
 package org.apache.cassandra.service.reads.repair;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -42,10 +41,8 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.locator.ReplicaLayout;
 import org.apache.cassandra.locator.ReplicaUtils;
 import org.apache.cassandra.net.Message;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MigrationManager;
@@ -305,8 +302,8 @@ public abstract  class AbstractReadRepairTest
         repair.startRepair(null, consumer);
 
         Assert.assertEquals(epSet(target1, target2), repair.getReadRecipients());
-        repair.getReadCallback().response(msg(target1, cell1));
-        repair.getReadCallback().response(msg(target2, cell1));
+        repair.getReadCallback().onResponse(msg(target1, cell1));
+        repair.getReadCallback().onResponse(msg(target2, cell1));
 
         repair.maybeSendAdditionalReads();
         Assert.assertEquals(epSet(target1, target2), repair.getReadRecipients());

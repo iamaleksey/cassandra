@@ -55,7 +55,7 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.dht.Token;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
@@ -1150,14 +1150,14 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         Message<NoPayload> echoMessage = Message.out(ECHO_REQ, noPayload);
         logger.trace("Sending ECHO_REQ to {}", addr);
-        IAsyncCallback echoHandler = new IAsyncCallback()
+        RequestCallback echoHandler = new RequestCallback()
         {
             public boolean isLatencyForSnitch()
             {
                 return false;
             }
 
-            public void response(Message msg)
+            public void onResponse(Message msg)
             {
                 // force processing of the echo response onto the gossip stage, as it comes in on the REQUEST_RESPONSE stage
                 runInGossipStageBlocking(() -> realMarkAlive(addr, localState));

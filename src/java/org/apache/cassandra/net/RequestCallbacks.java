@@ -50,22 +50,22 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
 
-public class RemoteCallbacks implements OutboundMessageCallbacks
+public class RequestCallbacks implements OutboundMessageCallbacks
 {
-    private static final Logger logger = LoggerFactory.getLogger(RemoteCallbacks.class);
+    private static final Logger logger = LoggerFactory.getLogger(RequestCallbacks.class);
 
     private final MessagingService messagingService;
     private final ScheduledExecutorService executor = new DebuggableScheduledThreadPoolExecutor("Callback-Map-Reaper");
     private final ConcurrentMap<CallbackKey, CallbackInfo> callbacks = new ConcurrentHashMap<>();
 
-    RemoteCallbacks(MessagingService messagingService)
+    RequestCallbacks(MessagingService messagingService)
     {
         this.messagingService = messagingService;
         long expirationInterval = DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2;
         executor.scheduleWithFixedDelay(this::expire, expirationInterval, expirationInterval, NANOSECONDS);
     }
 
-    public void addWithExpiration(IAsyncCallback cb, Message message, InetAddressAndPort to)
+    public void addWithExpiration(RequestCallback cb, Message message, InetAddressAndPort to)
     {
         // mutations need to call the overload with a ConsistencyLevel
         assert message.verb() != Verb.MUTATION_REQ && message.verb() != Verb.COUNTER_MUTATION_REQ && message.verb() != Verb.PAXOS_COMMIT_REQ;
@@ -147,7 +147,7 @@ public class RemoteCallbacks implements OutboundMessageCallbacks
         if (info.isFailureCallback())
         {
             StageManager.getStage(INTERNAL_RESPONSE).submit(() ->
-                ((IAsyncCallbackWithFailure) info.callback).onFailure(info.peer, RequestFailureReason.UNKNOWN));
+                ((RequestCallbackWithFailure) info.callback).onFailure(info.peer, RequestFailureReason.UNKNOWN));
         }
 
         if (info.shouldHint())
@@ -234,12 +234,12 @@ public class RemoteCallbacks implements OutboundMessageCallbacks
         final long expiresAtNanos;
 
         final InetAddressAndPort peer;
-        final IAsyncCallback callback;
+        final RequestCallback callback;
 
         @Deprecated // for 3.0 compatibility purposes only
         public final Verb responseVerb;
 
-        private CallbackInfo(Message message, InetAddressAndPort peer, IAsyncCallback callback)
+        private CallbackInfo(Message message, InetAddressAndPort peer, RequestCallback callback)
         {
             this.createdAtNanos = message.createdAtNanos();
             this.expiresAtNanos = message.expiresAtNanos();
@@ -265,7 +265,7 @@ public class RemoteCallbacks implements OutboundMessageCallbacks
 
         boolean isFailureCallback()
         {
-            return callback instanceof IAsyncCallbackWithFailure<?>;
+            return callback instanceof RequestCallbackWithFailure<?>;
         }
 
         public String toString()
@@ -281,7 +281,7 @@ public class RemoteCallbacks implements OutboundMessageCallbacks
         private final Replica replica;
 
         @VisibleForTesting
-        WriteCallbackInfo(Message message, Replica replica, IAsyncCallbackWithFailure<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
+        WriteCallbackInfo(Message message, Replica replica, RequestCallbackWithFailure<?> callback, ConsistencyLevel consistencyLevel, boolean allowHints)
         {
             super(message, replica.endpoint(), callback);
             this.mutation = shouldHint(allowHints, message, consistencyLevel) ? message.payload : null;

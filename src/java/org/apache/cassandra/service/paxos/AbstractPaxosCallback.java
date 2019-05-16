@@ -22,17 +22,16 @@ package org.apache.cassandra.service.paxos;
 
 
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.WriteType;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.RequestCallback;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public abstract class AbstractPaxosCallback<T> implements IAsyncCallback<T>
+public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
 {
     protected final CountDownLatch latch;
     protected final int targets;

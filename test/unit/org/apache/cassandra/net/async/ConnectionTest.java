@@ -63,7 +63,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AcceptVersions;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
@@ -370,14 +370,14 @@ public class ConnectionTest
 
             CountDownLatch done = new CountDownLatch(1);
             Message<?> message = Message.out(Verb._TEST_1, new Object());
-            MessagingService.instance().callbacks.addWithExpiration(new IAsyncCallbackWithFailure()
+            MessagingService.instance().callbacks.addWithExpiration(new RequestCallbackWithFailure()
             {
                 public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
                 {
                     done.countDown();
                 }
 
-                public void response(Message msg)
+                public void onResponse(Message msg)
                 {
                     throw new IllegalStateException();
                 }

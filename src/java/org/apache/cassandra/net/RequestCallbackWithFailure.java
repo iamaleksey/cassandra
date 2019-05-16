@@ -17,27 +17,14 @@
  */
 package org.apache.cassandra.net;
 
-/**
- * implementors of IAsyncCallback need to make sure that any public methods
- * are threadsafe with respect to response() being called from the message
- * service.  In particular, if any shared state is referenced, making
- * response alone synchronized will not suffice.
- */
-public interface IAsyncCallback<T>
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.locator.InetAddressAndPort;
+
+public interface RequestCallbackWithFailure<T> extends RequestCallback<T>
 {
-    /**
-     * @param msg response received.
-     */
-    void response(Message<T> msg);
 
     /**
-     * @return true if this callback is on the read path and its latency should be
-     * given as input to the dynamic snitch.
+     * Called when there is an exception on the remote node or timeout happens
      */
-    boolean isLatencyForSnitch();
-
-    default boolean supportsBackPressure()
-    {
-        return false;
-    }
+    void onFailure(InetAddressAndPort from, RequestFailureReason failureReason);
 }

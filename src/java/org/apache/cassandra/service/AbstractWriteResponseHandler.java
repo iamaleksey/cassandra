@@ -20,7 +20,6 @@ package org.apache.cassandra.service;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 import java.util.stream.Collectors;
@@ -40,7 +39,7 @@ import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.exceptions.WriteFailureException;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -48,7 +47,7 @@ import org.apache.cassandra.utils.concurrent.SimpleCondition;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
 
-public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackWithFailure<T>
+public abstract class AbstractWriteResponseHandler<T> implements RequestCallbackWithFailure<T>
 {
     protected static final Logger logger = LoggerFactory.getLogger(AbstractWriteResponseHandler.class);
 
@@ -164,7 +163,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
             //Let the delegate do full processing, this will loop back into the branch above
             //with idealCLDelegate == this, because the ideal write handler idealCLDelegate will always
             //be set to this in the delegate.
-            idealCLDelegate.response(m);
+            idealCLDelegate.onResponse(m);
         }
     }
 
@@ -229,7 +228,7 @@ public abstract class AbstractWriteResponseHandler<T> implements IAsyncCallbackW
     /**
      * null message means "response from local write"
      */
-    public abstract void response(Message<T> msg);
+    public abstract void onResponse(Message<T> msg);
 
     protected void signal()
     {

@@ -66,9 +66,9 @@ public class MockMessagingServiceTest
                 .respond(echoMessage);
 
         Message<NoPayload> echoMessageOut = Message.out(ECHO_REQ, NoPayload.noPayload);
-        MessagingService.instance().sendWithCallback(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new IAsyncCallback()
+        MessagingService.instance().sendWithCallback(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new RequestCallback()
         {
-            public void response(Message msg)
+            public void onResponse(Message msg)
             {
                 assertEquals(ECHO_REQ, msg.verb());
                 assertEquals(echoMessage.payload, msg.payload);

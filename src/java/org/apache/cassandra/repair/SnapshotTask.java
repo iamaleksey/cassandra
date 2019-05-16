@@ -23,7 +23,7 @@ import com.google.common.util.concurrent.AbstractFuture;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.messages.SnapshotMessage;
@@ -54,7 +54,7 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
     /**
      * Callback for snapshot request. Run on INTERNAL_RESPONSE stage.
      */
-    static class SnapshotCallback implements IAsyncCallbackWithFailure
+    static class SnapshotCallback implements RequestCallbackWithFailure
     {
         final SnapshotTask task;
 
@@ -68,7 +68,7 @@ public class SnapshotTask extends AbstractFuture<InetAddressAndPort> implements 
          *
          * @param msg response received.
          */
-        public void response(Message msg)
+        public void onResponse(Message msg)
         {
             task.set(task.endpoint);
         }

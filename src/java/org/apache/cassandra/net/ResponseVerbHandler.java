@@ -34,7 +34,7 @@ public class ResponseVerbHandler implements IVerbHandler
 
     public void doVerb(Message message)
     {
-        RemoteCallbacks.CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id(), message.from());
+        RequestCallbacks.CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id(), message.from());
         if (callbackInfo == null)
         {
             String msg = "Callback already removed for {} (from {})";
@@ -45,15 +45,15 @@ public class ResponseVerbHandler implements IVerbHandler
 
         long latencyNanos = ApproximateTime.nanoTime() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
-        IAsyncCallback cb = callbackInfo.callback;
+        RequestCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {
-            ((IAsyncCallbackWithFailure) cb).onFailure(message.from(), (RequestFailureReason) message.payload);
+            ((RequestCallbackWithFailure) cb).onFailure(message.from(), (RequestFailureReason) message.payload);
         }
         else
         {
             MessagingService.instance().latencySubscribers.maybeAdd(cb, message.from(), latencyNanos, NANOSECONDS);
-            cb.response(message);
+            cb.onResponse(message);
         }
 
         if (callbackInfo.callback.supportsBackPressure())

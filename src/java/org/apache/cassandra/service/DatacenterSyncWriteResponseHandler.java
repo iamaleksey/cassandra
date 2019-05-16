@@ -65,7 +65,7 @@ public class DatacenterSyncWriteResponseHandler<T> extends AbstractWriteResponse
         }
     }
 
-    public void response(Message<T> message)
+    public void onResponse(Message<T> message)
     {
         try
         {

@@ -236,7 +236,7 @@ public class StartupClusterConnectivityCheckerTest
                 Message msgIn = Message.builder(Verb.REQUEST_RSP, message.payload)
                                        .from(to)
                                        .build();
-                MessagingService.instance().callbacks.get(message.id(), to).callback.response(msgIn);
+                MessagingService.instance().callbacks.get(message.id(), to).callback.onResponse(msgIn);
             }
 
             if (markAliveInGossip)

@@ -182,14 +182,14 @@ public class StartupClusterConnectivityChecker
     private void sendPingMessages(Set<InetAddressAndPort> peers, Map<String, CountDownLatch> dcToRemainingPeers,
                                   AckMap acks, Function<InetAddressAndPort, String> getDatacenter)
     {
-        IAsyncCallback responseHandler = new IAsyncCallback()
+        RequestCallback responseHandler = new RequestCallback()
         {
             public boolean isLatencyForSnitch()
             {
                 return false;
             }
 
-            public void response(Message msg)
+            public void onResponse(Message msg)
             {
                 if (acks.incrementAndCheck(msg.from()))
                 {

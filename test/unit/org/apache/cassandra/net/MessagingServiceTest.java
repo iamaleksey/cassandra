@@ -218,8 +218,8 @@ public class MessagingServiceTest
     public void testUpdatesBackPressureOnSendWhenEnabledAndWithSupportedCallback() throws UnknownHostException
     {
         MockBackPressureStrategy.MockBackPressureState backPressureState = (MockBackPressureStrategy.MockBackPressureState) messagingService.getBackPressureState(InetAddressAndPort.getByName("127.0.0.2"));
-        IAsyncCallback bpCallback = new BackPressureCallback();
-        IAsyncCallback noCallback = new NoBackPressureCallback();
+        RequestCallback bpCallback = new BackPressureCallback();
+        RequestCallback noCallback = new NoBackPressureCallback();
         Message<?> ignored = null;
 
         DatabaseDescriptor.setBackPressureEnabled(true);
@@ -239,8 +239,8 @@ public class MessagingServiceTest
     public void testUpdatesBackPressureOnReceiveWhenEnabledAndWithSupportedCallback() throws UnknownHostException
     {
         MockBackPressureStrategy.MockBackPressureState backPressureState = (MockBackPressureStrategy.MockBackPressureState) messagingService.getBackPressureState(InetAddressAndPort.getByName("127.0.0.2"));
-        IAsyncCallback bpCallback = new BackPressureCallback();
-        IAsyncCallback noCallback = new NoBackPressureCallback();
+        RequestCallback bpCallback = new BackPressureCallback();
+        RequestCallback noCallback = new NoBackPressureCallback();
         boolean timeout = false;
 
         DatabaseDescriptor.setBackPressureEnabled(true);
@@ -263,8 +263,8 @@ public class MessagingServiceTest
     public void testUpdatesBackPressureOnTimeoutWhenEnabledAndWithSupportedCallback() throws UnknownHostException
     {
         MockBackPressureStrategy.MockBackPressureState backPressureState = (MockBackPressureStrategy.MockBackPressureState) messagingService.getBackPressureState(InetAddressAndPort.getByName("127.0.0.2"));
-        IAsyncCallback bpCallback = new BackPressureCallback();
-        IAsyncCallback noCallback = new NoBackPressureCallback();
+        RequestCallback bpCallback = new BackPressureCallback();
+        RequestCallback noCallback = new NoBackPressureCallback();
         boolean timeout = true;
 
         DatabaseDescriptor.setBackPressureEnabled(true);
@@ -373,7 +373,7 @@ public class MessagingServiceTest
         }
     }
 
-    private static class BackPressureCallback implements IAsyncCallback
+    private static class BackPressureCallback implements RequestCallback
     {
         @Override
         public boolean supportsBackPressure()
@@ -388,13 +388,13 @@ public class MessagingServiceTest
         }
 
         @Override
-        public void response(Message msg)
+        public void onResponse(Message msg)
         {
             throw new UnsupportedOperationException("Not supported.");
         }
     }
 
-    private static class NoBackPressureCallback implements IAsyncCallback
+    private static class NoBackPressureCallback implements RequestCallback
     {
         @Override
         public boolean supportsBackPressure()
@@ -409,7 +409,7 @@ public class MessagingServiceTest
         }
 
         @Override
-        public void response(Message msg)
+        public void onResponse(Message msg)
         {
             throw new UnsupportedOperationException("Not supported.");
         }

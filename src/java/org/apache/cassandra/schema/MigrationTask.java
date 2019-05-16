@@ -32,7 +32,7 @@ import org.apache.cassandra.db.SystemKeyspace.BootstrapState;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.gms.FailureDetector;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.WrappedRunnable;
@@ -84,10 +84,10 @@ final class MigrationTask extends WrappedRunnable
 
         final CountDownLatch completionLatch = new CountDownLatch(1);
 
-        IAsyncCallback<Collection<Mutation>> cb = new IAsyncCallback<Collection<Mutation>>()
+        RequestCallback<Collection<Mutation>> cb = new RequestCallback<Collection<Mutation>>()
         {
             @Override
-            public void response(Message<Collection<Mutation>> message)
+            public void onResponse(Message<Collection<Mutation>> message)
             {
                 try
                 {

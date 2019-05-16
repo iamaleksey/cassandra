@@ -47,9 +47,9 @@ public class BatchlogResponseHandler<T> extends AbstractWriteResponseHandler<T>
         return wrapped.ackCount();
     }
 
-    public void response(Message<T> msg)
+    public void onResponse(Message<T> msg)
     {
-        wrapped.response(msg);
+        wrapped.onResponse(msg);
         if (requiredBeforeFinishUpdater.decrementAndGet(this) == 0)
             cleanup.ackMutation();
     }

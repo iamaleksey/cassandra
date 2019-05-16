@@ -31,7 +31,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
-import org.apache.cassandra.net.IAsyncCallbackWithFailure;
+import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
@@ -205,7 +205,7 @@ final class HintsDispatcher implements AutoCloseable
         return callback;
     }
 
-    private static final class Callback implements IAsyncCallbackWithFailure
+    private static final class Callback implements RequestCallbackWithFailure
     {
         enum Outcome { SUCCESS, TIMEOUT, FAILURE, INTERRUPTED }
 
@@ -241,7 +241,7 @@ final class HintsDispatcher implements AutoCloseable
             condition.signalAll();
         }
 
-        public void response(Message msg)
+        public void onResponse(Message msg)
         {
             HintsServiceMetrics.updateDelayMetrics(msg.from(), ApproximateTime.currentTimeMillis() - this.hintCreationTime);
             outcome = Outcome.SUCCESS;

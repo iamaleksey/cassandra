@@ -148,11 +148,11 @@ public class WriteResponseHandlerTest
         AbstractWriteResponseHandler awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM, System.nanoTime() - TimeUnit.DAYS.toNanos(1));
 
         //dc1
-        awr.response(createDummyMessage(0));
-        awr.response(createDummyMessage(1));
+        awr.onResponse(createDummyMessage(0));
+        awr.onResponse(createDummyMessage(1));
         //dc2
-        awr.response(createDummyMessage(4));
-        awr.response(createDummyMessage(5));
+        awr.onResponse(createDummyMessage(4));
+        awr.onResponse(createDummyMessage(5));
 
         //Don't need the others
         awr.expired();
@@ -174,13 +174,13 @@ public class WriteResponseHandlerTest
         AbstractWriteResponseHandler awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.ALL);
 
         //dc1
-        awr.response(createDummyMessage(0));
-        awr.response(createDummyMessage(1));
-        awr.response(createDummyMessage(2));
+        awr.onResponse(createDummyMessage(0));
+        awr.onResponse(createDummyMessage(1));
+        awr.onResponse(createDummyMessage(2));
         //dc2
-        awr.response(createDummyMessage(3));
-        awr.response(createDummyMessage(4));
-        awr.response(createDummyMessage(5));
+        awr.onResponse(createDummyMessage(3));
+        awr.onResponse(createDummyMessage(4));
+        awr.onResponse(createDummyMessage(5));
 
         assertEquals(0,  ks.metric.writeFailedIdealCL.getCount());
         assertEquals(startingCount + 1, ks.metric.idealCLWriteLatency.latency.getCount());
@@ -197,13 +197,13 @@ public class WriteResponseHandlerTest
         AbstractWriteResponseHandler awr = createWriteResponseHandler(ConsistencyLevel.ONE, ConsistencyLevel.LOCAL_QUORUM);
 
         //dc1
-        awr.response(createDummyMessage(0));
-        awr.response(createDummyMessage(1));
-        awr.response(createDummyMessage(2));
+        awr.onResponse(createDummyMessage(0));
+        awr.onResponse(createDummyMessage(1));
+        awr.onResponse(createDummyMessage(2));
         //dc2
-        awr.response(createDummyMessage(3));
-        awr.response(createDummyMessage(4));
-        awr.response(createDummyMessage(5));
+        awr.onResponse(createDummyMessage(3));
+        awr.onResponse(createDummyMessage(4));
+        awr.onResponse(createDummyMessage(5));
 
         assertEquals(0,  ks.metric.writeFailedIdealCL.getCount());
         assertEquals(startingCount + 1, ks.metric.idealCLWriteLatency.latency.getCount());
@@ -220,9 +220,9 @@ public class WriteResponseHandlerTest
         AbstractWriteResponseHandler awr = createWriteResponseHandler(ConsistencyLevel.LOCAL_QUORUM, ConsistencyLevel.EACH_QUORUM);
 
         //Succeed in local DC
-        awr.response(createDummyMessage(0));
-        awr.response(createDummyMessage(1));
-        awr.response(createDummyMessage(2));
+        awr.onResponse(createDummyMessage(0));
+        awr.onResponse(createDummyMessage(1));
+        awr.onResponse(createDummyMessage(2));
 
         //Fail in remote DC
         awr.expired();

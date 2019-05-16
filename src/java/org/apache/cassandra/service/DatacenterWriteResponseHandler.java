@@ -42,11 +42,11 @@ public class DatacenterWriteResponseHandler<T> extends WriteResponseHandler<T>
     }
 
     @Override
-    public void response(Message<T> message)
+    public void onResponse(Message<T> message)
     {
         if (message == null || waitingFor(message.from()))
         {
-            super.response(message);
+            super.onResponse(message);
         }
         else
         {

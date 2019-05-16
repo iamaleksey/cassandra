@@ -526,11 +526,11 @@ public class BatchlogManager implements BatchlogManagerMBean
             }
 
             @Override
-            public void response(Message<T> m)
+            public void onResponse(Message<T> m)
             {
                 boolean removed = undelivered.remove(m == null ? FBUtilities.getBroadcastAddressAndPort() : m.from());
                 assert removed;
-                super.response(m);
+                super.onResponse(m);
             }
         }
     }

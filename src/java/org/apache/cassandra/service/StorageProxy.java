@@ -449,7 +449,7 @@ public class StorageProxy implements StorageProxyMBean
                 StageManager.getStage(PAXOS_PREPARE_REQ.stage).execute(() -> {
                     try
                     {
-                        callback.response(message.responseWith(doPrepare(toPrepare)));
+                        callback.onResponse(message.responseWith(doPrepare(toPrepare)));
                     }
                     catch (Exception ex)
                     {
@@ -479,7 +479,7 @@ public class StorageProxy implements StorageProxyMBean
                     try
                     {
                         Message<Boolean> response = message.responseWith(doPropose(proposal));
-                        callback.response(response);
+                        callback.onResponse(response);
                     }
                     catch (Exception ex)
                     {
@@ -572,7 +572,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     PaxosState.commit(message.payload);
                     if (responseHandler != null)
-                        responseHandler.response(null);
+                        responseHandler.onResponse(null);
                 }
                 catch (Exception ex)
                 {
@@ -1338,7 +1338,7 @@ public class StorageProxy implements StorageProxyMBean
         });
     }
 
-    private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable, final IAsyncCallbackWithFailure<?> handler)
+    private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable, final RequestCallbackWithFailure<?> handler)
     {
         StageManager.getStage(stage).maybeExecuteImmediately(new LocalMutationRunnable(localReplica)
         {
@@ -1347,7 +1347,7 @@ public class StorageProxy implements StorageProxyMBean
                 try
                 {
                     runnable.run();
-                    handler.response(null);
+                    handler.onResponse(null);
                 }
                 catch (Exception ex)
                 {
@@ -1480,7 +1480,7 @@ public class StorageProxy implements StorageProxyMBean
                 assert mutation instanceof CounterMutation;
 
                 Mutation result = ((CounterMutation) mutation).applyCounterMutation();
-                responseHandler.response(null);
+                responseHandler.onResponse(null);
                 sendToHintedReplicas(result, replicaPlan, responseHandler, localDataCenter, Stage.COUNTER_MUTATION);
             }
         };
@@ -2171,9 +2171,9 @@ public class StorageProxy implements StorageProxyMBean
         final Set<InetAddressAndPort> liveHosts = Gossiper.instance.getLiveMembers();
         final CountDownLatch latch = new CountDownLatch(liveHosts.size());
 
-        IAsyncCallback<UUID> cb = new IAsyncCallback<UUID>()
+        RequestCallback<UUID> cb = new RequestCallback<UUID>()
         {
-            public void response(Message<UUID> message)
+            public void onResponse(Message<UUID> message)
             {
                 // record the response from the remote node.
                 versions.put(message.from(), message.payload);
@@ -2419,9 +2419,9 @@ public class StorageProxy implements StorageProxyMBean
             viewWriteMetrics.viewReplicasAttempted.inc(candidateReplicaCount());
         }
 
-        public void response(Message<IMutation> msg)
+        public void onResponse(Message<IMutation> msg)
         {
-            super.response(msg);
+            super.onResponse(msg);
             viewWriteMetrics.viewReplicasSuccess.inc();
         }
     }
@@ -2617,7 +2617,7 @@ public class StorageProxy implements StorageProxyMBean
                 validTargets.forEach(HintsService.instance.metrics::incrCreatedHints);
                 // Notify the handler only for CL == ANY
                 if (responseHandler != null && responseHandler.replicaPlan.consistencyLevel() == ConsistencyLevel.ANY)
-                    responseHandler.response(null);
+                    responseHandler.onResponse(null);
             }
         };
 

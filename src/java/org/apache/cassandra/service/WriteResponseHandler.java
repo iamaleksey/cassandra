@@ -51,7 +51,7 @@ public class WriteResponseHandler<T> extends AbstractWriteResponseHandler<T>
         this(replicaPlan, null, writeType, queryStartNanoTime);
     }
 
-    public void response(Message<T> m)
+    public void onResponse(Message<T> m)
     {
         if (responsesUpdater.decrementAndGet(this) == 0)
             signal();

@@ -45,7 +45,7 @@ import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.locator.Replicas;
 import org.apache.cassandra.locator.InOurDcTester;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
-import org.apache.cassandra.net.IAsyncCallback;
+import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableId;
@@ -54,7 +54,7 @@ import org.apache.cassandra.tracing.Tracing;
 import static org.apache.cassandra.net.Verb.*;
 
 public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E>>
-        extends AbstractFuture<Object> implements IAsyncCallback<Object>
+        extends AbstractFuture<Object> implements RequestCallback<Object>
 {
     private final DecoratedKey key;
     private final P replicaPlan;
@@ -112,7 +112,7 @@ public class BlockingPartitionRepair<E extends Endpoints<E>, P extends ReplicaPl
     }
 
     @Override
-    public void response(Message<Object> msg)
+    public void onResponse(Message<Object> msg)
     {
         ack(msg.from());
     }

@@ -80,7 +80,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     public final SocketFactory socketFactory = new SocketFactory();
     public final LatencySubscribers latencySubscribers = new LatencySubscribers();
-    public final RemoteCallbacks callbacks = new RemoteCallbacks(this);
+    public final RequestCallbacks callbacks = new RequestCallbacks(this);
 
     // a public hook for filtering messages intended for delivery to this node
     public final InboundSink inboundSink = new InboundSink(this);
@@ -119,7 +119,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param callback The message callback.
      * @param message The actual message.
      */
-    public void updateBackPressureOnSend(InetAddressAndPort host, IAsyncCallback callback, Message<?> message)
+    public void updateBackPressureOnSend(InetAddressAndPort host, RequestCallback callback, Message<?> message)
     {
         if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
@@ -136,7 +136,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param callback The message callback.
      * @param timeout True if updated following a timeout, false otherwise.
      */
-    public void updateBackPressureOnReceive(InetAddressAndPort host, IAsyncCallback callback, boolean timeout)
+    public void updateBackPressureOnReceive(InetAddressAndPort host, RequestCallback callback, boolean timeout)
     {
         if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
@@ -259,16 +259,16 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param cb      callback interface which is used to pass the responses or
      *                suggest that a timeout occurred to the invoker of the send().
      */
-    public void sendWithCallback(Message message, InetAddressAndPort to, IAsyncCallback cb)
+    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb)
     {
         sendWithCallback(message, to, cb, null);
     }
 
-    public void sendWithCallback(Message message, InetAddressAndPort to, IAsyncCallback cb, ConnectionType specifyConnection)
+    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb, ConnectionType specifyConnection)
     {
         callbacks.addWithExpiration(cb, message, to);
         updateBackPressureOnSend(to, cb, message);
-        if (cb instanceof IAsyncCallbackWithFailure && !message.callBackOnFailure())
+        if (cb instanceof RequestCallbackWithFailure && !message.callBackOnFailure())
             message = message.withCallBackOnFailure();
         send(message, to, specifyConnection);
     }

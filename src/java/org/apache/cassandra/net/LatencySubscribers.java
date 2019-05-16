@@ -58,7 +58,7 @@ public class LatencySubscribers
      * @param address the host that replied to the message
      * @param latency
      */
-    public void maybeAdd(IAsyncCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
+    public void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
     {
         if (cb.isLatencyForSnitch())
             add(address, latency, unit);
