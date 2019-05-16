@@ -444,7 +444,7 @@ public class OutboundConnectionSettings
             socketFactory = MessagingService.instance().socketFactory;
 
         if (callbacks == null)
-            callbacks = MessagingService.instance().callbacks.expireDroppedMessagesCallbacks();
+            callbacks = MessagingService.instance().callbacks;
 
         if (debug == null)
             debug = OutboundDebugCallbacks.NONE;
