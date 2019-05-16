@@ -22,6 +22,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.config.DatabaseDescriptor;
@@ -346,11 +347,10 @@ public class PartitionRangeReadCommand extends ReadCommand implements PartitionR
         return Transformation.apply(iter, new CacheFilter());
     }
 
-    public Message<ReadCommand> createMessage(boolean trackRepairedData)
+    @Override
+    public Verb verb()
     {
-        return trackRepairedData
-             ? Message.outWithRepairedDataTracking(Verb.RANGE_REQ, this)
-             : Message.out(Verb.RANGE_REQ, this);
+        return Verb.RANGE_REQ;
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)

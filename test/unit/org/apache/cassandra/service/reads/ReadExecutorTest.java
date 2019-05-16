@@ -213,7 +213,6 @@ public class ReadExecutorTest
         {
             return Message.out(Verb.ECHO_REQ, NoPayload.noPayload);
         }
-
     }
 
     private ReplicaPlan.ForTokenRead plan(EndpointsForToken targets, ConsistencyLevel consistencyLevel)

@@ -131,6 +131,7 @@ public abstract class AbstractReadExecutor
     private void makeRequests(ReadCommand readCommand, Iterable<Replica> replicas)
     {
         boolean hasLocalEndpoint = false;
+        Message<ReadCommand> message = null;
 
         for (Replica replica: replicas)
         {
@@ -145,7 +146,10 @@ public abstract class AbstractReadExecutor
 
             if (traceState != null)
                 traceState.trace("reading {} from {}", readCommand.isDigestQuery() ? "digest" : "data", endpoint);
-            Message<ReadCommand> message = readCommand.createMessage(false);
+
+            if (null == message)
+                message = readCommand.createMessage(false);
+
             MessagingService.instance().sendWithCallback(message, endpoint, handler);
         }
 

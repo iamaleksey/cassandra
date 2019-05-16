@@ -331,16 +331,16 @@ public class Message<T>
         return outWithParam(nextId(), verb, payload, null, null);
     }
 
-    public static <T> Message<T> outWithFailureCallback(Verb verb, T payload)
+    public static <T> Message<T> outWithFlag(Verb verb, T payload, MessageFlag flag)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, MessageFlag.CALL_BACK_ON_FAILURE), null, null);
+        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, flag), null, null);
     }
 
-    public static <T> Message<T> outWithRepairedDataTracking(Verb verb, T payload)
+    public static <T> Message<T> outWithFlags(Verb verb, T payload, MessageFlag flag1, MessageFlag flag2)
     {
         assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, MessageFlag.TRACK_REPAIRED_DATA), null, null);
+        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(Header.addFlag(0, flag1), flag2), null, null);
     }
 
     public static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)

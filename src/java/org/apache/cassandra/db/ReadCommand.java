@@ -36,6 +36,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.*;
 import org.apache.cassandra.db.filter.*;
+import org.apache.cassandra.net.MessageFlag;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.db.partitions.*;
 import org.apache.cassandra.db.rows.*;
@@ -663,7 +665,14 @@ public abstract class ReadCommand extends AbstractReadQuery
     /**
      * Creates a message for this command.
      */
-    public abstract Message<ReadCommand> createMessage(boolean trackRepairedData);
+    public Message<ReadCommand> createMessage(boolean trackRepairedData)
+    {
+        return trackRepairedData
+             ? Message.outWithFlags(verb(), this, MessageFlag.CALL_BACK_ON_FAILURE, MessageFlag.TRACK_REPAIRED_DATA)
+             : Message.outWithFlag (verb(), this, MessageFlag.CALL_BACK_ON_FAILURE);
+    }
+
+    public abstract Verb verb();
 
     protected abstract void appendCQLWhereClause(StringBuilder sb);
 

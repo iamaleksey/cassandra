@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.metrics.TableMetrics;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.schema.ColumnMetadata;
@@ -1037,11 +1038,10 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
                              nowInSec());
     }
 
-    public Message<ReadCommand> createMessage(boolean trackRepairedData)
+    @Override
+    public Verb verb()
     {
-        return trackRepairedData
-             ? Message.outWithRepairedDataTracking(Verb.READ_REQ, this)
-             : Message.out(Verb.READ_REQ, this);
+        return Verb.READ_REQ;
     }
 
     protected void appendCQLWhereClause(StringBuilder sb)
