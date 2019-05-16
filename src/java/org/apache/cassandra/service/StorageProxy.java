@@ -2171,19 +2171,11 @@ public class StorageProxy implements StorageProxyMBean
         final Set<InetAddressAndPort> liveHosts = Gossiper.instance.getLiveMembers();
         final CountDownLatch latch = new CountDownLatch(liveHosts.size());
 
-        RequestCallback<UUID> cb = new RequestCallback<UUID>()
+        RequestCallback<UUID> cb = message ->
         {
-            public void onResponse(Message<UUID> message)
-            {
-                // record the response from the remote node.
-                versions.put(message.from(), message.payload);
-                latch.countDown();
-            }
-
-            public boolean isLatencyForSnitch()
-            {
-                return false;
-            }
+            // record the response from the remote node.
+            versions.put(message.from(), message.payload);
+            latch.countDown();
         };
         // an empty message acts as a request to the SchemaVersionVerbHandler.
         Message message = Message.out(Verb.SCHEMA_VERSION_REQ, noPayload);

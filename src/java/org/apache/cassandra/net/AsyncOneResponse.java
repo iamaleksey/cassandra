@@ -38,11 +38,6 @@ public class AsyncOneResponse<T> extends AsyncPromise<T> implements RequestCallb
         setSuccess(response.payload);
     }
 
-    public boolean isLatencyForSnitch()
-    {
-        return false;
-    }
-
     @VisibleForTesting
     public static <T> AsyncOneResponse<T> immediate(T value)
     {

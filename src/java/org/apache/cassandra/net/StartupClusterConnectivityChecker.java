@@ -42,6 +42,7 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.async.ConnectionType;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.Verb.PING_REQ;
@@ -148,11 +149,11 @@ public class StartupClusterConnectivityChecker
         }
 
         boolean succeeded = true;
-        for (String datacenter: dcToRemainingPeers.keySet())
+        for (CountDownLatch countDownLatch : dcToRemainingPeers.values())
         {
             long remainingNanos = Math.max(1, timeoutNanos - (System.nanoTime() - startNanos));
-            succeeded &= Uninterruptibles.awaitUninterruptibly(dcToRemainingPeers.get(datacenter),
-                                                               remainingNanos, TimeUnit.NANOSECONDS);
+            //noinspection UnstableApiUsage
+            succeeded &= Uninterruptibles.awaitUninterruptibly(countDownLatch, remainingNanos, TimeUnit.NANOSECONDS);
         }
 
         Gossiper.instance.unregister(listener);
@@ -182,22 +183,13 @@ public class StartupClusterConnectivityChecker
     private void sendPingMessages(Set<InetAddressAndPort> peers, Map<String, CountDownLatch> dcToRemainingPeers,
                                   AckMap acks, Function<InetAddressAndPort, String> getDatacenter)
     {
-        RequestCallback responseHandler = new RequestCallback()
-        {
-            public boolean isLatencyForSnitch()
+        RequestCallback responseHandler = msg -> {
+            if (acks.incrementAndCheck(msg.from()))
             {
-                return false;
-            }
-
-            public void onResponse(Message msg)
-            {
-                if (acks.incrementAndCheck(msg.from()))
-                {
-                    String datacenter = getDatacenter.apply(msg.from());
-                    // We have to check because we might only have the local DC in the map
-                    if (dcToRemainingPeers.containsKey(datacenter))
-                        dcToRemainingPeers.get(datacenter).countDown();
-                }
+                String datacenter = getDatacenter.apply(msg.from());
+                // We have to check because we might only have the local DC in the map
+                if (dcToRemainingPeers.containsKey(datacenter))
+                    dcToRemainingPeers.get(datacenter).countDown();
             }
         };
 

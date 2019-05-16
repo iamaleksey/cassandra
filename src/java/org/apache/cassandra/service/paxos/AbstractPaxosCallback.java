@@ -1,4 +1,3 @@
-package org.apache.cassandra.service.paxos;
 /*
  * 
  * Licensed to the Apache Software Foundation (ASF) under one
@@ -19,7 +18,7 @@ package org.apache.cassandra.service.paxos;
  * under the License.
  * 
  */
-
+package org.apache.cassandra.service.paxos;
 
 import java.util.concurrent.CountDownLatch;
 
@@ -44,11 +43,6 @@ public abstract class AbstractPaxosCallback<T> implements RequestCallback<T>
         this.consistency = consistency;
         latch = new CountDownLatch(targets);
         this.queryStartNanoTime = queryStartNanoTime;
-    }
-
-    public boolean isLatencyForSnitch()
-    {
-        return false;
     }
 
     public int getResponseCount()

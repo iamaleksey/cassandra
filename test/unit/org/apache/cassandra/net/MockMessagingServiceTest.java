@@ -66,18 +66,10 @@ public class MockMessagingServiceTest
                 .respond(echoMessage);
 
         Message<NoPayload> echoMessageOut = Message.out(ECHO_REQ, NoPayload.noPayload);
-        MessagingService.instance().sendWithCallback(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), new RequestCallback()
+        MessagingService.instance().sendWithCallback(echoMessageOut, FBUtilities.getBroadcastAddressAndPort(), msg ->
         {
-            public void onResponse(Message msg)
-            {
-                assertEquals(ECHO_REQ, msg.verb());
-                assertEquals(echoMessage.payload, msg.payload);
-            }
-
-            public boolean isLatencyForSnitch()
-            {
-                return false;
-            }
+            assertEquals(ECHO_REQ, msg.verb());
+            assertEquals(echoMessage.payload, msg.payload);
         });
 
         // we must have intercepted the outgoing message at this point

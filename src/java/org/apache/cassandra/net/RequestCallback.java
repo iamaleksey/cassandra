@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.net;
 
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.locator.InetAddressAndPort;
+
 /**
  * implementors of {@link RequestCallback} need to make sure that any public methods
  * are threadsafe with respect to {@link #onResponse} being called from the message
@@ -31,10 +34,20 @@ public interface RequestCallback<T>
     void onResponse(Message<T> msg);
 
     /**
+     * Called when there is an exception on the remote node or timeout happens
+     */
+    default void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+    {
+    }
+
+    /**
      * @return true if this callback is on the read path and its latency should be
      * given as input to the dynamic snitch.
      */
-    boolean isLatencyForSnitch();
+    default boolean isLatencyForSnitch()
+    {
+        return false;
+    }
 
     default boolean supportsBackPressure()
     {

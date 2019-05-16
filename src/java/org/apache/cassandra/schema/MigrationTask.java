@@ -84,28 +84,19 @@ final class MigrationTask extends WrappedRunnable
 
         final CountDownLatch completionLatch = new CountDownLatch(1);
 
-        RequestCallback<Collection<Mutation>> cb = new RequestCallback<Collection<Mutation>>()
+        RequestCallback<Collection<Mutation>> cb = msg ->
         {
-            @Override
-            public void onResponse(Message<Collection<Mutation>> message)
+            try
             {
-                try
-                {
-                    Schema.instance.mergeAndAnnounceVersion(message.payload);
-                }
-                catch (ConfigurationException e)
-                {
-                    logger.error("Configuration exception merging remote schema", e);
-                }
-                finally
-                {
-                    completionLatch.countDown();
-                }
+                Schema.instance.mergeAndAnnounceVersion(msg.payload);
             }
-
-            public boolean isLatencyForSnitch()
+            catch (ConfigurationException e)
             {
-                return false;
+                logger.error("Configuration exception merging remote schema", e);
+            }
+            finally
+            {
+                completionLatch.countDown();
             }
         };
 

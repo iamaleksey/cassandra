@@ -382,10 +382,6 @@ public class ConnectionTest
                     throw new IllegalStateException();
                 }
 
-                public boolean isLatencyForSnitch()
-                {
-                    return false;
-                }
             }, message, endpoint);
             AtomicInteger delivered = new AtomicInteger();
             unsafeSetSerializer(Verb._TEST_1, () -> new IVersionedSerializer<Object>()

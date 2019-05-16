@@ -1150,18 +1150,10 @@ public class Gossiper implements IFailureDetectionEventListener, GossiperMBean
 
         Message<NoPayload> echoMessage = Message.out(ECHO_REQ, noPayload);
         logger.trace("Sending ECHO_REQ to {}", addr);
-        RequestCallback echoHandler = new RequestCallback()
+        RequestCallback echoHandler = msg ->
         {
-            public boolean isLatencyForSnitch()
-            {
-                return false;
-            }
-
-            public void onResponse(Message msg)
-            {
-                // force processing of the echo response onto the gossip stage, as it comes in on the REQUEST_RESPONSE stage
-                runInGossipStageBlocking(() -> realMarkAlive(addr, localState));
-            }
+            // force processing of the echo response onto the gossip stage, as it comes in on the REQUEST_RESPONSE stage
+            runInGossipStageBlocking(() -> realMarkAlive(addr, localState));
         };
 
         MessagingService.instance().sendWithCallback(echoMessage, addr, echoHandler);

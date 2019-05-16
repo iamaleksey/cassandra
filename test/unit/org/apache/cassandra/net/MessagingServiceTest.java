@@ -382,12 +382,6 @@ public class MessagingServiceTest
         }
 
         @Override
-        public boolean isLatencyForSnitch()
-        {
-            return false;
-        }
-
-        @Override
         public void onResponse(Message msg)
         {
             throw new UnsupportedOperationException("Not supported.");
@@ -398,12 +392,6 @@ public class MessagingServiceTest
     {
         @Override
         public boolean supportsBackPressure()
-        {
-            return false;
-        }
-
-        @Override
-        public boolean isLatencyForSnitch()
         {
             return false;
         }

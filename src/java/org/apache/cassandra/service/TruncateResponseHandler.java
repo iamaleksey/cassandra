@@ -73,9 +73,4 @@ public class TruncateResponseHandler implements RequestCallback
         if (responses.get() >= responseCount)
             condition.signalAll();
     }
-
-    public boolean isLatencyForSnitch()
-    {
-        return false;
-    }
 }
