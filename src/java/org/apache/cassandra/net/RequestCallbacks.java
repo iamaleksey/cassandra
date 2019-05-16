@@ -145,7 +145,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
             messagingService.updateBackPressureOnReceive(info.peer, info.callback, true);
 
         if (info.invokeOnFailure())
-            StageManager.getStage(INTERNAL_RESPONSE).submit(() -> info.callback.onFailure(info.peer, RequestFailureReason.UNKNOWN));
+            StageManager.getStage(INTERNAL_RESPONSE).submit(() -> info.callback.onFailure(info.peer, RequestFailureReason.TIMEOUT));
 
         if (info.shouldHint())
         {
