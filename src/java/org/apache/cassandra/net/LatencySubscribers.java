@@ -26,7 +26,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 public class LatencySubscribers
 {
     private volatile ILatencySubscriber subscribers;
-    private final AtomicReferenceFieldUpdater<LatencySubscribers, ILatencySubscriber> subscribersUpdater
+    private static final AtomicReferenceFieldUpdater<LatencySubscribers, ILatencySubscriber> subscribersUpdater
         = AtomicReferenceFieldUpdater.newUpdater(LatencySubscribers.class, ILatencySubscriber.class, "subscribers");
 
     private static ILatencySubscriber merge(ILatencySubscriber a, ILatencySubscriber b)
