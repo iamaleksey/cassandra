@@ -73,6 +73,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to, previous);
     }
 
+    // FIXME: shouldn't need a special overload for writes; hinting should be part of AbstractWriteResponseHandler
     public void addWithExpiration(AbstractWriteResponseHandler<?> cb,
                                   Message<?> message,
                                   Replica to,
@@ -147,6 +148,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         if (info.invokeOnFailure())
             StageManager.getStage(INTERNAL_RESPONSE).submit(() -> info.callback.onFailure(info.peer, RequestFailureReason.TIMEOUT));
 
+        // FIXME: this has never belonged here, should be part of onFailure() in AbstractWriteResponseHandler
         if (info.shouldHint())
         {
             WriteCallbackInfo writeCallbackInfo = ((WriteCallbackInfo) info);
@@ -271,6 +273,8 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         }
     }
 
+    // FIXME: shouldn't need a specialized container for write callbacks; hinting should be part of
+    //        AbstractWriteResponseHandler implementation.
     static class WriteCallbackInfo extends CallbackInfo
     {
         // either a Mutation, or a Paxos Commit (MessageOut)
