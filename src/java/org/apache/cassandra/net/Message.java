@@ -89,7 +89,7 @@ public class Message<T>
         private final int flags;
         private final Map<ParamType, Object> params;
 
-        Header(long id, Verb verb, InetAddressAndPort from, long createdAtNanos, long expiresAtNanos, int flags, Map<ParamType, Object> params)
+        private Header(long id, Verb verb, InetAddressAndPort from, long createdAtNanos, long expiresAtNanos, int flags, Map<ParamType, Object> params)
         {
             this.id = id;
             this.verb = verb;
@@ -1228,7 +1228,6 @@ public class Message<T>
 
         private <T> int payloadSize(Message<T> message, int version)
         {
-            // FIXME: failure response conversion?
             long payloadSize = message.payload != null && message.payload != NoPayload.noPayload
                              ? message.verb().serializer().serializedSize(message.payload, version)
                              : 0;
