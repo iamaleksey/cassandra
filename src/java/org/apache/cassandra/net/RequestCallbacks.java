@@ -101,13 +101,17 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         return callbacks.remove(key(id, peer));
     }
 
-    @SuppressWarnings("UnusedReturnValue")
-    private CallbackInfo removeAndExpire(long id, InetAddressAndPort peer)
+    @VisibleForTesting
+    public void removeAndRespond(long id, InetAddressAndPort peer, Message message)
     {
         CallbackInfo ci = remove(id, peer);
-        if (null != ci)
-            onExpired(ci);
-        return ci;
+        if (null != ci) ci.callback.onResponse(message);
+    }
+
+    private void removeAndExpire(long id, InetAddressAndPort peer)
+    {
+        CallbackInfo ci = remove(id, peer);
+        if (null != ci) onExpired(ci);
     }
 
     private void expire()

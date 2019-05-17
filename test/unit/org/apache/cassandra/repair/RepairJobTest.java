@@ -54,7 +54,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.ResponseVerbHandler;
 import org.apache.cassandra.repair.messages.RepairMessage;
 import org.apache.cassandra.repair.messages.SyncRequest;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -167,7 +166,7 @@ public class RepairJobTest
     public void testEndToEndNoDifferences() throws InterruptedException, ExecutionException, TimeoutException
     {
         Map<InetAddressAndPort, MerkleTrees> mockTrees = new HashMap<>();
-        mockTrees.put(FBUtilities.getBroadcastAddressAndPort(), createInitialTree(false));
+        mockTrees.put(addr1, createInitialTree(false));
         mockTrees.put(addr2, createInitialTree(false));
         mockTrees.put(addr3, createInitialTree(false));
 
@@ -809,7 +808,7 @@ public class RepairJobTest
             switch (rm.messageType)
             {
                 case SNAPSHOT:
-                    ResponseVerbHandler.instance.doVerb(message.emptyResponse());
+                    MessagingService.instance().callbacks.removeAndRespond(message.id(), to, message.emptyResponse());
                     break;
                 case VALIDATION_REQUEST:
                     session.validationComplete(sessionJobDesc, to, mockTrees.get(to));
