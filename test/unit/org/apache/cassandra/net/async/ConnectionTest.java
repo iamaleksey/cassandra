@@ -439,7 +439,7 @@ public class ConnectionTest
             int count = 100;
 
             CountDownLatch deliveryDone = new CountDownLatch(1);
-            CountDownLatch receiveDone = new CountDownLatch(100);
+            CountDownLatch receiveDone = new CountDownLatch(90);
 
             AtomicInteger serialized = new AtomicInteger();
             Message<?> message = Message.builder(Verb._TEST_1, new Object())
@@ -454,13 +454,11 @@ public class ConnectionTest
                     {
                         if (0 == (i & 16))
                             out.writeByte(i);
-                        receiveDone.countDown();
                         throw new IOException();
                     }
+
                     if (1 != (i & 31))
                         out.writeByte(i);
-                    else
-                        receiveDone.countDown();
                 }
 
                 public Object deserialize(DataInputPlus in, int version) throws IOException
@@ -488,7 +486,7 @@ public class ConnectionTest
                            .pending  (  0,  0)
                            .overload (  0,  0)
                            .expired  (  0,  0)
-                           .error    ( 10, 10 * message.serializedSize(current_version))
+                           .error    ( 10, 10 * message.serializedSize(version))
                            .check();
             check(inbound) .received ( 90, 90 * message.serializedSize(version))
                            .processed( 90, 90 * message.serializedSize(version))
