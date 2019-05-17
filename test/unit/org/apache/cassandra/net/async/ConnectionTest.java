@@ -766,27 +766,6 @@ public class ConnectionTest
     }
 
     @Test
-    public void testInboundExpiration() throws Throwable
-    {
-        test((inbound, outbound, endpoint) -> {
-            unsafeSetExpiration(Verb._TEST_1, (t) -> 0);
-            AtomicInteger counter = new AtomicInteger();
-            CountDownLatch latch = new CountDownLatch(1);
-            unsafeSetHandler(Verb._TEST_1, () -> msg -> counter.incrementAndGet());
-            unsafeSetHandler(Verb._TEST_2, () -> msg -> latch.countDown());
-
-            Message<?> message = Message.out(Verb._TEST_1, noPayload);
-            for (int i = 0 ; i < 10 ; ++i)
-                outbound.enqueue(message);
-
-            outbound.enqueue(Message.out(Verb._TEST_2, noPayload));
-            latch.await(1, MINUTES);
-            Assert.assertEquals(0, latch.getCount());
-            Assert.assertEquals(0, counter.get());
-        });
-    }
-
-    @Test
     public void testAcquireReleaseOutbound() throws Throwable
     {
         test((inbound, outbound, endpoint) -> {
