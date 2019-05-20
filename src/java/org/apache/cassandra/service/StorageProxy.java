@@ -1287,32 +1287,30 @@ public class StorageProxy implements StorageProxyMBean
                                                  EndpointsForToken targets,
                                                  AbstractWriteResponseHandler<IMutation> handler)
     {
-        Iterator<Replica> iter = targets.iterator();
-        assert iter.hasNext();
-
-        // make the first replica responsible for forwarding the message to other replicas in the DC
-        Replica target = iter.next();
-
-        // Add the other destinations of the same message as a FORWARD_HEADER entry
-        while (iter.hasNext())
-        {
-            Replica destination = iter.next();
-            MessagingService.instance().callbacks.addWithExpiration(handler,
-                                                                    message,
-                                                                    destination,
-                                                                    handler.replicaPlan.consistencyLevel(),
-                                                                    true);
-            logger.trace("Adding FWD message to {}@{}", message.id(), destination);
-        }
+        /*
+         * Make the first replica responsible for forwarding the message to other
+         * replicas in the DC, add the other destinations as FORWARD_TO entries.
+         */
+        Replica first = targets.get(0);
+        EndpointsForToken rest = targets.subList(1, targets.size());
 
         // starting with 4.0, use the same message id for all replicas
-        long[] messageIds = new long[targets.size() - 1];
+        long[] messageIds = new long[rest.size()];
         Arrays.fill(messageIds, message.id());
 
-        List<InetAddressAndPort> forwardTargets = targets.endpointList().subList(1, targets.endpointList().size());
-        message = message.withForwardingTo(new ForwardToContainer(forwardTargets, messageIds));
-        MessagingService.instance().sendWriteWithCallback(message, target, handler, true);
-        logger.trace("Sending message to {}@{}", message.id(), target);
+        for (Replica replica : targets)
+        {
+            MessagingService.instance().callbacks.addWithExpiration(handler,
+                                                                    message,
+                                                                    replica,
+                                                                    handler.replicaPlan.consistencyLevel(),
+                                                                    true);
+            logger.trace("Adding FWD message to {}@{}", message.id(), replica);
+        }
+
+        message = message.withForwardingTo(new ForwardToContainer(rest.endpointList(), messageIds));
+        MessagingService.instance().send(message, first.endpoint());
+        logger.trace("Sending message to {}@{}", message.id(), first);
     }
 
     private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable)
