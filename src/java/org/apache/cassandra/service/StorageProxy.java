@@ -1306,10 +1306,11 @@ public class StorageProxy implements StorageProxyMBean
         }
 
         // starting with 4.0, use the same message id for all replicas
-        long[] messageIds = new long[targets.size()];
+        long[] messageIds = new long[targets.size() - 1];
         Arrays.fill(messageIds, message.id());
 
-        message = message.withForwardingTo(new ForwardToContainer(targets.endpointList(), messageIds));
+        List<InetAddressAndPort> forwardTargets = targets.endpointList().subList(1, targets.endpointList().size());
+        message = message.withForwardingTo(new ForwardToContainer(forwardTargets, messageIds));
         MessagingService.instance().sendWriteWithCallback(message, target, handler, true);
         logger.trace("Sending message to {}@{}", message.id(), target);
     }
