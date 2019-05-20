@@ -231,7 +231,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private void processSmallMessage(SharedBytes bytes, int size, Header header) throws IOException
+    private void processSmallMessage(SharedBytes bytes, int size, Header header)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -622,17 +622,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             dispatch(new ProcessLargeMessage(this));
         }
 
-        private void abort()
-        {
-            if (!isSkipping)
-            {
-                callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(size, received));
-                releaseCapacity(size);
-                releaseBuffers();
-                isSkipping = true;
-            }
-        }
-
         /**
          * Return true if this was the last frame of the large message.
          */
@@ -663,10 +652,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 }
                 finally
                 {
-                    releaseCapacity(size);
-                    releaseBuffers();
+                    doAbort();
                 }
-                isSkipping = true;
             }
 
             if (isSkipping)
@@ -692,10 +679,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             finally
             {
-                releaseCapacity(size);
-                releaseBuffers();
+                doAbort();
             }
-            isSkipping = true;
         }
 
         private Message deserialize()
@@ -725,6 +710,22 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
 
             return null;
+        }
+
+        private void abort()
+        {
+            if (isSkipping)
+                return;
+
+            callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(size, received));
+            doAbort();
+        }
+
+        private void doAbort()
+        {
+            releaseCapacity(size);
+            releaseBuffers();
+            isSkipping = true;
         }
 
         private void releaseBuffers()
