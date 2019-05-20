@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.concurrent.TimeUnit;
@@ -23,13 +22,24 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 
+/**
+ * Callback that {@link org.apache.cassandra.locator.DynamicEndpointSnitch} listens to in order
+ * to update host scores.
+ *
+ * FIXME: rename/specialise, since only used by DES?
+ */
 public class LatencySubscribers
 {
-    private volatile ILatencySubscriber subscribers;
-    private static final AtomicReferenceFieldUpdater<LatencySubscribers, ILatencySubscriber> subscribersUpdater
-        = AtomicReferenceFieldUpdater.newUpdater(LatencySubscribers.class, ILatencySubscriber.class, "subscribers");
+    public interface Subscriber
+    {
+        void receiveTiming(InetAddressAndPort address, long latency, TimeUnit unit);
+    }
 
-    private static ILatencySubscriber merge(ILatencySubscriber a, ILatencySubscriber b)
+    private volatile Subscriber subscribers;
+    private static final AtomicReferenceFieldUpdater<LatencySubscribers, Subscriber> subscribersUpdater
+        = AtomicReferenceFieldUpdater.newUpdater(LatencySubscribers.class, Subscriber.class, "subscribers");
+
+    private static Subscriber merge(Subscriber a, Subscriber b)
     {
         if (a == null) return b;
         if (b == null) return a;
@@ -39,14 +49,14 @@ public class LatencySubscribers
         };
     }
 
-    public void subscribe(ILatencySubscriber subscriber)
+    public void subscribe(Subscriber subscriber)
     {
         subscribersUpdater.accumulateAndGet(this, subscriber, LatencySubscribers::merge);
     }
 
     public void add(InetAddressAndPort address, long latency, TimeUnit unit)
     {
-        ILatencySubscriber subscribers = this.subscribers;
+        Subscriber subscribers = this.subscribers;
         if (subscribers != null)
             subscribers.receiveTiming(address, latency, unit);
     }
@@ -56,12 +66,10 @@ public class LatencySubscribers
      *
      * @param cb      the callback associated with this message -- this lets us know if it's a message type we're interested in
      * @param address the host that replied to the message
-     * @param latency
      */
-    public void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
+    void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
     {
         if (cb.trackLatencyForSnitch())
             add(address, latency, unit);
     }
-
 }

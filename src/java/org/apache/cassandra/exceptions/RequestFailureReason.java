@@ -82,7 +82,7 @@ public enum RequestFailureReason
         if (t instanceof TombstoneOverwhelmingException)
             return READ_TOO_MANY_TOMBSTONES;
 
-        if (t instanceof UnknownColumnException || t instanceof UnknownTableException)
+        if (t instanceof IncompatibleSchemaException)
             return INCOMPATIBLE_SCHEMA;
 
         return UNKNOWN;

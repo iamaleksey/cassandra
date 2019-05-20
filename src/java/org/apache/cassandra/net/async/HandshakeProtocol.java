@@ -33,7 +33,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AcceptVersions;
-import org.apache.cassandra.net.CompactEndpointSerializationHelper;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -95,7 +94,7 @@ public class HandshakeProtocol
     {
         /** Contains the PROTOCOL_MAGIC (int) and the flags (int). */
         private static final int MIN_LENGTH = 8;
-        private static final int MAX_LENGTH = 12 + CompactEndpointSerializationHelper.MAXIMUM_SIZE;
+        private static final int MAX_LENGTH = 12 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
 
         @Deprecated // this is ignored by post40 nodes, i.e. if maxMessagingVersion is set
         final int requestMessagingVersion;
@@ -146,7 +145,7 @@ public class HandshakeProtocol
 
                 if (requestMessagingVersion >= VERSION_40 && acceptVersions.max >= VERSION_40)
                 {
-                    CompactEndpointSerializationHelper.instance.serialize(from, out, requestMessagingVersion);
+                    InetAddressAndPort.serializer.serialize(from, out, requestMessagingVersion);
                     out.writeInt(computeCrc32(buffer, 0, buffer.position()));
                 }
                 buffer.flip();
@@ -186,7 +185,7 @@ public class HandshakeProtocol
 
                 if (requestedMessagingVersion >= VERSION_40 && maxMessagingVersion >= MessagingService.VERSION_40)
                 {
-                    from = CompactEndpointSerializationHelper.instance.deserialize(in, requestedMessagingVersion);
+                    from = InetAddressAndPort.serializer.deserialize(in, requestedMessagingVersion);
 
                     int computed = computeCrc32(nio, start, nio.position());
                     int read = in.readInt();
@@ -329,7 +328,7 @@ public class HandshakeProtocol
      * This message contains:
      *   1) The connection initiator's {@link org.apache.cassandra.net.MessagingService#current_version} (4 bytes).
      *      This indicates the max messaging version supported by this node.
-     *   2) The connection initiator's broadcast address as encoded by {@link org.apache.cassandra.net.CompactEndpointSerializationHelper}.
+     *   2) The connection initiator's broadcast address as encoded by {@link InetAddressAndPort.Serializer}.
      *      This can be either 7 bytes for an IPv4 address, or 19 bytes for an IPv6 one, post40.
      *      This can be either 5 bytes for an IPv4 address, or 17 bytes for an IPv6 one, pre40.
      * <p>
@@ -337,7 +336,7 @@ public class HandshakeProtocol
      */
     static class ConfirmOutboundPre40
     {
-        private static final int MAX_LENGTH = 4 + CompactEndpointSerializationHelper.MAXIMUM_SIZE;
+        private static final int MAX_LENGTH = 4 + InetAddressAndPort.Serializer.MAXIMUM_SIZE;
 
         final int maxMessagingVersion;
         final InetAddressAndPort from;
@@ -355,7 +354,7 @@ public class HandshakeProtocol
             {
                 out.writeInt(maxMessagingVersion);
                 // pre-4.0 nodes should only receive the address, never port, and it's ok to hardcode VERSION_30
-                CompactEndpointSerializationHelper.instance.serialize(from, out, VERSION_30);
+                InetAddressAndPort.serializer.serialize(from, out, VERSION_30);
                 buffer.flip();
                 return GlobalBufferPoolAllocator.wrap(buffer);
             }
@@ -374,7 +373,7 @@ public class HandshakeProtocol
             try
             {
                 int version = input.readInt();
-                InetAddressAndPort address = CompactEndpointSerializationHelper.instance.deserialize(input, version);
+                InetAddressAndPort address = InetAddressAndPort.serializer.deserialize(input, version);
                 in.skipBytes(nio.position() - start);
                 return new ConfirmOutboundPre40(version, address);
             }

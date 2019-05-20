@@ -35,7 +35,7 @@ import org.apache.cassandra.gms.ApplicationState;
 import org.apache.cassandra.gms.EndpointState;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.VersionedValue;
-import org.apache.cassandra.net.ILatencySubscriber;
+import org.apache.cassandra.net.LatencySubscribers;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.utils.FBUtilities;
@@ -44,7 +44,7 @@ import org.apache.cassandra.utils.MBeanWrapper;
 /**
  * A dynamic snitch that sorts endpoints by latency with an adapted phi failure detector
  */
-public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements ILatencySubscriber, DynamicEndpointSnitchMBean
+public class DynamicEndpointSnitch extends AbstractEndpointSnitch implements LatencySubscribers.Subscriber, DynamicEndpointSnitchMBean
 {
     private static final boolean USE_SEVERITY = !Boolean.getBoolean("cassandra.ignore_dynamic_snitch_severity");
 

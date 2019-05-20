@@ -48,7 +48,6 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
-import static org.apache.cassandra.net.MessagingService.ONE_BYTE;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -57,29 +56,296 @@ import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize
 import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
 import static org.apache.cassandra.utils.vint.VIntCoding.skipUnsignedVInt;
 
-/*
- * * @param <T> The type of the message payload.
+/**
+ * Immutable main unit of internode communication - what used to be {@code MessageIn} and {@code MessageOut} fused
+ * in one class.
+ *
+ * @param <T> The type of the message payload.
  */
 public class Message<T>
 {
-    // this is a valid ID for pre40 nodes
-    private static final long NO_ID = 0L;
+    public final Header header;
+    public final T payload;
+
+    private Message(Header header, T payload)
+    {
+        this.header = header;
+        this.payload = payload;
+    }
+
+    /** Sender of the message. */
+    public InetAddressAndPort from()
+    {
+        return header.from;
+    }
+
+    /** Whether the message has crossed the node boundary, that is whether it originated from another node. */
+    public boolean isCrossNode()
+    {
+        return !from().equals(FBUtilities.getBroadcastAddressAndPort());
+    }
+
+    /**
+     * id of the request/message. In 4.0+ can be shared between multiple messages of the same logical request,
+     * whilst in versions above a new id would be allocated for each message sent.
+     */
+    public long id()
+    {
+        return header.id;
+    }
+
+    public Verb verb()
+    {
+        return header.verb;
+    }
+
+    boolean isFailureResponse()
+    {
+        return verb() == Verb.FAILURE_RSP;
+    }
+
+    /**
+     * Creation time of the message. If cross-node timeouts are enabled ({@link DatabaseDescriptor#hasCrossNodeTimeout()},
+     * {@code deserialize()} will use the marshalled value, otherwise will use current time on the deserializing machine.
+     */
+    public long createdAtNanos()
+    {
+        return header.createdAtNanos;
+    }
+
+    public long expiresAtNanos()
+    {
+        return header.expiresAtNanos;
+    }
+
+    /** For how long the message has lived. */
+    public long elapsedSinceCreated(TimeUnit units)
+    {
+        return units.convert(ApproximateTime.nanoTime() - createdAtNanos(), NANOSECONDS);
+    }
+
+    public long creationTimeMillis()
+    {
+        return ApproximateTime.toCurrentTimeMillis(createdAtNanos());
+    }
+
+    /** Whether a failure response should be returned upon failure */
+    boolean callBackOnFailure()
+    {
+        return header.callBackOnFailure();
+    }
+
+    /** See CASSANDRA-14145 */
+    public boolean trackRepairedData()
+    {
+        return header.trackRepairedData();
+    }
+
+    /** Used for cross-DC write optimisation - pick one node in the DC and have it relay the write to its local peers */
+    @Nullable
+    public ForwardingInfo forwardTo()
+    {
+        return header.forwardTo();
+    }
+
+    /** The originator of the request - used when forwarding and will differ from {@link #from()} */
+    @Nullable
+    public InetAddressAndPort respondTo()
+    {
+        return header.respondTo();
+    }
+
+    @Nullable
+    public UUID traceSession()
+    {
+        return header.traceSession();
+    }
+
+    @Nullable
+    public TraceType traceType()
+    {
+        return header.traceType();
+    }
+
+    /*
+     * request/response convenience
+     */
+
+    /**
+     * Make a request {@link Message} with supplied verb and payload. Will fill in remaining fields
+     * automatically.
+     *
+     * If you know that you will need to set some params or flags - prefer using variants of {@code out()}
+     * that allow providing them at point of message constructions, rather than allocating new messages
+     * with those added flags and params. See {@code outWithFlag()}, {@code outWithFlags()}, and {@code outWithParam()}
+     * family.
+     */
+    public static <T> Message<T> out(Verb verb, T payload)
+    {
+        assert !verb.isResponse();
+
+        return outWithParam(nextId(), verb, payload, null, null);
+    }
+
+    public static <T> Message<T> outWithFlag(Verb verb, T payload, MessageFlag flag)
+    {
+        assert !verb.isResponse();
+        return outWithParam(nextId(), verb, 0, payload, flag.addTo(0), null, null);
+    }
+
+    public static <T> Message<T> outWithFlags(Verb verb, T payload, MessageFlag flag1, MessageFlag flag2)
+    {
+        assert !verb.isResponse();
+        return outWithParam(nextId(), verb, 0, payload, flag2.addTo(flag1.addTo(0)), null, null);
+    }
+
+    static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)
+    {
+        return outWithParam(id, verb, 0, payload, paramType, paramValue);
+    }
+
+    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
+    {
+        return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
+    }
+
+    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
+    {
+        if (payload == null)
+            throw new IllegalArgumentException();
+
+        InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
+        long createdAtNanos = ApproximateTime.nanoTime();
+        if (expiresAtNanos == 0)
+            expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
+
+        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
+    }
+
+    public static <T> Message<T> internalResponse(Verb verb, T payload)
+    {
+        assert verb.isResponse();
+        return outWithParam(0, verb, payload, null, null);
+    }
+
+    /** Builds a response Message with provided payload, and all the right fields inferred from request Message */
+    public <T> Message<T> responseWith(T payload)
+    {
+        return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null);
+    }
+
+    /** Builds a response Message with no payload, and all the right fields inferred from request Message */
+    public Message<NoPayload> emptyResponse()
+    {
+        return responseWith(NoPayload.noPayload);
+    }
+
+    /** Builds a failure response Message with an explicit reason, and fields inferred from request Message */
+    public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
+    {
+        return failureResponse(id(), expiresAtNanos(), reason);
+    }
+
+    static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
+    {
+        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
+    }
+
+    Message<T> withCallBackOnFailure()
+    {
+        return new Message<>(header.withFlag(MessageFlag.CALL_BACK_ON_FAILURE), payload);
+    }
+
+    public Message<T> withForwardTo(ForwardingInfo peers)
+    {
+        return new Message<>(header.withParam(ParamType.FORWARD_TO, peers), payload);
+    }
+
+    private static final EnumMap<ParamType, Object> NO_PARAMS = new EnumMap<>(ParamType.class);
+
+    private static Map<ParamType, Object> buildParams(ParamType type, Object value)
+    {
+        Map<ParamType, Object> params = NO_PARAMS;
+        if (Tracing.isTracing())
+            params = Tracing.instance.addTraceHeaders(new EnumMap<>(ParamType.class));
+
+        if (type != null)
+        {
+            if (params.isEmpty())
+                params = new EnumMap<>(ParamType.class);
+            params.put(type, value);
+        }
+
+        return params;
+    }
+
+    private static Map<ParamType, Object> addParam(Map<ParamType, Object> params, ParamType type, Object value)
+    {
+        if (type == null)
+            return params;
+
+        params = new EnumMap<>(params);
+        params.put(type, value);
+        return params;
+    }
+
+    /*
+     * id generation
+     */
+
+    private static final long NO_ID = 0L; // this is a valid ID for pre40 nodes
 
     private static final AtomicInteger nextId = new AtomicInteger(0);
 
-    /**
-     * The amount of prefix data, in bytes, before the serialized message.
-     */
-    private static final int PRE_40_MESSAGE_PREFIX_SIZE = 12;
-    private static final EnumMap<ParamType, Object> NO_PARAMS = new EnumMap<>(ParamType.class);
+    private static long nextId()
+    {
+        long id;
+        do
+        {
+            id = nextId.incrementAndGet();
+        }
+        while (id == NO_ID);
+
+        return id;
+    }
 
     /**
-     * we preface every message with this number so the recipient can validate the sender is sane
+     * WARNING: this is inaccurate for messages from pre40 nodes, which can use 0 as an id (but will do so rarely)
      */
+    @VisibleForTesting
+    boolean hasId()
+    {
+        return id() != NO_ID;
+    }
+
+    /** we preface every message with this number so the recipient can validate the sender is sane */
     public static final int PROTOCOL_MAGIC = 0xCA552DFA;
 
-    public static final Serializer serializer = new Serializer();
+    public static void validateLegacyProtocolMagic(int magic) throws InvalidLegacyProtocolMagic
+    {
+        if (magic != PROTOCOL_MAGIC)
+            throw new InvalidLegacyProtocolMagic(magic);
+    }
 
+    public static final class InvalidLegacyProtocolMagic extends IOException
+    {
+        public final int read;
+        private InvalidLegacyProtocolMagic(int read)
+        {
+            super(String.format("Read %d, Expected %d", read, PROTOCOL_MAGIC));
+            this.read = read;
+        }
+    }
+
+    public String toString()
+    {
+        return "(from:" + from() + ", type:" + verb().stage + " verb:" + verb() + ')';
+    }
+
+    /**
+     * Split into a separate object to allow partial message deserialization without wasting work and allocation
+     * afterwards, if the entire message is necessary and available.
+     */
     public static class Header
     {
         public final long id;
@@ -103,7 +369,7 @@ public class Message<T>
 
         Header withFlag(MessageFlag flag)
         {
-            return new Header(id, verb, from, createdAtNanos, expiresAtNanos, addFlag(flags, flag), params);
+            return new Header(id, verb, from, createdAtNanos, expiresAtNanos, flag.addTo(flags), params);
         }
 
         Header withParam(ParamType type, Object value)
@@ -111,49 +377,26 @@ public class Message<T>
             return new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, addParam(params, type, value));
         }
 
-        /*
-         * Flags
-         */
-
         boolean callBackOnFailure()
         {
-            return containsFlag(MessageFlag.CALL_BACK_ON_FAILURE);
+            return MessageFlag.CALL_BACK_ON_FAILURE.isIn(flags);
         }
 
         boolean trackRepairedData()
         {
-            return containsFlag(MessageFlag.TRACK_REPAIRED_DATA);
-        }
-
-        private boolean containsFlag(MessageFlag flag)
-        {
-            return containsFlag(flags, flag);
-        }
-
-        private static boolean containsFlag(int flags, MessageFlag flag)
-        {
-            return (flags & (1 << flag.ordinal())) != 0;
-        }
-
-        private static int addFlag(int flags, MessageFlag flag)
-        {
-            return flags | (1 << flag.ordinal());
-        }
-
-        /*
-         * Params
-         */
-
-        @Nullable
-        ForwardToContainer forwardTo()
-        {
-            return (ForwardToContainer) params.get(ParamType.FORWARD_TO);
+            return MessageFlag.TRACK_REPAIRED_DATA.isIn(flags);
         }
 
         @Nullable
-        InetAddressAndPort forwardedFrom()
+        ForwardingInfo forwardTo()
         {
-            return (InetAddressAndPort) params.get(ParamType.FORWARDED_FROM);
+            return (ForwardingInfo) params.get(ParamType.FORWARD_TO);
+        }
+
+        @Nullable
+        InetAddressAndPort respondTo()
+        {
+            return (InetAddressAndPort) params.get(ParamType.RESPOND_TO);
         }
 
         @Nullable
@@ -167,40 +410,6 @@ public class Message<T>
         {
             return (TraceType) params.getOrDefault(ParamType.TRACE_TYPE, TraceType.QUERY);
         }
-    }
-
-    public final Header header;
-    public final T payload;
-
-    private Message(Header header, T payload)
-    {
-        this.header = header;
-        this.payload = payload;
-    }
-
-    public InetAddressAndPort from()
-    {
-        return header.from;
-    }
-
-    public long id()
-    {
-        return header.id;
-    }
-
-    public long createdAtNanos()
-    {
-        return header.createdAtNanos;
-    }
-
-    public long expiresAtNanos()
-    {
-        return header.expiresAtNanos;
-    }
-
-    public Verb verb()
-    {
-        return header.verb;
     }
 
     public static class Builder<T>
@@ -234,7 +443,7 @@ public class Message<T>
 
         public Builder<T> withFlag(MessageFlag flag)
         {
-            flags = Header.addFlag(flags, flag);
+            flags = flag.addTo(flags);
             return this;
         }
 
@@ -325,216 +534,7 @@ public class Message<T>
                                .withPayload(payload);
     }
 
-    public static <T> Message<T> out(Verb verb, T payload)
-    {
-        assert !verb.isResponse();
-
-        return outWithParam(nextId(), verb, payload, null, null);
-    }
-
-    public static <T> Message<T> outWithFlag(Verb verb, T payload, MessageFlag flag)
-    {
-        assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(0, flag), null, null);
-    }
-
-    public static <T> Message<T> outWithFlags(Verb verb, T payload, MessageFlag flag1, MessageFlag flag2)
-    {
-        assert !verb.isResponse();
-        return outWithParam(nextId(), verb, 0, payload, Header.addFlag(Header.addFlag(0, flag1), flag2), null, null);
-    }
-
-    public static <T> Message<T> outWithParam(long id, Verb verb, T payload, ParamType paramType, Object paramValue)
-    {
-        return outWithParam(id, verb, 0, payload, paramType, paramValue);
-    }
-
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, ParamType paramType, Object paramValue)
-    {
-        return outWithParam(id, verb, expiresAtNanos, payload, 0, paramType, paramValue);
-    }
-
-    private static <T> Message<T> outWithParam(long id, Verb verb, long expiresAtNanos, T payload, int flags, ParamType paramType, Object paramValue)
-    {
-        if (payload == null)
-            throw new IllegalArgumentException();
-
-        InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
-        long createdAtNanos = ApproximateTime.nanoTime();
-        if (expiresAtNanos == 0)
-            expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
-
-        return new Message<>(new Header(id, verb, from, createdAtNanos, expiresAtNanos, flags, buildParams(paramType, paramValue)), payload);
-    }
-
-    static Message<RequestFailureReason> failureResponse(long id, long expiresAtNanos, RequestFailureReason reason)
-    {
-        return outWithParam(id, Verb.FAILURE_RSP, expiresAtNanos, reason, null, null);
-    }
-
-    public static <T> Message<T> internalResponse(Verb verb, T payload)
-    {
-        assert verb.isResponse();
-        return outWithParam(0, verb, payload, null, null);
-    }
-
-    public <T> Message<T> responseWith(T payload)
-    {
-        return outWithParam(id(), verb().responseVerb, expiresAtNanos(), payload, null, null);
-    }
-
-    public Message<NoPayload> emptyResponse()
-    {
-        return responseWith(NoPayload.noPayload);
-    }
-
-    public Message<RequestFailureReason> failureResponse(RequestFailureReason reason)
-    {
-        return failureResponse(id(), expiresAtNanos(), reason);
-    }
-
-    private static Map<ParamType, Object> buildParams(ParamType type, Object value)
-    {
-        Map<ParamType, Object> params = NO_PARAMS;
-        if (Tracing.isTracing())
-            params = Tracing.instance.addTraceHeaders(new EnumMap<>(ParamType.class));
-
-        if (type != null)
-        {
-            if (params.isEmpty())
-                params = new EnumMap<>(ParamType.class);
-            params.put(type, value);
-        }
-
-        return params;
-    }
-
-    private static Map<ParamType, Object> addParam(Map<ParamType, Object> params, ParamType type, Object value)
-    {
-        if (type == null)
-            return params;
-
-        params = new EnumMap<>(params);
-        params.put(type, value);
-        return params;
-    }
-
-    Message<T> withCallBackOnFailure()
-    {
-        return new Message<>(header.withFlag(MessageFlag.CALL_BACK_ON_FAILURE), payload);
-    }
-
-    public Message<T> withForwardingTo(ForwardToContainer peers)
-    {
-        return new Message<>(header.withParam(ParamType.FORWARD_TO, peers), payload);
-    }
-
-    private static long nextId()
-    {
-        long id;
-        do
-        {
-            id = nextId.incrementAndGet();
-        }
-        while (id == NO_ID);
-
-        return id;
-    }
-
-    /**
-     * For how long the message has lived.
-     */
-    public long elapsedSinceCreated(TimeUnit units)
-    {
-        return units.convert(ApproximateTime.nanoTime() - createdAtNanos(), NANOSECONDS);
-    }
-
-    public long creationTimeMillis()
-    {
-        return ApproximateTime.toCurrentTimeMillis(createdAtNanos());
-    }
-
-    /**
-     * Whether the message has crossed the node boundary, that is whether it originated from another node.
-     *
-     */
-    public boolean isCrossNode()
-    {
-        return !from().equals(FBUtilities.getBroadcastAddressAndPort());
-    }
-
-    boolean isFailureResponse()
-    {
-        return verb() == Verb.FAILURE_RSP;
-    }
-
-    /*
-     * Flags
-     */
-
-    boolean callBackOnFailure()
-    {
-        return header.callBackOnFailure();
-    }
-
-    public boolean trackRepairedData()
-    {
-        return header.trackRepairedData();
-    }
-
-    /*
-     * Params
-     */
-
-    @Nullable
-    public ForwardToContainer forwardTo()
-    {
-        return header.forwardTo();
-    }
-
-    @Nullable
-    public InetAddressAndPort forwardedFrom()
-    {
-        return header.forwardedFrom();
-    }
-
-    @Nullable
-    public UUID traceSession()
-    {
-        return header.traceSession();
-    }
-
-    @Nullable
-    public TraceType traceType()
-    {
-        return header.traceType();
-    }
-
-    public long getSlowQueryTimeout(TimeUnit units)
-    {
-        return DatabaseDescriptor.getSlowQueryTimeout(units);
-    }
-
-    public String toString()
-    {
-        return "(from:" + from() + ", type:" + verb().stage + " verb:" + verb() + ')';
-    }
-
-    public static final class InvalidLegacyProtocolMagic extends IOException
-    {
-        public final int read;
-        private InvalidLegacyProtocolMagic(int read)
-        {
-            super(String.format("Read %d, Expected %d", read, PROTOCOL_MAGIC));
-            this.read = read;
-        }
-    }
-
-    public static void validateLegacyProtocolMagic(int magic) throws InvalidLegacyProtocolMagic
-    {
-        if (magic != PROTOCOL_MAGIC)
-            throw new InvalidLegacyProtocolMagic(magic);
-    }
+    public static final Serializer serializer = new Serializer();
 
     /**
      * Each message contains a header with several fixed fields, an optional key-value params section, and then
@@ -632,12 +632,22 @@ public class Message<T>
             return size;
         }
 
+        /**
+         * Partially deserialize the message - by only extracting the header and leaving the payload alone.
+         *
+         * To get the rest of the message without repeating the work done here, use {@link #deserialize(DataInputPlus, Header, int)}
+         * method.
+         *
+         * It's assumed that the provided buffer contains all the bytes necessary to deserialize the header fully.
+         */
         public Header extractHeader(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
         {
-            return version >= VERSION_40 ? extractHeaderPost40(buf, from, currentTimeNanos, version) : extractHeaderPre40(buf, currentTimeNanos, version);
+            return version >= VERSION_40
+                 ? extractHeaderPost40(buf, from, currentTimeNanos, version)
+                 : extractHeaderPre40(buf, currentTimeNanos, version);
         }
 
-        long getExpiresAtNanos(long createdAtNanos, long currentTimeNanos, long expirationPeriodNanos)
+        private static long getExpiresAtNanos(long createdAtNanos, long currentTimeNanos, long expirationPeriodNanos)
         {
             if (!DatabaseDescriptor.hasCrossNodeTimeout() || createdAtNanos > currentTimeNanos)
                 createdAtNanos = currentTimeNanos;
@@ -705,7 +715,7 @@ public class Message<T>
             index += computeUnsignedVIntSize(id);
 
             int createdAtMillis = buf.getInt(index);
-            index += CREATION_TIME_SIZE;
+            index += sizeof(createdAtMillis);
 
             long expiresInMillis = getUnsignedVInt(buf, index);
             index += computeUnsignedVIntSize(expiresInMillis);
@@ -808,7 +818,7 @@ public class Message<T>
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
             out.writeInt((int) ApproximateTime.toCurrentTimeMillis(header.createdAtNanos));
-            CompactEndpointSerializationHelper.instance.serialize(header.from, out, version);
+            InetAddressAndPort.serializer.serialize(header.from, out, version);
             out.writeInt(header.verb.toPre40Verb().id);
             serializeParams(addFlagsToLegacyParams(header.params, header.flags), out, version);
         }
@@ -820,12 +830,14 @@ public class Message<T>
             long currentTimeNanos = ApproximateTime.nanoTime();
             AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
             long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
-            InetAddressAndPort from = CompactEndpointSerializationHelper.instance.deserialize(in, version);
+            InetAddressAndPort from = InetAddressAndPort.serializer.deserialize(in, version);
             Verb verb = Verb.fromId(in.readInt());
             Map<ParamType, Object> params = deserializeParams(in, version);
             int flags = removeFlagsFromLegacyParams(params);
             return new Header(id, verb, from, creationTimeNanos, verb.expiresAtNanos(creationTimeNanos), flags, params);
         }
+
+        private static final int PRE_40_MESSAGE_PREFIX_SIZE = 12; // protocol magic + id + createdAt
 
         private void skipHeaderPre40(DataInputPlus in) throws IOException
         {
@@ -839,7 +851,7 @@ public class Message<T>
         {
             long size = 0;
             size += PRE_40_MESSAGE_PREFIX_SIZE;
-            size += CompactEndpointSerializationHelper.instance.serializedSize(header.from, version);
+            size += InetAddressAndPort.serializer.serializedSize(header.from, version);
             size += sizeof(header.verb.id);
             size += serializedParamsSize(addFlagsToLegacyParams(header.params, header.flags), version);
             return Ints.checkedCast(size);
@@ -859,7 +871,7 @@ public class Message<T>
             int createdAtMillis = buf.getInt(index);
             index += 4;
 
-            InetAddressAndPort from = CompactEndpointSerializationHelper.instance.extract(buf, index, version);
+            InetAddressAndPort from = InetAddressAndPort.serializer.extract(buf, index);
             index += 1 + buf.get(index);
 
             Verb verb = Verb.fromId(buf.getInt(index));
@@ -918,8 +930,8 @@ public class Message<T>
             Message<T> message = new Message<>(header, payload);
 
             return header.params.containsKey(ParamType.FAILURE_RESPONSE)
-                   ? (Message<T>) toPost40FailureResponse(message)
-                   : message;
+                 ? (Message<T>) toPost40FailureResponse(message)
+                 : message;
         }
 
         private <T> T deserializePayloadPre40(DataInputPlus in, int version, IVersionedAsymmetricSerializer<?, T> serializer, int payloadSize) throws IOException
@@ -989,7 +1001,7 @@ public class Message<T>
             Map<ParamType, Object> params = new EnumMap<>(ParamType.class);
             params.putAll(post40.header.params);
 
-            params.put(ParamType.FAILURE_RESPONSE, ONE_BYTE);
+            params.put(ParamType.FAILURE_RESPONSE, LegacyFlag.instance);
             params.put(ParamType.FAILURE_REASON, post40.payload);
 
             Header header = new Header(post40.id(), post40.verb().toPre40Verb(), post40.from(), post40.createdAtNanos(), post40.expiresAtNanos(), 0, params);
@@ -1012,6 +1024,36 @@ public class Message<T>
         }
 
         /*
+         * created at + cross-node
+         */
+
+        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START  = 0xFFFFFFFFL - MINUTES.toMillis(15L);
+        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END    =               MINUTES.toMillis(15L);
+
+        private static long calculateCreationTimeNanos(int messageTimestampMillis, AlmostSameTime timeSnapshot, long currentTimeNanos)
+        {
+            long currentTimeMillis = timeSnapshot.toCurrentTimeMillis(currentTimeNanos);
+            // Reconstruct the message construction time sent by the remote host (we sent only the lower 4 bytes, assuming the
+            // higher 4 bytes wouldn't change between the sender and receiver)
+            long highBits = currentTimeMillis & 0xFFFFFFFF00000000L;
+
+            long sentLowBits = messageTimestampMillis & 0x00000000FFFFFFFFL;
+            long currentLowBits =   currentTimeMillis & 0x00000000FFFFFFFFL;
+
+            // if our sent bits occur within a grace period of a wrap around event,
+            // and our current bits are no more than the same grace period after a wrap around event,
+            // assume a wrap around has occurred, and deduct one highBit
+            if (      sentLowBits > TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START
+                      && currentLowBits < TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END)
+            {
+                highBits -= 0x0000000100000000L;
+            }
+
+            long sentTimeMillis = (highBits | sentLowBits);
+            return timeSnapshot.toNanoTime(sentTimeMillis);
+        }
+
+        /*
          * param ser/deser
          */
 
@@ -1023,11 +1065,11 @@ public class Message<T>
             Map<ParamType, Object> extended = new EnumMap<>(ParamType.class);
             extended.putAll(params);
 
-            if (Header.containsFlag(flags, MessageFlag.CALL_BACK_ON_FAILURE))
-                extended.put(ParamType.FAILURE_CALLBACK, ONE_BYTE);
+            if (MessageFlag.CALL_BACK_ON_FAILURE.isIn(flags))
+                extended.put(ParamType.FAILURE_CALLBACK, LegacyFlag.instance);
 
-            if (Header.containsFlag(flags, MessageFlag.TRACK_REPAIRED_DATA))
-                extended.put(ParamType.TRACK_REPAIRED_DATA, ONE_BYTE);
+            if (MessageFlag.TRACK_REPAIRED_DATA.isIn(flags))
+                extended.put(ParamType.TRACK_REPAIRED_DATA, LegacyFlag.instance);
 
             return extended;
         }
@@ -1037,10 +1079,10 @@ public class Message<T>
             int flags = 0;
 
             if (null != params.remove(ParamType.FAILURE_CALLBACK))
-                flags = Header.addFlag(flags, MessageFlag.CALL_BACK_ON_FAILURE);
+                flags = MessageFlag.CALL_BACK_ON_FAILURE.addTo(flags);
 
             if (null != params.remove(ParamType.TRACK_REPAIRED_DATA))
-                flags = Header.addFlag(flags, MessageFlag.TRACK_REPAIRED_DATA);
+                flags = MessageFlag.TRACK_REPAIRED_DATA.addTo(flags);
 
             return flags;
         }
@@ -1222,10 +1264,6 @@ public class Message<T>
             return index - readerIndex;
         }
 
-        /*
-         * helpers
-         */
-
         private <T> int payloadSize(Message<T> message, int version)
         {
             long payloadSize = message.payload != null && message.payload != NoPayload.noPayload
@@ -1233,37 +1271,15 @@ public class Message<T>
                              : 0;
             return Ints.checkedCast(payloadSize);
         }
-
-        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START  = 0xFFFFFFFFL - MINUTES.toMillis(15L);
-        private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END    =               MINUTES.toMillis(15L);
-        long calculateCreationTimeNanos(int messageTimestampMillis, AlmostSameTime timeSnapshot, long currentTimeNanos)
-        {
-            long currentTimeMillis = timeSnapshot.toCurrentTimeMillis(currentTimeNanos);
-            // Reconstruct the message construction time sent by the remote host (we sent only the lower 4 bytes, assuming the
-            // higher 4 bytes wouldn't change between the sender and receiver)
-            long highBits = currentTimeMillis & 0xFFFFFFFF00000000L;
-
-            long sentLowBits = messageTimestampMillis & 0x00000000FFFFFFFFL;
-            long currentLowBits =   currentTimeMillis & 0x00000000FFFFFFFFL;
-
-            // if our sent bits occur within a grace period of a wrap around event,
-            // and our current bits are no more than the same grace period after a wrap around event,
-            // assume a wrap around has occurred, and deduct one highBit
-            if (      sentLowBits > TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START
-                && currentLowBits < TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END)
-            {
-                highBits -= 0x0000000100000000L;
-            }
-
-            long sentTimeMillis = (highBits | sentLowBits);
-            return timeSnapshot.toNanoTime(sentTimeMillis);
-        }
     }
 
     private int serializedSize30;
     private int serializedSize3014;
     private int serializedSize40;
 
+    /**
+     * Serialized size of the entire message, for the provided messaging version. Caches the calculated value.
+     */
     public int serializedSize(int version)
     {
         switch (version)
@@ -1308,13 +1324,6 @@ public class Message<T>
             default:
                 throw new IllegalStateException();
         }
-    }
-
-    // WARNING: this is inaccurate for messages from pre40 nodes, who can use 0 as an id (but will do so rarely)
-    @VisibleForTesting
-    boolean hasId()
-    {
-        return id() != NO_ID;
     }
 
     public static class OversizedMessageException extends RuntimeException

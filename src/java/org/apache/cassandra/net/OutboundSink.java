@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
@@ -24,6 +23,15 @@ import java.util.function.BiPredicate;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.async.ConnectionType;
 
+/**
+ * A message sink that all outbound messages go through.
+ *
+ * Default sink {@link Sink} used by {@link MessagingService} is MessagingService#doSend(), which proceeds to
+ * send messages over the network, but it can be overridden to filter out certain messages, record the fact
+ * of attempted delivery, or delay they delivery.
+ *
+ * This facility is most useful for test code.
+ */
 public class OutboundSink
 {
     public interface Sink
@@ -35,6 +43,7 @@ public class OutboundSink
     {
         final BiPredicate<Message<?>, InetAddressAndPort> condition;
         final Sink next;
+
         private Filtered(BiPredicate<Message<?>, InetAddressAndPort> condition, Sink next)
         {
             this.condition = condition;
@@ -48,10 +57,9 @@ public class OutboundSink
         }
     }
 
-    private static final AtomicReferenceFieldUpdater<OutboundSink, Sink> sinkUpdater
-    = AtomicReferenceFieldUpdater.newUpdater(OutboundSink.class, Sink.class, "sink");
-
     private volatile Sink sink;
+    private static final AtomicReferenceFieldUpdater<OutboundSink, Sink> sinkUpdater
+        = AtomicReferenceFieldUpdater.newUpdater(OutboundSink.class, Sink.class, "sink");
 
     OutboundSink(Sink sink)
     {

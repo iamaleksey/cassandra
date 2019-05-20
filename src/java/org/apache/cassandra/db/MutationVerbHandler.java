@@ -40,12 +40,12 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
     public void doVerb(Message<Mutation> message)
     {
         // Check if there were any forwarding headers in this message
-        InetAddressAndPort from = message.forwardedFrom();
+        InetAddressAndPort from = message.respondTo();
         InetAddressAndPort respondToAddress;
         if (from == null)
         {
             respondToAddress = message.from();
-            ForwardToContainer forwardTo = message.forwardTo();
+            ForwardingInfo forwardTo = message.forwardTo();
             if (forwardTo != null) forwardToLocalNodes(message, forwardTo);
         }
         else
@@ -66,23 +66,21 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
         }
     }
 
-    private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardToContainer forwardTo)
+    private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)
     {
         Message.Builder<Mutation> builder =
             Message.builder(originalMessage)
-                   .withParam(ParamType.FORWARDED_FROM, originalMessage.from())
+                   .withParam(ParamType.RESPOND_TO, originalMessage.from())
                    .withoutParam(ParamType.FORWARD_TO);
 
         boolean useSameMessageID = forwardTo.useSameMessageID();
         // reuse the same Message if all ids are identical (as they will be for 4.0+ node originated messages)
         Message<Mutation> message = useSameMessageID ? builder.build() : null;
 
-        for (int i = 0; i < forwardTo.targets.size(); i++)
+        forwardTo.forEach((id, target) ->
         {
-            long messageId = forwardTo.messageIds[i];
-            InetAddressAndPort target = forwardTo.targets.get(i);
             Tracing.trace("Enqueuing forwarded write to {}", target);
-            MessagingService.instance().send(useSameMessageID ? message : builder.withId(messageId).build(), target);
-        }
+            MessagingService.instance().send(useSameMessageID ? message : builder.withId(id).build(), target);
+        });
     }
 }

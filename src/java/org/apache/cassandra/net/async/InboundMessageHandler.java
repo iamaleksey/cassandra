@@ -38,13 +38,14 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.EventLoop;
 import org.apache.cassandra.concurrent.ExecutorLocals;
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.concurrent.StageManager;
-import org.apache.cassandra.exceptions.UnknownColumnException;
-import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.exceptions.IncompatibleSchemaException;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Message.Header;
+import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.net.async.FrameDecoder.Frame;
 import org.apache.cassandra.net.async.FrameDecoder.FrameProcessor;
 import org.apache.cassandra.net.async.FrameDecoder.IntactFrame;
@@ -52,7 +53,6 @@ import org.apache.cassandra.net.async.FrameDecoder.CorruptFrame;
 import org.apache.cassandra.net.async.ResourceLimits.Limit;
 import org.apache.cassandra.tracing.TraceState;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
 
@@ -60,23 +60,95 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.async.Crc.*;
+import static org.apache.cassandra.utils.ApproximateTime.*;
 
 /**
- * Parses incoming messages as per the 3.0/3.11/4.0 internode messaging protocols.
+ * Core logic for handling inbound message deserialization and execution (in tandem with {@link FrameDecoder}).
+ *
+ * Handles small and large messages, corruption, flow control, dispatch of message processing onto an appropriate
+ * thread pool.
+ *
+ * # Interaction with {@link FrameDecoder}
+ *
+ * {@link InboundMessageHandler} sits on top of a {@link FrameDecoder} in the Netty pipeline, and is tightly
+ * coupled with it.
+ *
+ * {@link FrameDecoder} decodes inbound frames and relies on a supplied {@link FrameProcessor} to act on them.
+ * {@link InboundMessageHandler} provides two implementations of that interface:
+ *  - {@link #process(Frame)} is the default, primary processor, and the primary entry point to this class
+ *  - {@link UpToOneMessageFrameProcessor}, supplied to the decoder when the handler is reactivated after being
+ *    put in waiting mode due to lack of acquirable reserve memory capacity permits
+ *
+ * Return value of {@link FrameProcessor#process(Frame)} determines whether the decoder should keep processing
+ * frames (if {@code true} is returned) or stop until explicitly reactivated (if {@code false} is). To reactivate
+ * the decoder (once notified of available resource permits), {@link FrameDecoder#reactivate()} is invoked.
+ *
+ * # Frames
+ *
+ * {@link InboundMessageHandler} operates on frames of messages, and there are several kinds of them:
+ *  1. {@link IntactFrame} that are contained. As names suggest, these contain one or multiple fully contained
+ *     messages believed to be uncorrupted. Guaranteed to not contain an part of an incomplete message.
+ *     See {@link #processFrameOfContainedMessages(ShareableBytes, Limit, Limit)}.
+ *  2. {@link IntactFrame} that are NOT contained. These are uncorrupted parts of a large message split over multiple
+ *     parts due to their size. Can represent first or subsequent frame of a large message.
+ *     See {@link #processFirstFrameOfLargeMessage(IntactFrame, Limit, Limit)} and
+ *     {@link #processSubsequentFrameOfLargeMessage(Frame)}.
+ *  3. {@link CorruptFrame} with corrupt header. These are unrecoverable, and force a connection to be dropped.
+ *  4. {@link CorruptFrame} with a valid header, but corrupt payload. These can be either contained or uncontained.
+ *     - contained frames with corrupt payload can be gracefully dropped without dropping the connection
+ *     - uncontained frames with corrupt payload can be gracefully dropped unless they represent the first
+ *       frame of a new large message, as in that case we don't know how many bytes to skip
+ *     See {@link #processCorruptFrame(CorruptFrame)}.
+ *
+ *  Fundamental frame invariants:
+ *  1. A contained frame can only have fully-encapsulated messages - 1 to n, that don't cross frame boundaries
+ *  2. An uncontained frame can hold a part of one message only. It can NOT, say, contain end of one large message
+ *     and a beginning of another one. All the bytes in an uncontained frame always belong to a single message.
+ *
+ * # Small vs large messages
+ *
+ * A single handler is equipped to process both small and large messages, potentially interleaved, but the logic
+ * differs depending on size. Small messages are deserialized in place, and then handed off to an appropriate
+ * thread pool for processing. Large messages accumulate frames until completion of a message, then hand off
+ * the untouched frames to the correct thread pool for the verb to be deserialized there and immediately processed.
+ *
+ * See {@link LargeMessage} for details of the large-message accumulating state-machine, and {@link ProcessMessage}
+ * and its inheritors for the differences in execution.
+ *
+ * # Flow control (backpressure)
+ *
+ * To prevent nodes from overwhelming and bringing each other to the knees with more inbound messages that
+ * can be processed in a timely manner, {@link InboundMessageHandler} implements a strict flow control policy.
+ *
+ * Before we attempt to process a message fully, we first infer its size from the stream. Then we attempt to
+ * acquire memory permits for a message of that size. If we succeed, then we move on actually process the message.
+ * If we fail, the frame decoder deactivates until sufficient permits are released for the message to be processed
+ * and the handler is activated again. Permits are released back once the message has been fully processed -
+ * after the verb handler has been invoked - on the {@link Stage} for the {@link Verb} of the message.
+ *
+ * Every connection has an exclusive number of permits allocated to it (by default 4MiB). In addition to it,
+ * there is a per-endpoint reserve capacity and a global reserve capacity {@link Limit}, shared between all
+ * connections from the same host and all connections, respectively. So long as long as the handler stays within
+ * its exclusive limit, it doesn't need to tap into reserve capacity.
+ *
+ * If tapping into reserve capacity is necessary, but the handler fails to acquire capacity from either
+ * endpoint of global reserve (and it needs to acquire from both), the handler and its frame decoder become
+ * inactive and register with a {@link WaitQueue} of the appropriate type, depending on which of the reserves
+ * couldn't be tapped into. Once enough messages have finished processing and had their permits released back
+ * to the reserves, {@link WaitQueue} will reactivate the sleeping handlers and they'll resume processing frames.
+ *
+ * The reason we 'split' reserve capacity into two limits - endpoing and global - is to guarantee liveness, and
+ * prevent single endpoint's connections from taking over the whole reserve, starving other connections.
+ *
+ * One permit per byte of serialized message gets acquired. When inflated on-heap, each message will occupy more
+ * than that, necessarily, but despite wide variance, it's a good enough proxy that correlates with on-heap footprint.
  */
-public class InboundMessageHandler extends ChannelInboundHandlerAdapter
+public class InboundMessageHandler extends ChannelInboundHandlerAdapter implements FrameProcessor
 {
-    public interface OnHandlerClosed
-    {
-        void call(InboundMessageHandler handler);
-    }
-
     private static final Logger logger = LoggerFactory.getLogger(InboundMessageHandler.class);
     private static final NoSpamLogger noSpamLogger = NoSpamLogger.getLogger(logger, 1L, TimeUnit.SECONDS);
 
     private static final Message.Serializer serializer = Message.serializer;
-
-    private boolean isClosed;
 
     private final FrameDecoder decoder;
 
@@ -90,7 +162,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     private LargeMessage largeMessage;
 
     private final long queueCapacity;
-    @SuppressWarnings("FieldMayBeFinal")
     volatile long queueSize = 0L;
     private static final AtomicLongFieldUpdater<InboundMessageHandler> queueSizeUpdater =
         AtomicLongFieldUpdater.newUpdater(InboundMessageHandler.class, "queueSize");
@@ -108,12 +179,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     // wait queue handle, non-null if we overrun endpoint or global capacity and request to be resumed once it's released
     private WaitQueue.Ticket ticket = null;
 
-    /*
-     * Counters
-     */
     long corruptFramesRecovered, corruptFramesUnrecovered;
     long receivedCount, receivedBytes;
     long throttledCount, throttledNanos;
+
+    private boolean isClosed;
 
     InboundMessageHandler(FrameDecoder decoder,
 
@@ -155,18 +225,25 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
 
     @Override
-    public void handlerAdded(ChannelHandlerContext ctx)
-    {
-        decoder.activate(this::processFrame);
-    }
-
-    @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg)
     {
+        /*
+         * InboundMessageHandler works in tandem with FrameDecoder to implement flow control
+         * and work stashing optimally. We rely on FrameDecoder to invoke the provided
+         * FrameProcessor rather than on the pipeline and invocations of channelRead().
+         * process(Frame) is the primary entry point for this class.
+         */
         throw new IllegalStateException("InboundMessageHandler doesn't expect channelRead() to be invoked");
     }
 
-    private boolean processFrame(Frame frame) throws IOException
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx)
+    {
+        decoder.activate(this); // the frame decoder starts inactive until explicitly activated by the added inbound message handler
+    }
+
+    @Override
+    public boolean process(Frame frame) throws IOException
     {
         if (frame instanceof IntactFrame)
             return processIntactFrame((IntactFrame) frame, endpointReserveCapacity, globalReserveCapacity);
@@ -186,28 +263,27 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     }
 
     /*
-     * Handling of contained messages (not crossing boundaries of a frame) - both small and 'large', for the inbound
-     * definition of 'large' (breaching the size threshold for what we are willing to process on event-loop vs.
+     * Handle contained messages (not crossing boundaries of the frame) - both small and large, for the inbound
+     * definition of large (breaching the size threshold for what we are willing to process on event-loop vs.
      * off event-loop).
      */
-
-    private boolean processFrameOfContainedMessages(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
+    private boolean processFrameOfContainedMessages(ShareableBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
     {
-        while (bytes.isReadable())
+        while (bytes.hasRemaining())
             if (!processOneContainedMessage(bytes, endpointReserve, globalReserve))
                 return false;
         return true;
     }
 
-    private boolean processOneContainedMessage(SharedBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
+    private boolean processOneContainedMessage(ShareableBytes bytes, Limit endpointReserve, Limit globalReserve) throws IOException
     {
         ByteBuffer buf = bytes.get();
 
-        long currentTimeNanos = ApproximateTime.nanoTime();
+        long currentTimeNanos = nanoTime();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
-        if (ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+        if (isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
         {
             callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
             receivedCount++;
@@ -231,7 +307,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
-    private void processSmallMessage(SharedBytes bytes, int size, Header header)
+    private void processSmallMessage(ShareableBytes bytes, int size, Header header)
     {
         ByteBuffer buf = bytes.get();
         final int begin = buf.position();
@@ -242,11 +318,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         try (DataInputBuffer in = new DataInputBuffer(buf, false))
         {
             Message<?> m = serializer.deserialize(in, header, version);
-            if (in.available() > 0)
-                throw new InvalidSerializedSizeException(size, size - in.available());
+            if (in.available() > 0) // bytes remaining after deser: deserializer is busted
+                throw new InvalidSerializedSizeException(header.verb, size, size - in.available());
             message = m;
         }
-        catch (UnknownTableException | UnknownColumnException e)
+        catch (IncompatibleSchemaException e)
         {
             callbacks.onFailedDeserialize(size, header, e);
             noSpamLogger.info("{} incompatible schema encountered while deserializing a message", id(), e);
@@ -262,6 +338,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (null == message)
                 releaseCapacity(size);
 
+            // no matter what, set position to the beginning of the next message and restore limit, so that
+            // we can always keep on decoding the frame even on failure to deserialize previous message
             buf.position(begin + size);
             buf.limit(end);
         }
@@ -270,9 +348,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             dispatch(new ProcessSmallMessage(message, size));
     }
 
-    private void processLargeMessage(SharedBytes bytes, int size, Header header)
+    // for various reasons, it's possible for a large message to be contained in a single frame
+    private void processLargeMessage(ShareableBytes bytes, int size, Header header)
     {
-        new LargeMessage(size, header, bytes.sliceAndConsume(size).atomic()).schedule();
+        new LargeMessage(size, header, bytes.sliceAndConsume(size).share()).schedule();
     }
 
     /*
@@ -281,14 +360,14 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private boolean processFirstFrameOfLargeMessage(IntactFrame frame, Limit endpointReserve, Limit globalReserve) throws IOException
     {
-        SharedBytes bytes = frame.contents;
+        ShareableBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
 
-        long currentTimeNanos = ApproximateTime.nanoTime();
+        long currentTimeNanos = nanoTime();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
-        boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
+        boolean expired = isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
 
         if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
@@ -315,6 +394,21 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return true;
     }
 
+    /*
+     * We can handle some corrupt frames gracefully without dropping the connection and losing all the
+     * queued up messages, but not others.
+     *
+     * Corrupt frames that *ARE NOT* safe to skip gracefully and require the connection to be dropped:
+     *  - any frame with corrupt header (!frame.isRecoverable())
+     *  - first corrupt-payload frame of a large message (impossible to infer message size, and without it
+     *    impossible to skip the message safely
+     *
+     * Corrupt frames that *ARE* safe to skip gracefully, without reconnecting:
+     *  - any self-contained frame with a corrupt payload (but not header): we lose all the messages in the
+     *    frame, but that has no effect on subsequent ones
+     *  - any non-first payload-corrupt frame of a large message: we know the size of the large message in
+     *    flight, so we just skip frames until we've seen all its bytes; we only lose the large message
+     */
     private void processCorruptFrame(CorruptFrame frame) throws InvalidCrc
     {
         if (!frame.isRecoverable())
@@ -345,21 +439,33 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
     private void onEndpointReserveCapacityRegained(Limit endpointReserve, long elapsedNanos)
     {
-        try
-        {
-            onReserveCapacityRegained(endpointReserve, globalReserveCapacity, elapsedNanos);
-        }
-        catch (Throwable t)
-        {
-            exceptionCaught(t);
-        }
+        onReserveCapacityRegained(endpointReserve, globalReserveCapacity, elapsedNanos);
     }
 
     private void onGlobalReserveCapacityRegained(Limit globalReserve, long elapsedNanos)
     {
+        onReserveCapacityRegained(endpointReserveCapacity, globalReserve, elapsedNanos);
+    }
+
+    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve, long elapsedNanos)
+    {
+        if (isClosed)
+            return;
+
+        assert channel.eventLoop().inEventLoop();
+
+        ticket = null;
+        throttledNanos += elapsedNanos;
+
         try
         {
-            onReserveCapacityRegained(endpointReserveCapacity, globalReserve, elapsedNanos);
+            /*
+             * Process up to one message using supplied overriden reserves - one of them pre-allocated,
+             * and guaranteed to be enough for one message - then, if no obstacles enountered, reactivate
+             * the frame decoder using normal reserve capacities.
+             */
+            if (processUpToOneMessage(endpointReserve, globalReserve))
+                decoder.reactivate();
         }
         catch (Throwable t)
         {
@@ -367,22 +473,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void onReserveCapacityRegained(Limit endpointReserve, Limit globalReserve, long elapsedNanos) throws IOException
-    {
-        assert channel.eventLoop().inEventLoop();
-
-        if (!isClosed)
-        {
-            ticket = null;
-            throttledNanos += elapsedNanos;
-            if (processUpToOneMessage(endpointReserve, globalReserve))
-                decoder.reactivate();
-        }
-    }
-
-    /*
-     * Return true if the handler should be reactivated.
-     */
+    // return true if the handler should be reactivated - if no new hurdles were encountered,
+    // like running out of the other kind of reserve capacity
     private boolean processUpToOneMessage(Limit endpointReserve, Limit globalReserve) throws IOException
     {
         UpToOneMessageFrameProcessor processor = new UpToOneMessageFrameProcessor(endpointReserve, globalReserve);
@@ -390,6 +482,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return processor.isActive;
     }
 
+    /*
+     * Process at most one message. Won't always be an entire one (if the message in the head of line
+     * is a large one, and there aren't sufficient frames to decode it entirely), but will never be more than one.
+     */
     private class UpToOneMessageFrameProcessor implements FrameProcessor
     {
         private final Limit endpointReserve;
@@ -414,10 +510,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 firstFrame = false;
                 return processFirstFrame((IntactFrame) frame);
             }
-            else
-            {
-                return processSubsequentFrame(frame);
-            }
+
+            return processSubsequentFrame(frame);
         }
 
         private boolean processFirstFrame(IntactFrame frame) throws IOException
@@ -439,12 +533,16 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             if (frame instanceof IntactFrame)
                 processSubsequentFrameOfLargeMessage(frame);
             else
-                processCorruptFrame((CorruptFrame) frame); // TODO: can almost be folded into ^
+                processCorruptFrame((CorruptFrame) frame);
 
             return largeMessage != null; // continue until done with the large message
         }
     }
 
+    /**
+     * Try to acquire permits for the inbound message. In case of failure, register with the right wait queue to be
+     * reactivated once permit capacity is regained.
+     */
     @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private boolean acquireCapacity(Limit endpointReserve, Limit globalReserve, int bytes, long currentTimeNanos, long expiresAtNanos)
     {
@@ -491,9 +589,18 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         long newQueueSize = queueSizeUpdater.addAndGet(this, bytes);
         long actualExcess = max(0, min(newQueueSize - queueCapacity, bytes));
 
-        if (actualExcess != allocatedExcess) // can be smaller if a release happened since
+        /*
+         * It's possible that some permits were released at some point after we loaded current queueSize,
+         * and we can satisfy more of the permits using our exclusive per-connection capacity, needing
+         * less than previously estimated from the reserves. If that's the case, release the now unneeded
+         * permit excess back to endpoint/global reserves.
+         */
+        if (actualExcess != allocatedExcess) // actualExcess < allocatedExcess
         {
-            ResourceLimits.release(endpointReserve, globalReserve, allocatedExcess - actualExcess);
+            long excess = allocatedExcess - actualExcess;
+
+            endpointReserve.release(excess);
+            globalReserve.release(excess);
 
             endpointWaitQueue.signal();
             globalWaitQueue.signal();
@@ -508,7 +615,9 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         if (oldQueueSize > queueCapacity)
         {
             long excess = min(oldQueueSize - queueCapacity, bytes);
-            ResourceLimits.release(endpointReserveCapacity, globalReserveCapacity, excess);
+
+            endpointReserveCapacity.release(excess);
+            globalReserveCapacity.release(excess);
 
             endpointWaitQueue.signal();
             globalWaitQueue.signal();
@@ -550,27 +659,13 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
     @Override
     public void channelInactive(ChannelHandlerContext ctx)
     {
-        close();
-    }
-
-    /*
-     * Clean up after ourselves
-     */
-    private void close()
-    {
         isClosed = true;
 
         if (null != largeMessage)
-        {
             largeMessage.abort();
-            largeMessage = null;
-        }
 
         if (null != ticket)
-        {
             ticket.invalidate();
-            ticket = null;
-        }
 
         onClosed.call(this);
     }
@@ -595,12 +690,24 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         return SocketFactory.channelId(peer, self, type, channel.id().asShortText());
     }
 
+    /**
+     * A large-message frame-accumulating state machine.
+     *
+     * Collects intact frames until it's has all the bytes necessary to deserialize the large message,
+     * at which point it schedules a task on the appropriate {@link Stage},
+     * a task that deserializes the message and immediately invokes the verb handler.
+     *
+     * Also handles corrupt frames and potential expiry of the large message during accumulation:
+     * if it's taking the frames too long to arrive, there is no point in holding on to the
+     * accumulated frames, or in gathering more - so we release the ones we already have, and
+     * switch to skipping mode.
+     */
     private class LargeMessage
     {
         private final int size;
         private final Header header;
 
-        private final List<SharedBytes> buffers = new ArrayList<>();
+        private final List<ShareableBytes> buffers = new ArrayList<>();
         private int received;
         private boolean isSkipping;
 
@@ -611,7 +718,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             this.isSkipping = isSkipping;
         }
 
-        private LargeMessage(int size, Header header, SharedBytes bytes)
+        private LargeMessage(int size, Header header, ShareableBytes bytes)
         {
             this(size, header, false);
             buffers.add(bytes);
@@ -643,8 +750,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
              * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
              * release capacity, and switch to skipping.
              */
-            long currentTimeNanos = ApproximateTime.nanoTime();
-            if (!isSkipping && ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+            long currentTimeNanos = nanoTime();
+            if (!isSkipping && isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
             {
                 try
                 {
@@ -662,7 +769,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
             else
             {
-                buffers.add(frame.contents.sliceAndConsume(frame.frameSize).atomic());
+                buffers.add(frame.contents.sliceAndConsume(frame.frameSize).share());
                 if (received == size)
                     schedule();
             }
@@ -690,10 +797,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 Message<?> m = serializer.deserialize(input, header, version);
                 int remainder = input.remainder();
                 if (remainder > 0)
-                    throw new InvalidSerializedSizeException(size, size - remainder);
+                    throw new InvalidSerializedSizeException(header.verb, size, size - remainder);
                 return m;
             }
-            catch (UnknownTableException | UnknownColumnException e)
+            catch (IncompatibleSchemaException e)
             {
                 callbacks.onFailedDeserialize(size, header, e);
                 noSpamLogger.info("{} incompatible schema encountered while deserializing a message", id(), e);
@@ -714,11 +821,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         private void abort()
         {
-            if (isSkipping)
-                return;
-
-            callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(size, received));
-            doAbort();
+            if (!isSkipping)
+            {
+                callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(header.verb, size, received));
+                doAbort();
+            }
         }
 
         private void doAbort()
@@ -730,13 +837,13 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         private void releaseBuffers()
         {
-            buffers.forEach(SharedBytes::release);
+            buffers.forEach(ShareableBytes::release);
             buffers.clear();
         }
     }
 
-    /*
-     * Submit a {@link ProcessMessage} task to the appropriate Stage for the Verb.
+    /**
+     * Submit a {@link ProcessMessage} task to the appropriate {@link Stage} for the {@link Verb}.
      */
     private void dispatch(ProcessMessage task)
     {
@@ -745,37 +852,32 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         TraceState state = Tracing.instance.initializeFromMessage(header);
         if (state != null) state.trace("{} message received from {}", header.verb, header.from);
 
-        callbacks.onDispatched(task.size, header);
+        callbacks.onDispatched(task.size(), header);
         StageManager.getStage(header.verb.stage).execute(task, ExecutorLocals.create(state));
     }
 
-    /*
-     * Actually handle the message. Executes on the appropriate Stage for the Verb.
-     */
     private abstract class ProcessMessage implements Runnable
     {
-        protected final int size;
-
-        ProcessMessage(int size)
-        {
-            this.size = size;
-        }
-
-        @Override
+        /**
+         * Actually handle the message. Runs on the appropriate {@link Stage} for the {@link Verb}.
+         *
+         * Small messages will come pre-deserialized. Large messages will be deserialized on the stage,
+         * just in time, and only then processed.
+         */
         public void run()
         {
             Header header = header();
-            long currentTimeNanos = ApproximateTime.nanoTime();
-            boolean expired = ApproximateTime.isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
+            long currentTimeNanos = nanoTime();
+            boolean expired = isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
 
             boolean processed = false;
             try
             {
-                callbacks.onExecuting(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                callbacks.onExecuting(size(), header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
 
                 if (expired)
                 {
-                    callbacks.onExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                    callbacks.onExpired(size(), header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
                     return;
                 }
 
@@ -784,52 +886,52 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 {
                     consumer.accept(message);
                     processed = true;
-                    callbacks.onProcessed(size, header);
+                    callbacks.onProcessed(size(), header);
                 }
             }
             finally
             {
                 if (processed)
-                    releaseProcessedCapacity(size, header);
+                    releaseProcessedCapacity(size(), header);
                 else
-                    releaseCapacity(size);
+                    releaseCapacity(size());
 
                 releaseResources();
 
-                callbacks.onExecuted(size, header, ApproximateTime.nanoTime() - currentTimeNanos, NANOSECONDS);
+                callbacks.onExecuted(size(), header, nanoTime() - currentTimeNanos, NANOSECONDS);
             }
         }
 
+        abstract int size();
         abstract Header header();
         abstract Message provideMessage();
-        abstract void releaseResources();
+        void releaseResources() {}
     }
 
     private class ProcessSmallMessage extends ProcessMessage
     {
+        private final int size;
         private final Message message;
 
         ProcessSmallMessage(Message message, int size)
         {
-            super(size);
+            this.size = size;
             this.message = message;
         }
 
-        @Override
+        int size()
+        {
+            return size;
+        }
+
         Header header()
         {
             return message.header;
         }
 
-        @Override
         Message provideMessage()
         {
             return message;
-        }
-
-        @Override
-        void releaseResources()
-        {
         }
     }
 
@@ -839,17 +941,19 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         ProcessLargeMessage(LargeMessage message)
         {
-            super(message.size);
             this.message = message;
         }
 
-        @Override
+        int size()
+        {
+            return message.size;
+        }
+
         Header header()
         {
             return message.header;
         }
 
-        @Override
         Message provideMessage()
         {
             return message.deserialize();
@@ -862,17 +966,33 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    /*
-     * Backpressure handling
+    /**
+     * A special-purpose wait queue to park inbound message handlers that failed to allocate
+     * reserve capacity for a message in. Upon such failure a handler registers itself with
+     * a {@link WaitQueue} of the appropriate kind (either ENDPOINT or GLOBAL - if failed
+     * to allocate endpoint or global reserve capacity, respectively), stops processing any
+     * accumulated frames or receiving new ones, and waits - until reactivated.
+     *
+     * Every time permits are returned to an endpoint or global {@link Limit}, the respective
+     * queue gets signalled, and if there are any handlers registered in it, we will attempt
+     * to reactivate as many waiting handlers as current available reserve capacity allows
+     * us to - immediately, on the {@link #signal()}-calling thread. At most one such attempt
+     * will be in progress at any given time.
+     *
+     * Handlers that can be reactivated will be grouped by their {@link EventLoop} and a single
+     * {@link ReactivateHandlers} task will be scheduled per event loop, on the corresponding
+     * event loops.
+     *
+     * When run, the {@link ReactivateHandlers} task will ask each handler in its group to first
+     * process one message - using preallocated reserve capacity - and if no obstacles were met -
+     * reactivate the handlers, this time using their regular reserves.
+     *
+     * See {@link WaitQueue#schedule()}, {@link ReactivateHandlers#run()}, {@link Ticket#reactivateHandler(Limit)}.
      */
-
     public static final class WaitQueue
     {
-        enum Kind { ENDPOINT_CAPACITY, GLOBAL_CAPACITY }
+        enum Kind { ENDPOINT, GLOBAL }
 
-        /*
-         * Callback scheduler states
-         */
         private static final int NOT_RUNNING = 0;
         @SuppressWarnings("unused")
         private static final int RUNNING     = 1;
@@ -895,12 +1015,12 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
         public static WaitQueue endpoint(Limit endpointReserveCapacity)
         {
-            return new WaitQueue(Kind.ENDPOINT_CAPACITY, endpointReserveCapacity);
+            return new WaitQueue(Kind.ENDPOINT, endpointReserveCapacity);
         }
 
         public static WaitQueue global(Limit globalReserveCapacity)
         {
-            return new WaitQueue(Kind.GLOBAL_CAPACITY, globalReserveCapacity);
+            return new WaitQueue(Kind.GLOBAL, globalReserveCapacity);
         }
 
         private Ticket register(InboundMessageHandler handler, int bytesRequested, long registeredAtNanos, long expiresAtNanos)
@@ -912,12 +1032,12 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             return ticket;
         }
 
-        void signal()
+        private void signal()
         {
             if (queue.relaxedIsEmpty())
-                return;
+                return; // we can return early if no handlers have registered with the wait queue
 
-            if (NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> Integer.min(RUN_AGAIN, i + 1)))
+            if (NOT_RUNNING == scheduledUpdater.getAndUpdate(this, i -> min(RUN_AGAIN, i + 1)))
             {
                 do
                 {
@@ -927,14 +1047,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
         }
 
-        /*
-         * TODO: traverse the entire queue to unblock handlers that have expired tickets, and also remove any closed handlers
-         */
         private void schedule()
         {
-            Map<EventLoop, ResumeProcessing> tasks = null;
+            Map<EventLoop, ReactivateHandlers> tasks = null;
 
-            long currentTimeNanos = ApproximateTime.nanoTime();
+            long currentTimeNanos = nanoTime();
 
             Ticket t;
             while ((t = queue.peek()) != null)
@@ -948,22 +1065,26 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 boolean isLive = t.isLive(currentTimeNanos);
                 if (isLive && !reserveCapacity.tryAllocate(t.bytesRequested))
                 {
-                    t.reset();
-                    break;
+                    if (!t.reset()) // the ticket was invalidated after being called but before now
+                    {
+                        queue.remove();
+                        continue;
+                    }
+                    break; // TODO: traverse the entire queue to unblock handlers that have expired or invalidated tickets
                 }
 
                 if (null == tasks)
                     tasks = new IdentityHashMap<>();
 
                 queue.remove();
-                tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ResumeProcessing()).add(t, isLive);
+                tasks.computeIfAbsent(t.handler.eventLoop(), e -> new ReactivateHandlers()).add(t, isLive);
             }
 
             if (null != tasks)
                 tasks.forEach(EventLoop::execute);
         }
 
-        class ResumeProcessing implements Runnable
+        private class ReactivateHandlers implements Runnable
         {
             List<Ticket> tickets = new ArrayList<>();
             long capacity = 0L;
@@ -971,9 +1092,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             private void add(Ticket ticket, boolean isLive)
             {
                 tickets.add(ticket);
-
-                if (isLive)
-                    capacity += ticket.bytesRequested;
+                if (isLive) capacity += ticket.bytesRequested;
             }
 
             public void run()
@@ -987,8 +1106,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 finally
                 {
                     /*
-                     * Free up any unused global capacity, if any. Will be non-zero if one or more handlers were closed
-                     * when we attempted to run their callback or used more of their personal allowance; or if the first
+                     * Free up any unused capacity, if any. Will be non-zero if one or more handlers were closed
+                     * when we attempted to run their callback, or used more of their other reserve; or if the first
                      * message in the unprocessed stream has expired in the narrow time window.
                      */
                     long remaining = limit.remaining();
@@ -1001,11 +1120,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
             }
         }
 
-        static final class Ticket
+        private static final class Ticket
         {
             private static final int WAITING     = 0;
             private static final int CALLED      = 1;
-            private static final int INVALIDATED = 2;
+            private static final int INVALIDATED = 2; // invalidated by a handler that got closed
 
             private volatile int state;
             private static final AtomicIntegerFieldUpdater<Ticket> stateUpdater =
@@ -1028,10 +1147,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
 
             private void reactivateHandler(Limit capacity)
             {
-                long elapsedNanos = ApproximateTime.nanoTime() - reigsteredAtNanos;
+                long elapsedNanos = nanoTime() - reigsteredAtNanos;
                 try
                 {
-                    if (waitQueue.kind == Kind.ENDPOINT_CAPACITY)
+                    if (waitQueue.kind == Kind.ENDPOINT)
                         handler.onEndpointReserveCapacityRegained(capacity, elapsedNanos);
                     else
                         handler.onGlobalReserveCapacityRegained(capacity, elapsedNanos);
@@ -1042,20 +1161,20 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 }
             }
 
-            boolean isInvalidated()
+            private boolean isWaiting()
             {
-                return state == INVALIDATED;
+                return state == WAITING;
             }
 
-            boolean isLive(long currentTimeNanos)
+            private boolean isLive(long currentTimeNanos)
             {
-                return !ApproximateTime.isAfterNanoTime(currentTimeNanos, expiresAtNanos);
+                return !isAfterNanoTime(currentTimeNanos, expiresAtNanos);
             }
 
-            void invalidate()
+            private void invalidate()
             {
-                if (stateUpdater.compareAndSet(this, WAITING, INVALIDATED))
-                    waitQueue.signal();
+                state = INVALIDATED;
+                waitQueue.signal();
             }
 
             private boolean call()
@@ -1063,15 +1182,15 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter
                 return stateUpdater.compareAndSet(this, WAITING, CALLED);
             }
 
-            private void reset()
+            private boolean reset()
             {
-                state = WAITING;
-            }
-
-            private boolean isWaiting()
-            {
-                return state == WAITING;
+                return stateUpdater.compareAndSet(this, CALLED, WAITING);
             }
         }
+    }
+
+    public interface OnHandlerClosed
+    {
+        void call(InboundMessageHandler handler);
     }
 }

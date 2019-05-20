@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.net.UnknownHostException;
@@ -28,6 +27,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
 
+/**
+ * Map of hosts to their known current messaging versions.
+ */
 public class EndpointMessagingVersions
 {
     private static final Logger logger = LoggerFactory.getLogger(EndpointMessagingVersions.class);

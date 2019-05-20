@@ -21,53 +21,47 @@ import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 public abstract class ResourceLimits
 {
+    /**
+     * Represents permits to utilise a resource and ways to allocate and release them.
+     *
+     * Two implementations are currently provided:
+     * 1. {@link Concurrent}, for shared limits, which is thread-safe;
+     * 2. {@link Basic}, for limits that are not shared between threads, is not thread-safe.
+     */
     public interface Limit
     {
+        /**
+         * @return total amount of permits represented by this {@link Limit} - the capacity
+         */
         long limit();
+
+        /**
+         * @return remaining, unallocated permit amount
+         */
         long remaining();
+
+        /**
+         * @return amount of permits currently in use
+         */
         long using();
 
+        /**
+         * Attempts to allocate an amount of permits from this limit. If allocated, <em>MUST</em> eventually
+         * be released back with {@link #release(long)}.
+         *
+         * @return {@code true} if the allocation was successful, {@code false} otherwise
+         */
         boolean tryAllocate(long amount);
+
+        /**
+         * @param amount return the amount of permits back to this limit
+         */
         void release(long amount);
     }
 
-    public static class EndpointAndGlobal
-    {
-        public final Limit endpoint;
-        public final Limit global;
-
-        EndpointAndGlobal(Limit endpoint, Limit global)
-        {
-            this.endpoint = endpoint;
-            this.global = global;
-        }
-
-        Outcome tryAllocate(long amount)
-        {
-            if (!global.tryAllocate(amount))
-                return Outcome.INSUFFICIENT_GLOBAL;
-
-            if (endpoint.tryAllocate(amount))
-                return Outcome.SUCCESS;
-
-            global.release(amount);
-            return Outcome.INSUFFICIENT_ENDPOINT;
-        }
-
-        void release(long amount)
-        {
-            ResourceLimits.release(endpoint, global, amount);
-        }
-    }
-
-    public enum Outcome { SUCCESS, INSUFFICIENT_ENDPOINT, INSUFFICIENT_GLOBAL }
-
-    public static void release(Limit endpoint, Limit global, long amount)
-    {
-        endpoint.release(amount);
-        global.release(amount);
-    }
-
+    /**
+     * A thread-safe permit container.
+     */
     public static class Concurrent implements Limit
     {
         private final long limit;
@@ -106,7 +100,8 @@ public abstract class ResourceLimits
 
                 if (next > limit)
                     return false;
-            } while (!usingUpdater.compareAndSet(this, current, next));
+            }
+            while (!usingUpdater.compareAndSet(this, current, next));
 
             return true;
         }
@@ -119,6 +114,9 @@ public abstract class ResourceLimits
         }
     }
 
+    /**
+     * A cheaper, thread-unsafe permit container to be used for unshared limits.
+     */
     public static class Basic implements Limit
     {
         private final long limit;
@@ -159,4 +157,45 @@ public abstract class ResourceLimits
             using -= amount;
         }
     }
+
+    /**
+     * A convenience class that groups a per-endpoint limit with the global one
+     * to allow allocating/releasing permits from/to both limits as one logical operation.
+     */
+    public static class EndpointAndGlobal
+    {
+        public final Limit endpoint;
+        public final Limit global;
+
+        EndpointAndGlobal(Limit endpoint, Limit global)
+        {
+            this.endpoint = endpoint;
+            this.global = global;
+        }
+
+        /**
+         * @return {@code INSUFFICIENT_GLOBAL} if there weren't enough permits in the global limit, or
+         *         {@code INSUFFICIENT_ENDPOINT} if there weren't enough permits in the per-endpoint limit, or
+         *         {@code SUCCESS} if there were enough permits to take from both.
+         */
+        Outcome tryAllocate(long amount)
+        {
+            if (!global.tryAllocate(amount))
+                return Outcome.INSUFFICIENT_GLOBAL;
+
+            if (endpoint.tryAllocate(amount))
+                return Outcome.SUCCESS;
+
+            global.release(amount);
+            return Outcome.INSUFFICIENT_ENDPOINT;
+        }
+
+        void release(long amount)
+        {
+            endpoint.release(amount);
+            global.release(amount);
+        }
+    }
+
+    public enum Outcome { SUCCESS, INSUFFICIENT_ENDPOINT, INSUFFICIENT_GLOBAL }
 }

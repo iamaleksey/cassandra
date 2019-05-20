@@ -17,9 +17,7 @@
  */
 package org.apache.cassandra.exceptions;
 
-import java.io.IOException;
-
-public final class UnknownColumnException extends IOException
+public final class UnknownColumnException extends IncompatibleSchemaException
 {
     public UnknownColumnException(String msg)
     {

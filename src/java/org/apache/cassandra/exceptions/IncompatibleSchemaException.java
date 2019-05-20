@@ -15,13 +15,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.cassandra.net;
+package org.apache.cassandra.exceptions;
 
-import java.util.concurrent.TimeUnit;
+import java.io.IOException;
 
-import org.apache.cassandra.locator.InetAddressAndPort;
-
-public interface ILatencySubscriber
+public class IncompatibleSchemaException extends IOException
 {
-    public void receiveTiming(InetAddressAndPort address, long latency, TimeUnit unit);
+    public IncompatibleSchemaException(String msg)
+    {
+        super(msg);
+    }
 }

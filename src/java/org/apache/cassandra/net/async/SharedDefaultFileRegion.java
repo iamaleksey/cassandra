@@ -40,7 +40,8 @@ public class SharedDefaultFileRegion extends DefaultFileRegion
         // but we use it to ensure we can spot memory leaks
         final Ref<FileChannel> ref;
         final AtomicInteger refCount = new AtomicInteger(1);
-        public SharedFileChannel(FileChannel fileChannel)
+
+        SharedFileChannel(FileChannel fileChannel)
         {
             this.ref = new Ref<>(fileChannel, new RefCounted.Tidy()
             {
@@ -53,7 +54,7 @@ public class SharedDefaultFileRegion extends DefaultFileRegion
 
                 public String name()
                 {
-                    return "SharedFileChannel[" + fileChannel.toString() + "]";
+                    return "SharedFileChannel[" + fileChannel.toString() + ']';
                 }
             });
         }
@@ -65,9 +66,10 @@ public class SharedDefaultFileRegion extends DefaultFileRegion
         }
     }
 
-    final SharedFileChannel shared;
-    boolean deallocated = false;
-    public SharedDefaultFileRegion(SharedFileChannel shared, long position, long count)
+    private final SharedFileChannel shared;
+    private boolean deallocated = false;
+
+    SharedDefaultFileRegion(SharedFileChannel shared, long position, long count)
     {
         super(shared.ref.get(), position, count);
         this.shared = shared;

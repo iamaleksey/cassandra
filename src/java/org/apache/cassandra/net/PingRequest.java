@@ -33,15 +33,15 @@ import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
  */
 public class PingRequest
 {
-    public static IVersionedSerializer<PingRequest> serializer = new Serializer();
+    public static Serializer serializer = new Serializer();
 
     public static final PingRequest forUrgent = new PingRequest(URGENT_MESSAGES);
     public static final PingRequest forSmall  = new PingRequest(SMALL_MESSAGES);
     public static final PingRequest forLarge  = new PingRequest(LARGE_MESSAGES);
 
-    public final ConnectionType connectionType;
+    final ConnectionType connectionType;
 
-    public PingRequest(ConnectionType connectionType)
+    private PingRequest(ConnectionType connectionType)
     {
         this.connectionType = connectionType;
     }

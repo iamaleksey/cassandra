@@ -52,7 +52,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.MessagingService.minimum_version;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
-import static org.apache.cassandra.net.async.SharedBytes.wrap;
+import static org.apache.cassandra.net.async.ShareableBytes.wrap;
 
 // TODO: test corruption
 // TODO: use a different random seed each time
@@ -98,7 +98,7 @@ public class FramingTest
     {
         final List<byte[]> original;
         final int[] boundaries;
-        final SharedBytes frames;
+        final ShareableBytes frames;
 
         private SequenceOfFrames(List<byte[]> original, int[] boundaries, ByteBuffer frames)
         {
@@ -134,7 +134,7 @@ public class FramingTest
         SequenceOfFrames sequenceOfFrames = sequenceOfFrames(random, encoder);
 
         List<byte[]> uncompressed = sequenceOfFrames.original;
-        SharedBytes frames = sequenceOfFrames.frames;
+        ShareableBytes frames = sequenceOfFrames.frames;
         int[] boundaries = sequenceOfFrames.boundaries;
 
         int end = frames.get().limit();
@@ -162,15 +162,15 @@ public class FramingTest
         Assert.assertTrue(decoder.frames.isEmpty());
     }
 
-    private static void verify(byte[] expect, SharedBytes actual)
+    private static void verify(byte[] expect, ShareableBytes actual)
     {
         verify(expect, 0, expect.length, actual);
     }
 
-    private static void verify(byte[] expect, int start, int end, SharedBytes actual)
+    private static void verify(byte[] expect, int start, int end, ShareableBytes actual)
     {
         byte[] fetch = new byte[end - start];
-        Assert.assertEquals(end - start, actual.readableBytes());
+        Assert.assertEquals(end - start, actual.remaining());
         actual.get().get(fetch);
         boolean equals = true;
         for (int i = start ; equals && i < end ; ++i)
@@ -267,7 +267,7 @@ public class FramingTest
         SequenceOfFrames sequenceOfMessages = sequenceOfMessages(random, largeRatio, messagingVersion);
 
         List<byte[]> messages = sequenceOfMessages.original;
-        SharedBytes stream = sequenceOfMessages.frames;
+        ShareableBytes stream = sequenceOfMessages.frames;
 
         int end = stream.get().limit();
         List<FrameDecoder.Frame> out = new ArrayList<>();
@@ -294,8 +294,8 @@ public class FramingTest
                     // that was stashed only to decide how big the message was
                     FrameDecoder.IntactFrame frame = (FrameDecoder.IntactFrame) out.get(outIndex++);
                     Assert.assertEquals(false, frame.isSelfContained);
-                    start = frame.contents.readableBytes();
-                    verify(message, 0, frame.contents.readableBytes(), frame.contents);
+                    start = frame.contents.remaining();
+                    verify(message, 0, frame.contents.remaining(), frame.contents);
                 }
                 else
                 {
@@ -349,7 +349,7 @@ public class FramingTest
                     verify(m, frame.contents.sliceAndConsume(m.length));
                     ++beginFrameIndex;
                 }
-                Assert.assertFalse(frame.contents.isReadable());
+                Assert.assertFalse(frame.contents.hasRemaining());
             }
 
             if (limit > messageStart

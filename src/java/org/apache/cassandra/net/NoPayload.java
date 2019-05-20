@@ -17,30 +17,30 @@
  */
 package org.apache.cassandra.net;
 
-import java.io.IOException;
-
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
+/**
+ * Empty message payload - primarily used for responses.
+ *
+ * Prefer this singleton to writing one-off specialised classes.
+ */
 public class NoPayload
 {
     public static final NoPayload noPayload = new NoPayload();
-    public static final Serializer serializer = new Serializer();
 
-    public static class Serializer implements IVersionedSerializer<NoPayload>
+    private NoPayload() {}
+
+    public static final IVersionedSerializer<NoPayload> serializer = new IVersionedSerializer<NoPayload>()
     {
-        private Serializer()
-        {
-        }
-
-        public void serialize(NoPayload noPayload, DataOutputPlus out, int version) throws IOException
+        public void serialize(NoPayload noPayload, DataOutputPlus out, int version)
         {
             if (noPayload != NoPayload.noPayload)
                 throw new IllegalArgumentException();
         }
 
-        public NoPayload deserialize(DataInputPlus in, int version) throws IOException
+        public NoPayload deserialize(DataInputPlus in, int version)
         {
             return noPayload;
         }
@@ -49,7 +49,5 @@ public class NoPayload
         {
             return 0;
         }
-    }
-
-    private NoPayload() {}
+    };
 }

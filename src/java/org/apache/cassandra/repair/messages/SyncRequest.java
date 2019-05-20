@@ -31,8 +31,6 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.CompactEndpointSerializationHelper;
-import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.streaming.PreviewKind;
 
@@ -88,9 +86,9 @@ public class SyncRequest extends RepairMessage
         public void serialize(SyncRequest message, DataOutputPlus out, int version) throws IOException
         {
             RepairJobDesc.serializer.serialize(message.desc, out, version);
-            CompactEndpointSerializationHelper.instance.serialize(message.initiator, out, version);
-            CompactEndpointSerializationHelper.instance.serialize(message.src, out, version);
-            CompactEndpointSerializationHelper.instance.serialize(message.dst, out, version);
+            InetAddressAndPort.serializer.serialize(message.initiator, out, version);
+            InetAddressAndPort.serializer.serialize(message.src, out, version);
+            InetAddressAndPort.serializer.serialize(message.dst, out, version);
             out.writeInt(message.ranges.size());
             for (Range<Token> range : message.ranges)
             {
@@ -103,9 +101,9 @@ public class SyncRequest extends RepairMessage
         public SyncRequest deserialize(DataInputPlus in, int version) throws IOException
         {
             RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            InetAddressAndPort owner = CompactEndpointSerializationHelper.instance.deserialize(in, version);
-            InetAddressAndPort src = CompactEndpointSerializationHelper.instance.deserialize(in, version);
-            InetAddressAndPort dst = CompactEndpointSerializationHelper.instance.deserialize(in, version);
+            InetAddressAndPort owner = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort src = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort dst = InetAddressAndPort.serializer.deserialize(in, version);
             int rangesCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangesCount);
             for (int i = 0; i < rangesCount; ++i)
@@ -117,7 +115,7 @@ public class SyncRequest extends RepairMessage
         public long serializedSize(SyncRequest message, int version)
         {
             long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += 3 * CompactEndpointSerializationHelper.instance.serializedSize(message.initiator, version);
+            size += 3 * InetAddressAndPort.serializer.serializedSize(message.initiator, version);
             size += TypeSizes.sizeof(message.ranges.size());
             for (Range<Token> range : message.ranges)
                 size += AbstractBounds.tokenSerializer.serializedSize(range, version);

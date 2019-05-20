@@ -23,6 +23,8 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeoutException;
 
+import javax.annotation.Nullable;
+
 import com.google.common.annotations.VisibleForTesting;
 
 import org.slf4j.Logger;
@@ -50,6 +52,15 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
 
+/**
+ * An expiring map of request callbacks.
+ *
+ * Used to match response (id, peer) pairs to corresponding {@link RequestCallback}s, or, if said responses
+ * don't arrive in a timely manner (within verb's timeout), to expire the callbacks.
+ *
+ * Since we reuse the same request id for multiple messages now, the map is keyed by (id, peer) tuples
+ * rather than just id as it used to before 4.0.
+ */
 public class RequestCallbacks implements OutboundMessageCallbacks
 {
     private static final Logger logger = LoggerFactory.getLogger(RequestCallbacks.class);
@@ -61,10 +72,32 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     RequestCallbacks(MessagingService messagingService)
     {
         this.messagingService = messagingService;
+
         long expirationInterval = DatabaseDescriptor.getMinRpcTimeout(NANOSECONDS) / 2;
         executor.scheduleWithFixedDelay(this::expire, expirationInterval, expirationInterval, NANOSECONDS);
     }
 
+    /**
+     * @return the registered {@link CallbackInfo} for this id and peer, or {@code null} if unset or expired.
+     */
+    @Nullable
+    CallbackInfo get(long id, InetAddressAndPort peer)
+    {
+        return callbacks.get(key(id, peer));
+    }
+
+    /**
+     * Remove and return the {@link CallbackInfo} associated with given id and peer, if known.
+     */
+    @Nullable
+    CallbackInfo remove(long id, InetAddressAndPort peer)
+    {
+        return callbacks.remove(key(id, peer));
+    }
+
+    /**
+     * Register the provided {@link RequestCallback}, inferring expiry and id from the provided {@link Message}.
+     */
     public void addWithExpiration(RequestCallback cb, Message message, InetAddressAndPort to)
     {
         // mutations need to call the overload with a ConsistencyLevel
@@ -85,20 +118,10 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         assert previous == null : format("Callback already exists for id %d/%s! (%s)", message.id(), to.endpoint(), previous);
     }
 
-    public CallbackInfo get(long id, InetAddressAndPort peer)
-    {
-        return callbacks.get(key(id, peer));
-    }
-
     <T> IVersionedAsymmetricSerializer<?, T> responseSerializer(long id, InetAddressAndPort peer)
     {
         CallbackInfo info = get(id, peer);
         return info == null ? null : info.responseVerb.serializer();
-    }
-
-    public CallbackInfo remove(long id, InetAddressAndPort peer)
-    {
-        return callbacks.remove(key(id, peer));
     }
 
     @VisibleForTesting
@@ -353,7 +376,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
         removeAndExpire(message.id(), peer);
 
         /* in case of a write sent to a different DC, also expire all forwarding targets */
-        ForwardToContainer forwardTo = message.forwardTo();
+        ForwardingInfo forwardTo = message.forwardTo();
         if (null != forwardTo)
             forwardTo.forEach(this::removeAndExpire);
     }

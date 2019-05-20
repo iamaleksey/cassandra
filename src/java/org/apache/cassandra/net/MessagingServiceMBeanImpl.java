@@ -304,5 +304,4 @@ public class MessagingServiceMBeanImpl implements MessagingServiceMBean
     {
         return versions.get(address);
     }
-
 }

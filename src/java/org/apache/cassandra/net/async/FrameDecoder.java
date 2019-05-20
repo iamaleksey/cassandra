@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
@@ -33,7 +32,32 @@ import org.apache.cassandra.net.Message;
 
 import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
 
-abstract class FrameDecoder extends ChannelInboundHandlerAdapter
+/**
+ * A Netty inbound handler that decodes incoming frames and passes them forward to
+ * {@link InboundMessageHandler} for processing.
+ *
+ * Handles work stashing, and together with {@link InboundMessageHandler} - flow control.
+ *
+ * Unlike most Netty inbound handlers, doesn't use the pipeline to talk to its
+ * upstream handler. Instead, a {@link FrameProcessor} must be registered with
+ * the frame decoder, to be invoked on new frames. See {@link #deliver(FrameProcessor)}.
+ *
+ * See {@link #activate(FrameProcessor)}, {@link #reactivate()}, and {@link FrameProcessor}
+ * for flow control implementation.
+ *
+ * Five frame decoders currently exist, one used for each connection depending on flags and messaging version:
+ * 1. {@link FrameDecoderCrc}:
+          no compression; payload is protected by CRC32
+ * 2. {@link FrameDecoderLZ4}:
+          LZ4 compression with custom frame format; payload is protected by CRC32
+ * 3. {@link FrameDecoderUnprotected}:
+          no compression; no integrity protection
+ * 4. {@link FrameDecoderLegacy}:
+          no compression; no integrity protection; turns unframed streams of legacy messages (< 4.0) into frames
+ * 5. {@link FrameDecoderLegacyLZ4}
+ *        LZ4 compression using standard LZ4 frame format; groups legacy messages (< 4.0) into frames
+ */
+public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
     private static final FrameProcessor NO_PROCESSOR =
         frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };
@@ -78,11 +102,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     final static class IntactFrame extends Frame
     {
-        final SharedBytes contents;
+        final ShareableBytes contents;
 
-        IntactFrame(boolean isSelfContained, SharedBytes contents)
+        IntactFrame(boolean isSelfContained, ShareableBytes contents)
         {
-            super(isSelfContained, contents.readableBytes());
+            super(isSelfContained, contents.remaining());
             this.contents = contents;
         }
 
@@ -93,13 +117,20 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
         boolean isConsumed()
         {
-            return !contents.isReadable();
+            return !contents.hasRemaining();
         }
     }
 
     /**
      * A corrupted frame was encountered; this represents the knowledge we have about this frame,
      * and whether or not the stream is recoverable.
+     *
+     * Generally we consider a frame with corrupted header as unrecoverable, and frames with intact header,
+     * but corrupted payload - as recoverable, since we know and can skip payload size.
+     *
+     * {@link InboundMessageHandler} further has its own idea of which frames are and aren't recoverable.
+     * A recoverable {@link CorruptFrame} can be considered unrecoverable by {@link InboundMessageHandler}
+     * if it's the first frame of a large message (isn't self contained).
      */
     final static class CorruptFrame extends Frame
     {
@@ -151,7 +182,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         this.allocator = allocator;
     }
 
-    abstract void decode(Collection<Frame> into, SharedBytes bytes);
+    abstract void decode(Collection<Frame> into, ShareableBytes bytes);
     abstract void addLastTo(ChannelPipeline pipeline);
 
     /**
@@ -219,9 +250,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      * this will receive messages of type {@link GlobalBufferPoolAllocator.Wrapped} or
      * {@link LocalBufferPoolAllocator.Wrapped}.
      *
-     * These buffers are unwrapped and passed to {@link #decode(Collection, SharedBytes)},
+     * These buffers are unwrapped and passed to {@link #decode(Collection, ShareableBytes)},
      * which collects decoded frames into {@link #frames}, which we send upstream in {@link #deliver}
      */
+    @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws IOException
     {
         if (msg instanceof BufferPoolAllocator.Wrapped)
@@ -229,11 +261,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
             ByteBuffer buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
             // netty will probably have mis-predicted the space needed
             allocator.putUnusedPortion(buf, false);
-            channelRead(SharedBytes.wrap(buf));
+            channelRead(ShareableBytes.wrap(buf));
         }
-        else if (msg instanceof SharedBytes) // legacy LZ4 decoder
+        else if (msg instanceof ShareableBytes) // legacy LZ4 decoder
         {
-            channelRead((SharedBytes) msg);
+            channelRead((ShareableBytes) msg);
         }
         else
         {
@@ -241,13 +273,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void channelRead(SharedBytes bytes) throws IOException
+    private void channelRead(ShareableBytes bytes) throws IOException
     {
         decode(frames, bytes);
 
         if (isActive) isActive = deliver(processor);
     }
 
+    @Override
     public void channelReadComplete(ChannelHandlerContext ctx)
     {
         if (isActive)
@@ -292,7 +325,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         return deliver;
     }
 
-    void stash(SharedBytes in, int stashLength, int begin, int length)
+    void stash(ShareableBytes in, int stashLength, int begin, int length)
     {
         ByteBuffer out = allocator.getAtLeast(stashLength);
         copyBytes(in.get(), begin, out, 0, length);
@@ -300,13 +333,14 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         stash = out;
     }
 
-
+    @Override
     public void handlerAdded(ChannelHandlerContext ctx)
     {
         this.ctx = ctx;
         ctx.channel().config().setAutoRead(false);
     }
 
+    @Override
     public void channelInactive(ChannelHandlerContext ctx)
     {
         isClosed = true;

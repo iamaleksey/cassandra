@@ -24,7 +24,6 @@ import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.CompactEndpointSerializationHelper;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.PreviewKind;
@@ -72,7 +71,7 @@ public class StreamInitMessage extends StreamMessage
     {
         public void serialize(StreamInitMessage message, DataOutputStreamPlus out, int version, StreamSession session) throws IOException
         {
-            CompactEndpointSerializationHelper.instance.serialize(message.from, out, version);
+            InetAddressAndPort.serializer.serialize(message.from, out, version);
             out.writeInt(message.sessionIndex);
             UUIDSerializer.serializer.serialize(message.planId, out, MessagingService.current_version);
             out.writeUTF(message.streamOperation.getDescription());
@@ -87,7 +86,7 @@ public class StreamInitMessage extends StreamMessage
 
         public StreamInitMessage deserialize(DataInputPlus in, int version, StreamSession session) throws IOException
         {
-            InetAddressAndPort from = CompactEndpointSerializationHelper.instance.deserialize(in, version);
+            InetAddressAndPort from = InetAddressAndPort.serializer.deserialize(in, version);
             int sessionIndex = in.readInt();
             UUID planId = UUIDSerializer.serializer.deserialize(in, MessagingService.current_version);
             String description = in.readUTF();
@@ -100,7 +99,7 @@ public class StreamInitMessage extends StreamMessage
 
         public long serializedSize(StreamInitMessage message, int version)
         {
-            long size = CompactEndpointSerializationHelper.instance.serializedSize(message.from, version);
+            long size = InetAddressAndPort.serializer.serializedSize(message.from, version);
             size += TypeSizes.sizeof(message.sessionIndex);
             size += UUIDSerializer.serializer.serializedSize(message.planId, MessagingService.current_version);
             size += TypeSizes.sizeof(message.streamOperation.getDescription());

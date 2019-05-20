@@ -320,8 +320,7 @@ public class OutboundConnection
                 // if we're overloaded to one endpoint, we may be accumulating expirable messages, so
                 // attempt an expiry to see if this makes room for our newer message.
                 // this is an optimisation only; messages will be expired on ~100ms cycle, and by Delivery when it runs
-                if (queue.maybePruneExpired() &&
-                    SUCCESS == acquireCapacity(canonicalSize))
+                if (queue.maybePruneExpired() && SUCCESS == acquireCapacity(canonicalSize))
                     break;
             case INSUFFICIENT_GLOBAL:
                 onOverloaded(message);
@@ -799,7 +798,7 @@ public class OutboundConnection
                         Message.serializer.serialize(next, out, messagingVersion);
 
                         if (sending.length() != sendingBytes + messageSize)
-                            throw new InvalidSerializedSizeException(messageSize, sending.length() - sendingBytes);
+                            throw new InvalidSerializedSizeException(next.verb(), messageSize, sending.length() - sendingBytes);
 
                         canonicalSize += canonicalSize(next);
                         sendingCount += 1;
@@ -966,7 +965,7 @@ public class OutboundConnection
                 Message.serializer.serialize(send, out, established.messagingVersion);
 
                 if (out.position() != messageSize)
-                    throw new InvalidSerializedSizeException(messageSize, out.position());
+                    throw new InvalidSerializedSizeException(send.verb(), messageSize, out.position());
 
                 out.close();
                 sentCount += 1;

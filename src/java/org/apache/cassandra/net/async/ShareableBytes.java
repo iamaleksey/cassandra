@@ -15,46 +15,39 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
 import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
 
-import org.apache.cassandra.utils.ByteBufferUtil;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
- * A wrapper for possibly sharing portions of a single, BufferPool managed, ByteBuffer;
+ * A wrapper for possibly sharing portions of a single, {@link BufferPool} managed, {@link ByteBuffer};
  * optimised for the case where no sharing is necessary.
+ *
+ * When sharing is necessary, {@link #share()} method must be invoked by the owning thread
+ * before a {@link ShareableBytes} instance can be shared with another thread.
  */
-class SharedBytes
+class ShareableBytes
 {
-    public static final class Empty extends SharedBytes
-    {
-        public static final Empty instance = new Empty();
-        public Empty() { super(ByteBufferUtil.EMPTY_BYTE_BUFFER); }
-        SharedBytes atomic() { return this; }
-        SharedBytes retain() { return this; }
-        void release() {}
-    }
-
     private final ByteBuffer bytes;
-    private final SharedBytes owner;
+    private final ShareableBytes owner;
     private volatile int count;
 
     private static final int UNSHARED = -1;
     private static final int RELEASED = 0;
-    private static final AtomicIntegerFieldUpdater<SharedBytes> countUpdater = AtomicIntegerFieldUpdater.newUpdater(SharedBytes.class, "count");
+    private static final AtomicIntegerFieldUpdater<ShareableBytes> countUpdater =
+        AtomicIntegerFieldUpdater.newUpdater(ShareableBytes.class, "count");
 
-    SharedBytes(ByteBuffer bytes)
+    ShareableBytes(ByteBuffer bytes)
     {
         this.count = UNSHARED;
         this.owner = this;
         this.bytes = bytes;
     }
 
-    SharedBytes(SharedBytes owner, ByteBuffer bytes)
+    ShareableBytes(ShareableBytes owner, ByteBuffer bytes)
     {
         this.owner = owner;
         this.bytes = bytes;
@@ -66,12 +59,12 @@ class SharedBytes
         return bytes;
     }
 
-    boolean isReadable()
+    boolean hasRemaining()
     {
         return bytes.hasRemaining();
     }
 
-    int readableBytes()
+    int remaining()
     {
         return bytes.remaining();
     }
@@ -82,11 +75,11 @@ class SharedBytes
     }
 
     /**
-     * Ensure this SharedBytes will use atomic operations for updating its count from now on.
+     * Ensure this ShareableBytes will use atomic operations for updating its count from now on.
      * The first invocation must occur while the calling thread has exclusive access (though there may be more
      * than one 'owner', these must all either be owned by the calling thread or otherwise not being used)
      */
-    SharedBytes atomic()
+    ShareableBytes share()
     {
         int count = owner.count;
         if (count < 0)
@@ -94,7 +87,7 @@ class SharedBytes
         return this;
     }
 
-    SharedBytes retain()
+    private ShareableBytes retain()
     {
         owner.doRetain();
         return this;
@@ -106,19 +99,18 @@ class SharedBytes
         if (count < 0)
         {
             countUpdater.lazySet(this, count - 1);
+            return;
         }
-        else
+
+        while (true)
         {
-            while (true)
-            {
-                if (count == RELEASED)
-                    throw new IllegalStateException("Attempted to reference an already released SharedByteBuffer");
+            if (count == RELEASED)
+                throw new IllegalStateException("Attempted to reference an already released SharedByteBuffer");
 
-                if (countUpdater.compareAndSet(this, count, count + 1))
-                    return;
+            if (countUpdater.compareAndSet(this, count, count + 1))
+                return;
 
-                count = this.count;
-            }
+            count = this.count;
         }
     }
 
@@ -150,11 +142,11 @@ class SharedBytes
     /**
      * Create a slice over the next {@code length} bytes, consuming them from our buffer, and incrementing the owner count
      */
-    SharedBytes sliceAndConsume(int length)
+    ShareableBytes sliceAndConsume(int length)
     {
         int begin = bytes.position();
         int end = begin + length;
-        SharedBytes result = slice(begin, end);
+        ShareableBytes result = slice(begin, end);
         bytes.position(end);
         return result;
     }
@@ -162,16 +154,16 @@ class SharedBytes
     /**
      * Create a new slice, incrementing the number of owners (making it shared if it was previously unshared)
      */
-    SharedBytes slice(int begin, int end)
+    ShareableBytes slice(int begin, int end)
     {
         ByteBuffer slice = bytes.duplicate();
         slice.position(begin).limit(end);
-        return new SharedBytes(owner.retain(), slice);
+        return new ShareableBytes(owner.retain(), slice);
     }
 
-    static SharedBytes wrap(ByteBuffer buffer)
+    static ShareableBytes wrap(ByteBuffer buffer)
     {
-        return new SharedBytes(buffer);
+        return new ShareableBytes(buffer);
     }
 }
 

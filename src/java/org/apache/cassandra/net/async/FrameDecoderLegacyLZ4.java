@@ -81,7 +81,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             this.allocator = allocator;
         }
 
-        private final Deque<SharedBytes> frames = new ArrayDeque<>(4);
+        private final Deque<ShareableBytes> frames = new ArrayDeque<>(4);
 
         // total # of frames decoded between two subsequent invocations of channelReadComplete()
         private int decodedFrameCount = 0;
@@ -97,7 +97,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             CorruptLZ4Frame error = null;
             try
             {
-                decode(frames, SharedBytes.wrap(buf));
+                decode(frames, ShareableBytes.wrap(buf));
             }
             catch (CorruptLZ4Frame e)
             {
@@ -129,7 +129,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             ctx.fireChannelReadComplete();
         }
 
-        private void decode(Collection<SharedBytes> into, SharedBytes newBytes) throws CorruptLZ4Frame
+        private void decode(Collection<ShareableBytes> into, ShareableBytes newBytes) throws CorruptLZ4Frame
         {
             try
             {
@@ -141,7 +141,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             }
         }
 
-        private void doDecode(Collection<SharedBytes> into, SharedBytes newBytes) throws CorruptLZ4Frame
+        private void doDecode(Collection<ShareableBytes> into, ShareableBytes newBytes) throws CorruptLZ4Frame
         {
             ByteBuffer in = newBytes.get();
 
@@ -160,7 +160,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
                     return;
 
                 stash.flip();
-                SharedBytes stashed = SharedBytes.wrap(stash);
+                ShareableBytes stashed = ShareableBytes.wrap(stash);
                 stash = null;
 
                 try
@@ -199,7 +199,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             }
         }
 
-        private SharedBytes decompressFrame(SharedBytes bytes, int begin, int end, Header header) throws CorruptLZ4Frame
+        private ShareableBytes decompressFrame(ShareableBytes bytes, int begin, int end, Header header) throws CorruptLZ4Frame
         {
             ByteBuffer buf = bytes.get();
 
@@ -217,7 +217,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             {
                 decompressor.decompress(buf, begin + HEADER_LENGTH, out, 0, header.uncompressedLength);
                 validateChecksum(out, 0, header);
-                return SharedBytes.wrap(out);
+                return ShareableBytes.wrap(out);
             }
             catch (Throwable t)
             {
@@ -323,7 +323,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
 
         private ByteBuffer stash;
 
-        private void stash(SharedBytes in, int stashLength, int begin, int length)
+        private void stash(ShareableBytes in, int stashLength, int begin, int length)
         {
             ByteBuffer out = allocator.getAtLeast(stashLength);
             copyBytes(in.get(), begin, out, 0, length);

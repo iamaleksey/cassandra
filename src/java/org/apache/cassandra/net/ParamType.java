@@ -23,37 +23,52 @@ import java.util.Map;
 import javax.annotation.Nullable;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
-import org.apache.cassandra.io.DummyByteVersionedSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 import static java.lang.Math.max;
 
 /**
- * Type names and serializers for various parameters that
+ * Type names and serializers for various parameters that can be put in {@link Message} params map.
+ *
+ * It should be safe to add new params without bumping messaging version - {@link Message} serializer
+ * will skip over any params it doesn't recognise.
+ *
+ * Please don't add boolean params here. Extend and use {@link MessageFlag} instead.
  */
 public enum ParamType
 {
-    FORWARD_TO          (0, "FORWARD_TO",    ForwardToContainer.serializer),
-    FORWARDED_FROM      (1, "FORWARD_FROM",  CompactEndpointSerializationHelper.instance),
+    FORWARD_TO          (0, "FORWARD_TO",    ForwardingInfo.serializer),
+    RESPOND_TO          (1, "FORWARD_FROM",  InetAddressAndPort.serializer),
 
     @Deprecated
-    FAILURE_RESPONSE    (2, "FAIL",          DummyByteVersionedSerializer.instance),
+    FAILURE_RESPONSE    (2, "FAIL",          LegacyFlag.serializer),
     @Deprecated
     FAILURE_REASON      (3, "FAIL_REASON",   RequestFailureReason.serializer),
     @Deprecated
-    FAILURE_CALLBACK    (4, "CAL_BAC",       DummyByteVersionedSerializer.instance),
+    FAILURE_CALLBACK    (4, "CAL_BAC",       LegacyFlag.serializer),
 
     TRACE_SESSION       (5, "TraceSession",  UUIDSerializer.serializer),
     TRACE_TYPE          (6, "TraceType",     Tracing.traceTypeSerializer),
 
     @Deprecated
-    TRACK_REPAIRED_DATA (7, "TrackRepaired", DummyByteVersionedSerializer.instance);
+    TRACK_REPAIRED_DATA (7, "TrackRepaired", LegacyFlag.serializer);
 
-    public final int id;
-    public final String legacyAlias;
-    public final IVersionedSerializer serializer;
+    final int id;
+    @Deprecated final String legacyAlias; // pre-4.0 we used to serialize entire param name string
+    final IVersionedSerializer serializer;
+
+    ParamType(int id, String legacyAlias, IVersionedSerializer serializer)
+    {
+        if (id < 0)
+            throw new IllegalArgumentException("ParamType id must be non-negative");
+
+        this.id = id;
+        this.legacyAlias = legacyAlias;
+        this.serializer = serializer;
+    }
 
     private static final ParamType[] idToTypeMap;
     private static final Map<String, ParamType> aliasToTypeMap;
@@ -81,16 +96,6 @@ public enum ParamType
 
         idToTypeMap = idMap;
         aliasToTypeMap = aliasMap;
-    }
-
-    ParamType(int id, String legacyAlias, IVersionedSerializer serializer)
-    {
-        if (id < 0)
-            throw new IllegalArgumentException("ParamType id must be non-negative");
-
-        this.id = id;
-        this.legacyAlias = legacyAlias;
-        this.serializer = serializer;
     }
 
     @Nullable

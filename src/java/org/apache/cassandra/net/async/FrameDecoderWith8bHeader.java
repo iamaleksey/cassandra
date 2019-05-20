@@ -59,16 +59,16 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
      * Extract a frame known to cover the given range.
      * If {@code transferOwnership}, the method is responsible for ensuring bytes.release() is invoked at some future point.
      */
-    abstract Frame unpackFrame(SharedBytes bytes, int begin, int end, long header);
+    abstract Frame unpackFrame(ShareableBytes bytes, int begin, int end, long header);
 
     /**
      * Decode a number of frames using the above abstract method implementations.
-     * It is expected for this method to be invoked by the implementing class' {@link #decode(Collection, SharedBytes)}
+     * It is expected for this method to be invoked by the implementing class' {@link #decode(Collection, ShareableBytes)}
      * so that this implementation will be inlined, and all of the abstract method implementations will also be inlined.
      * TODO verify this in assembly
      */
     @Inline
-    protected void decode(Collection<Frame> into, SharedBytes newBytes, int headerLength)
+    protected void decode(Collection<Frame> into, ShareableBytes newBytes, int headerLength)
     {
         ByteBuffer in = newBytes.get();
 
@@ -95,7 +95,7 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
                     return;
 
                 stash.flip();
-                SharedBytes stashed = SharedBytes.wrap(stash);
+                ShareableBytes stashed = ShareableBytes.wrap(stash);
                 stash = null;
 
                 try

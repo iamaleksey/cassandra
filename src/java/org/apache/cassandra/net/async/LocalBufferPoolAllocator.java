@@ -25,7 +25,8 @@ import org.apache.cassandra.utils.memory.BufferPool;
  * Equivalent to {@link GlobalBufferPoolAllocator}, except explicitly using a specified
  * {@link org.apache.cassandra.utils.memory.BufferPool.LocalPool} to allocate from.
  *
- * Exists to facilitate more efficient handling large messages on the inbound path.
+ * Exists to facilitate more efficient handling large messages on the inbound path,
+ * used by {@link ConnectionType#LARGE_MESSAGES} connections.
  *
  * TODO: enforce that get() and getAtLeast() are invoked from within the expected thread
  */

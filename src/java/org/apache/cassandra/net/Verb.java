@@ -316,6 +316,7 @@ public enum Verb
     }
 }
 
+@SuppressWarnings("unused")
 class VerbTimeouts
 {
     static final ToLongFunction<TimeUnit> rpcTimeout      = DatabaseDescriptor::getRpcTimeout;

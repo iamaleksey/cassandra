@@ -26,12 +26,13 @@ import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 
-public class ResponseVerbHandler implements IVerbHandler
+class ResponseVerbHandler implements IVerbHandler
 {
     public static final ResponseVerbHandler instance = new ResponseVerbHandler();
 
-    private static final Logger logger = LoggerFactory.getLogger( ResponseVerbHandler.class );
+    private static final Logger logger = LoggerFactory.getLogger(ResponseVerbHandler.class);
 
+    @Override
     public void doVerb(Message message)
     {
         RequestCallbacks.CallbackInfo callbackInfo = MessagingService.instance().callbacks.remove(message.id(), message.from());
@@ -45,6 +46,7 @@ public class ResponseVerbHandler implements IVerbHandler
 
         long latencyNanos = ApproximateTime.nanoTime() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
+
         RequestCallback cb = callbackInfo.callback;
         if (message.isFailureResponse())
         {

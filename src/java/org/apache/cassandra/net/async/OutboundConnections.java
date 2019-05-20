@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.nio.channels.ClosedChannelException;
@@ -48,7 +47,7 @@ import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
 /**
  * Groups a set of outbound connections to a given peer, and routes outgoing messages to the appropriate connection
  * (based upon message's type or size). Contains a {@link OutboundConnection} for each of the
- * {@link ConnectionType} type.
+ * {@link ConnectionType} types.
  */
 public class OutboundConnections
 {
@@ -74,6 +73,14 @@ public class OutboundConnections
         this.small = new OutboundConnection(SMALL_MESSAGES, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGES, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT_MESSAGES, template, reserveCapacityInBytes);
+    }
+
+    /**
+     * Select the appropriate connection for the provided message and use it to send the message.
+     */
+    public void enqueue(Message msg, ConnectionType type) throws ClosedChannelException
+    {
+        connectionFor(msg, type).enqueue(msg);
     }
 
     public static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
@@ -102,11 +109,6 @@ public class OutboundConnections
     public BackPressureState getBackPressureState()
     {
         return backPressureState;
-    }
-
-    public void enqueue(Message msg, ConnectionType type) throws ClosedChannelException
-    {
-        connectionFor(msg, type).enqueue(msg);
     }
 
     /**
@@ -162,6 +164,7 @@ public class OutboundConnections
         {
             throw new RuntimeException(e);
         }
+
         if (metrics != null)
             metrics.release();
     }
@@ -191,14 +194,12 @@ public class OutboundConnections
         return connectionFor(message, null);
     }
 
-    @VisibleForTesting
-    OutboundConnection connectionFor(Message msg, ConnectionType forceConnection)
+    private OutboundConnection connectionFor(Message msg, ConnectionType forceConnection)
     {
         return connectionFor(connectionTypeFor(msg, forceConnection));
     }
 
-    @VisibleForTesting
-    public static ConnectionType connectionTypeFor(Message<?> msg, ConnectionType specifyConnection)
+    private static ConnectionType connectionTypeFor(Message<?> msg, ConnectionType specifyConnection)
     {
         if (specifyConnection != null)
             return specifyConnection;
@@ -249,7 +250,7 @@ public class OutboundConnections
 
     private static class UnusedConnectionMonitor
     {
-        public UnusedConnectionMonitor(MessagingService messagingService)
+        UnusedConnectionMonitor(MessagingService messagingService)
         {
             this.messagingService = messagingService;
         }
@@ -315,7 +316,7 @@ public class OutboundConnections
     }
 
     @VisibleForTesting
-    public static OutboundConnections unsafeCreate(OutboundConnectionSettings template, BackPressureState backPressureState)
+    static OutboundConnections unsafeCreate(OutboundConnectionSettings template, BackPressureState backPressureState)
     {
         OutboundConnections connections = new OutboundConnections(template, backPressureState);
         connections.metricsReady.signalAll();

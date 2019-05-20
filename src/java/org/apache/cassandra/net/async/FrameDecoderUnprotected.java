@@ -62,13 +62,13 @@ final class FrameDecoderUnprotected extends FrameDecoderWith8bHeader
         return payloadLength(header6b) + HEADER_LENGTH;
     }
 
-    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header6b)
+    final Frame unpackFrame(ShareableBytes bytes, int begin, int end, long header6b)
     {
         boolean isSelfContained = isSelfContained(header6b);
         return new IntactFrame(isSelfContained, bytes.slice(begin + HEADER_LENGTH, end));
     }
 
-    void decode(Collection<Frame> into, SharedBytes bytes)
+    void decode(Collection<Frame> into, ShareableBytes bytes)
     {
         decode(into, bytes, HEADER_LENGTH);
     }

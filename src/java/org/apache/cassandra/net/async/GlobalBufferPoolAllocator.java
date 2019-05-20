@@ -20,7 +20,11 @@ package org.apache.cassandra.net.async;
 import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
+import org.apache.cassandra.utils.memory.BufferPool;
 
+/**
+ * Primary {@link ByteBuf} / {@link ByteBuffer} allocator - using the global {@link BufferPool}.
+ */
 public class GlobalBufferPoolAllocator extends BufferPoolAllocator
 {
     public static final GlobalBufferPoolAllocator instance = new GlobalBufferPoolAllocator();

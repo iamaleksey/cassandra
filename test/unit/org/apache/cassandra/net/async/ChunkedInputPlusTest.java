@@ -49,7 +49,7 @@ public class ChunkedInputPlusTest
     @Test
     public void testUnderRead() throws IOException
     {
-        List<SharedBytes> chunks = Lists.newArrayList(
+        List<ShareableBytes> chunks = Lists.newArrayList(
             chunk(1, 1), chunk(2, 2), chunk(3, 3)
         );
 
@@ -59,9 +59,9 @@ public class ChunkedInputPlusTest
             input.readFully(readBytes);
             assertArrayEquals(new byte[] { 1, 2, 2, 3, 3 }, readBytes);
 
-            assertFalse(chunks.get(0).isReadable());
-            assertFalse(chunks.get(1).isReadable());
-            assertTrue (chunks.get(2).isReadable());
+            assertFalse(chunks.get(0).hasRemaining());
+            assertFalse(chunks.get(1).hasRemaining());
+            assertTrue (chunks.get(2).hasRemaining());
 
             assertTrue (chunks.get(0).isReleased());
             assertTrue (chunks.get(1).isReleased());
@@ -75,7 +75,7 @@ public class ChunkedInputPlusTest
     @Test
     public void testExactRead() throws IOException
     {
-        List<SharedBytes> chunks = Lists.newArrayList(
+        List<ShareableBytes> chunks = Lists.newArrayList(
             chunk(1, 1), chunk(2, 2), chunk(3, 3)
         );
 
@@ -85,9 +85,9 @@ public class ChunkedInputPlusTest
             input.readFully(readBytes);
             assertArrayEquals(new byte[] { 1, 2, 2, 3, 3, 3 }, readBytes);
 
-            assertFalse(chunks.get(0).isReadable());
-            assertFalse(chunks.get(1).isReadable());
-            assertFalse(chunks.get(2).isReadable());
+            assertFalse(chunks.get(0).hasRemaining());
+            assertFalse(chunks.get(1).hasRemaining());
+            assertFalse(chunks.get(2).hasRemaining());
 
             assertTrue (chunks.get(0).isReleased());
             assertTrue (chunks.get(1).isReleased());
@@ -101,7 +101,7 @@ public class ChunkedInputPlusTest
     @Test
     public void testOverRead() throws IOException
     {
-        List<SharedBytes> chunks = Lists.newArrayList(
+        List<ShareableBytes> chunks = Lists.newArrayList(
             chunk(1, 1), chunk(2, 2), chunk(3, 3)
         );
 
@@ -116,9 +116,9 @@ public class ChunkedInputPlusTest
         {
             eofCaught = true;
 
-            assertFalse(chunks.get(0).isReadable());
-            assertFalse(chunks.get(1).isReadable());
-            assertFalse(chunks.get(2).isReadable());
+            assertFalse(chunks.get(0).hasRemaining());
+            assertFalse(chunks.get(1).hasRemaining());
+            assertFalse(chunks.get(2).hasRemaining());
 
             assertTrue (chunks.get(2).isReleased());
             assertTrue (chunks.get(1).isReleased());
@@ -130,7 +130,7 @@ public class ChunkedInputPlusTest
     @Test
     public void testRemainder() throws IOException
     {
-        List<SharedBytes> chunks = Lists.newArrayList(
+        List<ShareableBytes> chunks = Lists.newArrayList(
             chunk(1, 1), chunk(2, 2), chunk(3, 3)
         );
 
@@ -148,10 +148,10 @@ public class ChunkedInputPlusTest
         }
     }
 
-    private SharedBytes chunk(int size, int fill)
+    private ShareableBytes chunk(int size, int fill)
     {
         ByteBuffer buffer = ByteBuffer.allocate(size);
         Arrays.fill(buffer.array(), (byte) fill);
-        return SharedBytes.wrap(buffer);
+        return ShareableBytes.wrap(buffer);
     }
 }
