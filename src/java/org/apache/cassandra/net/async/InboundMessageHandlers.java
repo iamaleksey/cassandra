@@ -32,6 +32,12 @@ import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.utils.ApproximateTime;
 
+/**
+ * An aggregation of {@link InboundMessageHandler}s for all connections from a peer.
+ *
+ * Manages metrics and shared resource limits. Can have multiple connections of a single
+ * type open simultaneousely (legacy in particular).
+ */
 public final class InboundMessageHandlers
 {
     private final InetAddressAndPort self;
@@ -117,8 +123,8 @@ public final class InboundMessageHandlers
         this.handlerProvider = handlerProvider;
 
         urgentCallbacks = makeMessageCallbacks(peer, urgentCounters, globalMetricCallbacks, messageConsumer);
-        smallCallbacks  = makeMessageCallbacks(peer, smallCounters, globalMetricCallbacks, messageConsumer);
-        largeCallbacks  = makeMessageCallbacks(peer, largeCounters, globalMetricCallbacks, messageConsumer);
+        smallCallbacks  = makeMessageCallbacks(peer, smallCounters,  globalMetricCallbacks, messageConsumer);
+        largeCallbacks  = makeMessageCallbacks(peer, largeCounters,  globalMetricCallbacks, messageConsumer);
         legacyCallbacks = makeMessageCallbacks(peer, legacyCounters, globalMetricCallbacks, messageConsumer);
 
         metrics = new InternodeInboundMetrics(peer, this);

@@ -30,10 +30,13 @@ import java.util.function.Consumer;
  *
  * {@link #offer(Object)} provides volatile visibility semantics. {@link #offer(Object)} is lock-free, {@link #poll()}
  * and all related consumer methods are wait-free.
+ *
+ * In addition to that, provides a {@link #relaxedPeekLastAndOffer(Object)} method that we use to avoid a CAS when
+ * putting message handlers onto the wait queue.
  */
 class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHead<E>
 {
-    @SuppressWarnings("unused")
+    @SuppressWarnings("unused") // pad two cache lines after the head to prevent false sharing
     protected long p31, p32, p33, p34, p35, p36, p37, p38, p39, p40, p41, p42, p43, p44, p45;
 
     ManyToOneConcurrentLinkedQueue()
@@ -85,6 +88,13 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         return item;
     }
 
+    /**
+     * Consume the queue in its entirety and feed every item to the provided {@link Consumer}.
+     *
+     * Exists primarily for convenience, and essentially just wraps {@link #poll()} in a loop.
+     * Yields no performance benefit over invoking {@link #poll()} manually - there just isn't
+     * anything to meaningfully amortise on the consumer side of this queue.
+     */
     void drain(Consumer<E> consumer)
     {
         E item;
@@ -108,6 +118,11 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         return internalOffer(e);
     }
 
+    /**
+     * internalOffer() is based on {@link java.util.concurrent.ConcurrentLinkedQueue#offer(Object)},
+     * written by Doug Lea and Martin Buchholz with assistance from members of JCP JSR-166 Expert Group
+     * and released to the public domain, as explained at http://creativecommons.org/publicdomain/zero/1.0/
+     */
     private E internalOffer(E e)
     {
         if (null == e)
@@ -163,7 +178,7 @@ class ManyToOneConcurrentLinkedQueueHead<E> extends ManyToOneConcurrentLinkedQue
 
 class ManyToOneConcurrentLinkedQueuePadding2<E> extends ManyToOneConcurrentLinkedQueueTail<E>
 {
-    @SuppressWarnings("unused")
+    @SuppressWarnings("unused") // pad two cache lines between tail and head to prevent false sharing
     protected long p16, p17, p18, p19, p20, p21, p22, p23, p24, p25, p26, p27, p28, p29, p30;
 }
 
@@ -183,7 +198,7 @@ class ManyToOneConcurrentLinkedQueueTail<E> extends ManyToOneConcurrentLinkedQue
 
 class ManyToOneConcurrentLinkedQueuePadding1
 {
-    @SuppressWarnings("unused")
+    @SuppressWarnings("unused") // pad two cache lines before the tail to prevent false sharing
     protected long p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15;
 
     static final class Node<E>

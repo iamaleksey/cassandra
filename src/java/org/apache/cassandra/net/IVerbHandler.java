@@ -24,7 +24,6 @@ import java.io.IOException;
  * The concrete implementation of this interface would provide the functionality
  * for a given verb.
  */
-
 public interface IVerbHandler<T>
 {
     /**

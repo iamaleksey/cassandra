@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.exceptions.InvalidRequestException;
@@ -49,7 +50,7 @@ public class ReadCommandVerbHandler implements IVerbHandler<ReadCommand>
         validateTransientStatus(message);
 
         long timeout = message.expiresAtNanos() - message.createdAtNanos();
-        command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, message.getSlowQueryTimeout(NANOSECONDS));
+        command.setMonitoringTime(message.createdAtNanos(), message.isCrossNode(), timeout, DatabaseDescriptor.getSlowQueryTimeout(NANOSECONDS));
 
         if (message.trackRepairedData())
             command.trackRepairedStatus();

@@ -33,8 +33,6 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.net.CompactEndpointSerializationHelper;
-import org.apache.cassandra.net.MessagingService;
 
 public class StreamRequest
 {
@@ -68,7 +66,7 @@ public class StreamRequest
             out.writeUTF(request.keyspace);
             out.writeInt(request.columnFamilies.size());
 
-            CompactEndpointSerializationHelper.instance.serialize(request.full.endpoint(), out, version);
+            InetAddressAndPort.serializer.serialize(request.full.endpoint(), out, version);
             serializeReplicas(request.full, out, version);
             serializeReplicas(request.transientReplicas, out, version);
             for (String cf : request.columnFamilies)
@@ -91,7 +89,7 @@ public class StreamRequest
         {
             String keyspace = in.readUTF();
             int cfCount = in.readInt();
-            InetAddressAndPort endpoint = CompactEndpointSerializationHelper.instance.deserialize(in, version);
+            InetAddressAndPort endpoint = InetAddressAndPort.serializer.deserialize(in, version);
 
             RangesAtEndpoint full = deserializeReplicas(in, version, endpoint, true);
             RangesAtEndpoint transientReplicas = deserializeReplicas(in, version, endpoint, false);
@@ -122,7 +120,7 @@ public class StreamRequest
         {
             int size = TypeSizes.sizeof(request.keyspace);
             size += TypeSizes.sizeof(request.columnFamilies.size());
-            size += CompactEndpointSerializationHelper.instance.serializedSize(request.full.endpoint(), version);
+            size += InetAddressAndPort.serializer.serializedSize(request.full.endpoint(), version);
             size += replicasSerializedSize(request.transientReplicas, version);
             size += replicasSerializedSize(request.full, version);
             for (String cf : request.columnFamilies)

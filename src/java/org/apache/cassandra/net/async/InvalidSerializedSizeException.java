@@ -15,19 +15,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
 
+import org.apache.cassandra.net.Verb;
+
+import static java.lang.String.format;
+
 public class InvalidSerializedSizeException extends IOException
 {
+    public final Verb verb;
     public final long expectedSize;
     public final long actualSizeAtLeast;
 
-    public InvalidSerializedSizeException(long expectedSize, long actualSizeAtLeast)
+    InvalidSerializedSizeException(Verb verb, long expectedSize, long actualSizeAtLeast)
     {
-        super("Invalid serialized size; expected " + expectedSize + ", actual size at least " + actualSizeAtLeast);
+        super(format("Invalid serialized size; expected %d, actual size at least %d, for verb %s", expectedSize, actualSizeAtLeast, verb));
+        this.verb = verb;
+        this.expectedSize = expectedSize;
+        this.actualSizeAtLeast = actualSizeAtLeast;
+    }
+
+    InvalidSerializedSizeException(long expectedSize, long actualSizeAtLeast)
+    {
+        super(format("Invalid serialized size; expected %d, actual size at least %d", expectedSize, actualSizeAtLeast));
+        this.verb = null;
         this.expectedSize = expectedSize;
         this.actualSizeAtLeast = actualSizeAtLeast;
     }

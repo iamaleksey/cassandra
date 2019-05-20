@@ -44,7 +44,7 @@ import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatemen
 import static org.apache.cassandra.utils.FBUtilities.getBroadcastAddressAndPort;
 
 /**
- * A collection of data points to be passed around for outbound connections.
+ * A collection of settings to be passed around for outbound connections.
  */
 @SuppressWarnings({ "WeakerAccess", "unused" })
 public class OutboundConnectionSettings

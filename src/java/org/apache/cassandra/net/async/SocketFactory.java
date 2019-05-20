@@ -186,19 +186,15 @@ public final class SocketFactory
     static SslHandler newSslHandler(Channel channel, SslContext sslContext, @Nullable InetSocketAddress peer)
     {
         if (peer == null)
-        {
             return sslContext.newHandler(channel.alloc());
-        }
-        else
-        {
-            logger.debug("Creating SSL handler for {}:{}", peer.getHostString(), peer.getPort());
-            SslHandler sslHandler = sslContext.newHandler(channel.alloc(), peer.getHostString(), peer.getPort());
-            SSLEngine engine = sslHandler.engine();
-            SSLParameters sslParameters = engine.getSSLParameters();
-            sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
-            engine.setSSLParameters(sslParameters);
-            return sslHandler;
-        }
+
+        logger.debug("Creating SSL handler for {}:{}", peer.getHostString(), peer.getPort());
+        SslHandler sslHandler = sslContext.newHandler(channel.alloc(), peer.getHostString(), peer.getPort());
+        SSLEngine engine = sslHandler.engine();
+        SSLParameters sslParameters = engine.getSSLParameters();
+        sslParameters.setEndpointIdentificationAlgorithm("HTTPS");
+        engine.setSSLParameters(sslParameters);
+        return sslHandler;
     }
 
     static String encryptionLogStatement(EncryptionOptions options)

@@ -17,12 +17,67 @@
  */
 package org.apache.cassandra.net;
 
+import static java.lang.Math.max;
+
+/**
+ * Binary message flags to be passed as {@code flags} field of {@link Message}.
+ */
 public enum MessageFlag
 {
-    /*
-     * The order matters here, since we use enum ordinals to encode the flags.
+    /** a failure response should be sent back in case of failure */
+    CALL_BACK_ON_FAILURE (0),
+    /** track repaired data - see CASSANDRA-14145 */
+    TRACK_REPAIRED_DATA  (1);
+
+    private final int id;
+
+    MessageFlag(int id)
+    {
+        this.id = id;
+    }
+
+    /**
+     * @return {@code true} if the flag is present in provided flags, {@code false} otherwise
      */
-    CALL_BACK_ON_FAILURE,
-    TRACK_REPAIRED_DATA
+    boolean isIn(int flags)
+    {
+        return (flags & (1 << id)) != 0;
+    }
+
+    /**
+     * @return new flags value with this flag added
+     */
+    int addTo(int flags)
+    {
+        return flags | (1 << id);
+    }
+
+    private static final MessageFlag[] idToFlagMap;
+    static
+    {
+        MessageFlag[] flags = values();
+
+        int max = -1;
+        for (MessageFlag flag : flags)
+            max = max(flag.id, max);
+
+        MessageFlag[] idMap = new MessageFlag[max + 1];
+        for (MessageFlag flag : flags)
+        {
+            if (idMap[flag.id] != null)
+                throw new RuntimeException("Two MessageFlag-s that map to the same id: " + flag.id);
+            idMap[flag.id] = flag;
+        }
+        idToFlagMap = idMap;
+    }
+
+    @SuppressWarnings("unused")
+    MessageFlag lookUpById(int id)
+    {
+        if (id < 0)
+            throw new IllegalArgumentException("MessageFlag id must be non-negative (got " + id + ')');
+
+        return id < idToFlagMap.length ? idToFlagMap[id] : null;
+    }
 }
 

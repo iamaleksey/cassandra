@@ -17,10 +17,6 @@
  */
 package org.apache.cassandra.net.async;
 
-import java.util.function.Consumer;
-
-import org.apache.cassandra.net.Message;
-
 public interface OutboundDebugCallbacks
 {
     static final OutboundDebugCallbacks NONE = new OutboundDebugCallbacks()

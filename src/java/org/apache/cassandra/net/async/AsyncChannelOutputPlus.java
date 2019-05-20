@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.io.IOException;
@@ -28,7 +27,6 @@ import org.apache.cassandra.io.util.BufferedDataOutputStreamPlus;
 import org.apache.cassandra.io.util.DataOutputStreamPlus;
 
 import static java.lang.Math.max;
-import static java.lang.Math.min;
 
 /**
  * A {@link DataOutputStreamPlus} that writes ASYNCHRONOUSLY to a Netty Channel.

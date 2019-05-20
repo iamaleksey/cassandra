@@ -43,7 +43,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.NoPayload.noPayload;
-import static org.apache.cassandra.net.ParamType.FORWARDED_FROM;
+import static org.apache.cassandra.net.ParamType.RESPOND_TO;
 import static org.apache.cassandra.net.ParamType.TRACE_SESSION;
 import static org.apache.cassandra.net.ParamType.TRACE_TYPE;
 import static org.junit.Assert.*;
@@ -153,7 +153,7 @@ public class MessageTest
         assertEquals(traceType, msg.traceType());
         assertEquals(traceSession, msg.traceSession());
         assertNull(msg.forwardTo());
-        assertNull(msg.forwardedFrom());
+        assertNull(msg.respondTo());
     }
 
     @Test
@@ -177,7 +177,7 @@ public class MessageTest
         testCycle(Message.out(Verb._TEST_2, 42));
         testCycle(Message.outWithFlag(Verb._TEST_2, 42, MessageFlag.CALL_BACK_ON_FAILURE));
         testCycle(Message.outWithFlags(Verb._TEST_2, 42, MessageFlag.CALL_BACK_ON_FAILURE, MessageFlag.TRACK_REPAIRED_DATA));
-        testCycle(Message.outWithParam(1, Verb._TEST_2, 42, FORWARDED_FROM, FBUtilities.getBroadcastAddressAndPort()));
+        testCycle(Message.outWithParam(1, Verb._TEST_2, 42, RESPOND_TO, FBUtilities.getBroadcastAddressAndPort()));
     }
 
     @Test
@@ -238,7 +238,7 @@ public class MessageTest
         assertEquals(msg1.trackRepairedData(), msg2.trackRepairedData());
         assertEquals(msg1.traceType(),         msg2.traceType());
         assertEquals(msg1.traceSession(),      msg2.traceSession());
-        assertEquals(msg1.forwardedFrom(),     msg2.forwardedFrom());
+        assertEquals(msg1.respondTo(),         msg2.respondTo());
         assertEquals(msg1.forwardTo(),         msg2.forwardTo());
 
         Object payload1 = msg1.payload;

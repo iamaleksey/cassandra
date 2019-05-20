@@ -33,7 +33,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
-public class ForwardToContainerTest
+public class ForwardingInfoTest
 {
     @Test
     public void testCurrent() throws Exception
@@ -57,20 +57,20 @@ public class ForwardToContainerTest
                                                               InetAddressAndPort.getByName("2001:0db8:0000:0000:0000:ff00:0042:8329"),
                                                               InetAddressAndPort.getByName("[2001:0db8:0000:0000:0000:ff00:0042:8329]:7000"));
 
-        ForwardToContainer ftc = new ForwardToContainer(addresses, new long[] { 44, 45, 46, 47, 48, 49 });
+        ForwardingInfo ftc = new ForwardingInfo(addresses, new long[] { 44, 45, 46, 47, 48, 49 });
         ByteBuffer buffer;
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
-            ForwardToContainer.serializer.serialize(ftc, dob, version);
+            ForwardingInfo.serializer.serialize(ftc, dob, version);
             buffer = dob.buffer();
         }
 
-        assertEquals(buffer.remaining(), ForwardToContainer.serializer.serializedSize(ftc, version));
+        assertEquals(buffer.remaining(), ForwardingInfo.serializer.serializedSize(ftc, version));
 
-        ForwardToContainer deserialized;
+        ForwardingInfo deserialized;
         try (DataInputBuffer dib = new DataInputBuffer(buffer, false))
         {
-            deserialized = ForwardToContainer.serializer.deserialize(dib, version);
+            deserialized = ForwardingInfo.serializer.deserialize(dib, version);
         }
 
         assertTrue(Arrays.equals(ftc.messageIds, deserialized.messageIds));

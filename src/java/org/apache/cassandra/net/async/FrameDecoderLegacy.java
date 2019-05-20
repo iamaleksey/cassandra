@@ -39,7 +39,7 @@ class FrameDecoderLegacy extends FrameDecoder
         this.messagingVersion = messagingVersion;
     }
 
-    final void decode(Collection<Frame> into, SharedBytes newBytes)
+    final void decode(Collection<Frame> into, ShareableBytes newBytes)
     {
         ByteBuffer in = newBytes.get();
         try
@@ -89,17 +89,17 @@ class FrameDecoderLegacy extends FrameDecoder
 
                 stash.flip();
                 assert !isSelfContained || stash.limit() == length;
-                SharedBytes stashed = SharedBytes.wrap(stash);
+                ShareableBytes stashed = ShareableBytes.wrap(stash);
                 into.add(new IntactFrame(isSelfContained, stashed));
                 stash = null;
             }
 
             if (remainingBytesInLargeMessage > 0)
             {
-                if (remainingBytesInLargeMessage >= newBytes.readableBytes())
+                if (remainingBytesInLargeMessage >= newBytes.remaining())
                 {
-                    remainingBytesInLargeMessage -= newBytes.readableBytes();
-                    into.add(new IntactFrame(false, newBytes.sliceAndConsume(newBytes.readableBytes())));
+                    remainingBytesInLargeMessage -= newBytes.remaining();
+                    into.add(new IntactFrame(false, newBytes.sliceAndConsume(newBytes.remaining())));
                     return;
                 }
                 else

@@ -54,6 +54,9 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.MUTATION;
 import static org.apache.cassandra.utils.Throwables.maybeFail;
 
+/**
+ * WIP
+ */
 public final class MessagingService extends MessagingServiceMBeanImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(MessagingService.class);
@@ -67,12 +70,11 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
     public static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
 
-    public static final byte[] ONE_BYTE = new byte[1];
-
     private static class MSHandle
     {
         public static final MessagingService instance = new MessagingService(false);
     }
+
     public static MessagingService instance()
     {
         return MSHandle.instance;
@@ -113,13 +115,102 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     }
 
     /**
+     * Send a non-mutation message to a given endpoint. This method specifies a callback
+     * which is invoked with the actual response.
+     *
+     * @param message message to be sent.
+     * @param to      endpoint to which the message needs to be sent
+     * @param cb      callback interface which is used to pass the responses or
+     *                suggest that a timeout occurred to the invoker of the send().
+     */
+    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb)
+    {
+        sendWithCallback(message, to, cb, null);
+    }
+
+    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb, ConnectionType specifyConnection)
+    {
+        callbacks.addWithExpiration(cb, message, to);
+        updateBackPressureOnSend(to, cb, message);
+        if (cb.invokeOnFailure() && !message.callBackOnFailure())
+            message = message.withCallBackOnFailure();
+        send(message, to, specifyConnection);
+    }
+
+    /**
+     * Send a mutation message or a Paxos Commit to a given endpoint. This method specifies a callback
+     * which is invoked with the actual response.
+     * Also holds the message (only mutation messages) to determine if it
+     * needs to trigger a hint (uses StorageProxy for that).
+     *
+     * @param message message to be sent.
+     * @param to      endpoint to which the message needs to be sent
+     * @param handler callback interface which is used to pass the responses or
+     *                suggest that a timeout occurred to the invoker of the send().
+     */
+    public void sendWriteWithCallback(Message message, Replica to, AbstractWriteResponseHandler<?> handler, boolean allowHints)
+    {
+        assert message.callBackOnFailure();
+        callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
+        updateBackPressureOnSend(to.endpoint(), handler, message);
+        send(message, to.endpoint(), null);
+    }
+
+    /**
+     * Send a message to a given endpoint. This method adheres to the fire and forget
+     * style messaging.
+     *
+     * @param message messages to be sent.
+     * @param to      endpoint to which the message needs to be sent
+     */
+    public void send(Message message, InetAddressAndPort to)
+    {
+        send(message, to, null);
+    }
+
+    public void send(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
+    {
+        if (logger.isTraceEnabled())
+        {
+            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
+
+            if (to.equals(FBUtilities.getBroadcastAddressAndPort()))
+                logger.trace("Message-to-self {} going over MessagingService", message);
+        }
+
+        outboundSink.accept(message, to, specifyConnection);
+    }
+
+    private void doSend(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
+    {
+        // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
+        while (true)
+        {
+            OutboundConnections connections = getOutbound(to);
+            try
+            {
+                connections.enqueue(message, specifyConnection);
+                return;
+            }
+            catch (ClosedChannelException e)
+            {
+                if (isShuttingDown)
+                    return; // just drop the message, and let others clean up
+
+                // remove the connection and try again
+                channelManagers.remove(to, connections);
+            }
+        }
+    }
+
+    /**
      * Updates the back-pressure state on sending to the given host if enabled and the given message callback supports it.
      *
      * @param host The replica host the back-pressure state refers to.
      * @param callback The message callback.
      * @param message The actual message.
      */
-    public void updateBackPressureOnSend(InetAddressAndPort host, RequestCallback callback, Message<?> message)
+    void updateBackPressureOnSend(InetAddressAndPort host, RequestCallback callback, Message<?> message)
     {
         if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
@@ -136,7 +227,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param callback The message callback.
      * @param timeout True if updated following a timeout, false otherwise.
      */
-    public void updateBackPressureOnReceive(InetAddressAndPort host, RequestCallback callback, boolean timeout)
+    void updateBackPressureOnReceive(InetAddressAndPort host, RequestCallback callback, boolean timeout)
     {
         if (DatabaseDescriptor.backPressureEnabled() && callback.supportsBackPressure())
         {
@@ -170,6 +261,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
                     continue;
                 states.add(getOutbound(host).getBackPressureState());
             }
+            //noinspection unchecked
             backPressure.apply(states, timeoutInNanos, NANOSECONDS);
         }
     }
@@ -238,6 +330,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
      * @param address IP Address to identify the peer
      * @param preferredAddress IP Address to use (and prefer) going forward for connecting to the peer
      */
+    @SuppressWarnings("UnusedReturnValue")
     public Future<Void> maybeReconnectWithNewIp(InetAddressAndPort address, InetAddressAndPort preferredAddress)
     {
         if (!SystemKeyspace.updatePreferredIP(address, preferredAddress))
@@ -248,93 +341,6 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             return messagingPool.reconnectWithNewIp(preferredAddress);
 
         return null;
-    }
-
-    /**
-     * Send a non-mutation message to a given endpoint. This method specifies a callback
-     * which is invoked with the actual response.
-     *
-     * @param message message to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     * @param cb      callback interface which is used to pass the responses or
-     *                suggest that a timeout occurred to the invoker of the send().
-     */
-    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb)
-    {
-        sendWithCallback(message, to, cb, null);
-    }
-
-    public void sendWithCallback(Message message, InetAddressAndPort to, RequestCallback cb, ConnectionType specifyConnection)
-    {
-        callbacks.addWithExpiration(cb, message, to);
-        updateBackPressureOnSend(to, cb, message);
-        if (cb.invokeOnFailure() && !message.callBackOnFailure())
-            message = message.withCallBackOnFailure();
-        send(message, to, specifyConnection);
-    }
-
-    /**
-     * Send a mutation message or a Paxos Commit to a given endpoint. This method specifies a callback
-     * which is invoked with the actual response.
-     * Also holds the message (only mutation messages) to determine if it
-     * needs to trigger a hint (uses StorageProxy for that).
-     *
-     * @param message message to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     * @param handler callback interface which is used to pass the responses or
-     *                suggest that a timeout occurred to the invoker of the send().
-     */
-    public void sendWriteWithCallback(Message message, Replica to, AbstractWriteResponseHandler<?> handler, boolean allowHints)
-    {
-        assert message.callBackOnFailure();
-        callbacks.addWithExpiration(handler, message, to, handler.consistencyLevel(), allowHints);
-        updateBackPressureOnSend(to.endpoint(), handler, message);
-        send(message, to.endpoint(), null);
-    }
-
-    /**
-     * Send a message to a given endpoint. This method adheres to the fire and forget
-     * style messaging.
-     *
-     * @param message messages to be sent.
-     * @param to      endpoint to which the message needs to be sent
-     */
-    public void send(Message message, InetAddressAndPort to)
-    {
-        send(message, to, null);
-    }
-
-    public void send(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
-    {
-        if (logger.isTraceEnabled())
-            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
-
-        if (to.equals(FBUtilities.getBroadcastAddressAndPort()))
-            logger.trace("Message-to-self {} going over MessagingService", message);
-
-        outboundSink.accept(message, to, specifyConnection);
-    }
-
-    private void doSend(Message message, InetAddressAndPort to, ConnectionType specifyConnection)
-    {
-        // expire the callback if the message failed to enqueue (failed to establish a connection or exceeded queue capacity)
-        while (true)
-        {
-            OutboundConnections connections = getOutbound(to);
-            try
-            {
-                connections.enqueue(message, specifyConnection);
-                return;
-            }
-            catch (ClosedChannelException e)
-            {
-                if (isShuttingDown)
-                    return; // just drop the message, and let others clean up
-
-                // remove the connection and try again
-                channelManagers.remove(to, connections);
-            }
-        }
     }
 
     /**

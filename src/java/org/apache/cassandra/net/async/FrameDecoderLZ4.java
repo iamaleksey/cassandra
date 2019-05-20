@@ -86,7 +86,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
         return compressedLength(header8b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header8b)
+    final Frame unpackFrame(ShareableBytes bytes, int begin, int end, long header8b)
     {
         ByteBuffer input = bytes.get();
 
@@ -114,7 +114,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
             try
             {
                 decompressor.decompress(input, begin + HEADER_LENGTH, out, 0, uncompressedLength);
-                return new IntactFrame(isSelfContained, SharedBytes.wrap(out));
+                return new IntactFrame(isSelfContained, ShareableBytes.wrap(out));
             }
             catch (Throwable t)
             {
@@ -124,7 +124,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
         }
     }
 
-    void decode(Collection<Frame> into, SharedBytes bytes)
+    void decode(Collection<Frame> into, ShareableBytes bytes)
     {
         // TODO: confirm in assembly output that we inline the relevant nested method calls
         decode(into, bytes, HEADER_LENGTH);

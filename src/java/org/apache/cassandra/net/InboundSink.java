@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.io.IOException;
@@ -32,6 +31,17 @@ import org.apache.cassandra.index.IndexNotAvailableException;
 import org.apache.cassandra.net.async.InboundMessageHandlers;
 import org.apache.cassandra.utils.NoSpamLogger;
 
+/**
+ * A message sink that all inbound messages go through.
+ *
+ * Default sink used by {@link MessagingService} is {@link IVerbHandler#doVerb(Message)}, but it can be overridden
+ * to filter out certain messages, record the fact of attempted delivery, or delay arrival.
+ *
+ * This facility is most useful for test code.
+ *
+ * {@link #accept(Message)} is invoked on a thread belonging to the {@link org.apache.cassandra.concurrent.Stage}
+ * assigned to the {@link Verb} of the message.
+ */
 public class InboundSink implements InboundMessageHandlers.MessageConsumer
 {
     private static final NoSpamLogger noSpamLogger =
@@ -41,6 +51,7 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
     {
         final Predicate<Message<?>> condition;
         final ThrowingConsumer<Message<?>, IOException> next;
+
         private Filtered(Predicate<Message<?>> condition, ThrowingConsumer<Message<?>, IOException> next)
         {
             this.condition = condition;
@@ -54,11 +65,12 @@ public class InboundSink implements InboundMessageHandlers.MessageConsumer
         }
     }
 
+    @SuppressWarnings("FieldMayBeFinal")
+    private volatile ThrowingConsumer<Message<?>, IOException> sink;
     private static final AtomicReferenceFieldUpdater<InboundSink, ThrowingConsumer> sinkUpdater
-    = AtomicReferenceFieldUpdater.newUpdater(InboundSink.class, ThrowingConsumer.class, "sink");
+        = AtomicReferenceFieldUpdater.newUpdater(InboundSink.class, ThrowingConsumer.class, "sink");
 
     private final MessagingService messaging;
-    private volatile ThrowingConsumer<Message<?>, IOException> sink;
 
     InboundSink(MessagingService messaging)
     {

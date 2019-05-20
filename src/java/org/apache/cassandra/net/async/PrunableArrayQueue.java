@@ -24,6 +24,7 @@ import java.util.function.Predicate;
  *
  * Can think of this queue as if it were an {@link java.util.ArrayDeque} with {@link #prune(Pruner)} method - an efficient
  * way to prune the queue in-place that is more expressive, and faster than {@link java.util.ArrayDeque#removeIf(Predicate)}.
+ *
  * The latter has to perform O(n*n) shifts, whereas {@link #prune(Pruner)} only needs O(n) shifts at worst.
  */
 final class PrunableArrayQueue<E>
@@ -41,8 +42,14 @@ final class PrunableArrayQueue<E>
         void onKept(E e);
     }
 
-    private E[] buffer;
     private int capacity;
+    private E[] buffer;
+
+    /*
+     * mask = capacity - 1;
+     * since capacity is a power of 2, value % capacity == value & (capacity - 1) == value & mask
+     */
+    private int mask;
 
     private int head = 0;
     private int tail = 0;
@@ -51,6 +58,7 @@ final class PrunableArrayQueue<E>
     PrunableArrayQueue(int requestedCapacity)
     {
         capacity = Math.max(8, findNextPositivePowerOfTwo(requestedCapacity));
+        mask = capacity - 1;
         buffer = (E[]) new Object[capacity];
     }
 
@@ -58,7 +66,7 @@ final class PrunableArrayQueue<E>
     boolean offer(E e)
     {
         buffer[tail] = e;
-        if ((tail = (tail + 1) & (capacity - 1)) == head)
+        if ((tail = (tail + 1) & mask) == head)
             doubleCapacity();
         return true;
     }
@@ -75,14 +83,14 @@ final class PrunableArrayQueue<E>
             return null;
 
         buffer[head] = null;
-        head = (head + 1) & (capacity - 1);
+        head = (head + 1) & mask;
 
         return result;
     }
 
     int size()
     {
-        return (tail - head) & (capacity - 1);
+        return (tail - head) & mask;
     }
 
     boolean isEmpty()
@@ -109,7 +117,7 @@ final class PrunableArrayQueue<E>
                  * We start at the tail and work backwards to minimise the number of copies
                  * as we expect to primarily prune from the front.
                  */
-                int k = (tail - 1 - i) & (capacity - 1);
+                int k = (tail - 1 - i) & mask;
                 e = buffer[k];
 
                 if (pruner.shouldPrune(e))
@@ -122,7 +130,7 @@ final class PrunableArrayQueue<E>
                 {
                     if (removed > 0)
                     {
-                        buffer[(k + removed) & (capacity - 1)] = e;
+                        buffer[(k + removed) & mask] = e;
                         buffer[k] = null;
                     }
                     pruner.onKept(e);
@@ -131,7 +139,7 @@ final class PrunableArrayQueue<E>
         }
         finally
         {
-            head = (head + removed) & (capacity - 1);
+            head = (head + removed) & mask;
         }
 
         return removed;
@@ -153,6 +161,7 @@ final class PrunableArrayQueue<E>
         tail = capacity;
 
         capacity = newCapacity;
+        mask = newCapacity - 1;
         buffer = newBuffer;
     }
 

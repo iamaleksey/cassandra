@@ -15,16 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
+import java.util.Collections;
+import java.util.IdentityHashMap;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 
-import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.Uninterruptibles;
 
 import org.slf4j.Logger;
@@ -32,10 +33,25 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.utils.ApproximateTime;
-import org.apache.mina.util.IdentityHashSet;
 
 import static java.lang.Math.min;
 
+/**
+ * A composite queue holding messages to be delivered by an {@link OutboundConnection}.
+ *
+ * Contains two queues:
+ *  1. An external MPSC {@link ManyToOneConcurrentLinkedQueue} for producers to enqueue messages onto
+ *  2. An internal intermediate {@link PrunableArrayQueue} into which the external queue is
+ *     drained with exclusive access and from which actual deliveries happen
+ * The second, intermediate queue exists to enable efficient in-place pruning of expired messages.
+ *
+ * Said pruning will be attempted in several scenarios:
+ *  1. By callers invoking {@link #add(Message)} - if metadata indicates presence of expired messages
+ *     in the queue, and if exclusive access can be immediately obtained (non-blockingly)
+ *  2. By {@link OutboundConnection}, periodically, while disconnected
+ *  3. As an optimisation, in an attempt to free up endpoint capacity on {@link OutboundConnection#enqueue(Message)}
+ *     if current endpoint reserve was insufficient
+ */
 @SuppressWarnings("WeakerAccess")
 public class OutboundMessageQueue
 {
@@ -60,6 +76,9 @@ public class OutboundMessageQueue
         this.onExpired = onExpired;
     }
 
+    /**
+     * Add the provided message to the queue. Always succeeds.
+     */
     public void add(Message<?> m)
     {
         maybePruneExpired();
@@ -67,12 +86,14 @@ public class OutboundMessageQueue
         maybeUpdateMinimumExpiryTime(m.expiresAtNanos());
     }
 
-    private void maybeUpdateMinimumExpiryTime(long newTime)
-    {
-        if (newTime < earliestExpiresAt)
-            earliestExpiresAtUpdater.accumulateAndGet(this, newTime, Math::min);
-    }
-
+    /**
+     * Try to obtain the lock; if this fails, a callback will be registered to be invoked when
+     * the lock is relinquished.
+     *
+     * This callback will run WITHOUT ownership of the lock, so must re-obtain the lock.
+     *
+     * @return null if failed to obtain the lock
+     */
     public WithLock lockOrCallback(long nowNanos, Runnable callbackIfDeferred)
     {
         if (!lockOrCallback(callbackIfDeferred))
@@ -81,20 +102,25 @@ public class OutboundMessageQueue
         return new WithLock(nowNanos);
     }
 
+    /**
+     * Try to obtain the lock. If successful, invoke the provided consumer immediately, otherwise
+     * register it to be invoked when the lock is relinquished.
+     */
     public void runEventually(Consumer<WithLock> runEventually)
     {
         // TODO: should we be offloading the callback to another thread to guarantee unlock thread is not unduly burdened?
         try (WithLock withLock = lockOrCallback(ApproximateTime.nanoTime(), () -> runEventually(runEventually)))
         {
-            if (withLock == null)
-                return;
-
-            runEventually.accept(withLock);
+            if (withLock != null)
+                runEventually.accept(withLock);
         }
     }
 
     /**
-     * May return null because the lock could not be acquired, even if the queue is non-empty
+     * If succeeds to obtain the lock, polls the queue, otherwise registers the provided callback
+     * to be invoked when the lock is relinquished.
+     *
+     * May return null when the queue is non-empty - if the lock could not be acquired.
      */
     public Message<?> tryPoll(long nowNanos, Runnable elseIfDeferred)
     {
@@ -156,7 +182,7 @@ public class OutboundMessageQueue
         public void consume(Consumer<Message<?>> consumer)
         {
             Message<?> m;
-            while ( null != (m = poll()))
+            while (null != (m = poll()))
                 consumer.accept(m);
         }
 
@@ -180,6 +206,12 @@ public class OutboundMessageQueue
         if (ApproximateTime.isAfterNanoTime(nowNanos, earliestExpiresAt))
             return tryRun(() -> pruneWithLock(nowNanos));
         return false;
+    }
+
+    private void maybeUpdateMinimumExpiryTime(long newTime)
+    {
+        if (newTime < earliestExpiresAt)
+            earliestExpiresAtUpdater.accumulateAndGet(this, newTime, Math::min);
     }
 
     /*
@@ -365,7 +397,7 @@ public class OutboundMessageQueue
     private class RemoveRunner extends AtomicReference<Remove> implements Runnable
     {
         final CountDownLatch done = new CountDownLatch(1);
-        final IdentityHashSet<Message<?>> removed = new IdentityHashSet<>();
+        final Set<Message<?>> removed = Collections.newSetFromMap(new IdentityHashMap<>());
 
         RemoveRunner() { super(new Remove(null, null)); }
 
@@ -376,7 +408,7 @@ public class OutboundMessageQueue
 
         public void run()
         {
-            IdentityHashSet<Message<?>> remove = new IdentityHashSet<>();
+            Set<Message<?>> remove = Collections.newSetFromMap(new IdentityHashMap<>());
             removeRunner = null;
             Remove undo = getAndSet(null);
             while (undo.message != null)
@@ -447,16 +479,8 @@ public class OutboundMessageQueue
         return runner.removed.contains(remove);
     }
 
-
     private static boolean shouldSend(Message<?> m, long nowNanos)
     {
         return !ApproximateTime.isAfterNanoTime(nowNanos, m.expiresAtNanos());
     }
-
-    @VisibleForTesting
-    void unsafeAdd(Message<?> m)
-    {
-        externalQueue.offer(m);
-    }
-
 }

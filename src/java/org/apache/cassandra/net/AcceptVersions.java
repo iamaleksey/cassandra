@@ -15,22 +15,28 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
+/**
+ * Encapsulates minimum and maximum messaging versions that a node accepts.
+ */
 public class AcceptVersions
 {
     public final int min, max;
+
     public AcceptVersions(int min, int max)
     {
         this.min = min;
         this.max = max;
     }
+
+    @Override
     public boolean equals(Object that)
     {
         if (!(that instanceof AcceptVersions))
             return false;
-        return    min == ((AcceptVersions) that).min
-               && max == ((AcceptVersions) that).max;
+
+        return min == ((AcceptVersions) that).min
+            && max == ((AcceptVersions) that).max;
     }
 }

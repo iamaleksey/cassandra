@@ -1305,7 +1305,7 @@ public class StorageProxy implements StorageProxyMBean
             long[] messageIds = new long[forwardToReplicas.size()];
             Arrays.fill(messageIds, message.id());
 
-            message = message.withForwardingTo(new ForwardToContainer(forwardToReplicas.endpointList(), messageIds));
+            message = message.withForwardTo(new ForwardingInfo(forwardToReplicas.endpointList(), messageIds));
         }
 
         MessagingService.instance().sendWriteWithCallback(message, targets.get(0), handler, true);

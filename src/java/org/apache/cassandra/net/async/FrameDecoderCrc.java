@@ -54,7 +54,7 @@ public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
         return ((int) header6b) & 0x1FFFF;
     }
 
-    static int headerCrc(long header6b)
+    private static int headerCrc(long header6b)
     {
         return ((int) (header6b >>> 24)) & 0xFFFFFF;
     }
@@ -101,7 +101,7 @@ public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
         return payloadLength(header6b) + HEADER_AND_TRAILER_LENGTH;
     }
 
-    final Frame unpackFrame(SharedBytes bytes, int begin, int end, long header6b)
+    final Frame unpackFrame(ShareableBytes bytes, int begin, int end, long header6b)
     {
         ByteBuffer in = bytes.get();
         boolean isSelfContained = isSelfContained(header6b);
@@ -120,7 +120,7 @@ public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
         return new IntactFrame(isSelfContained, bytes.slice(begin + HEADER_LENGTH, end - TRAILER_LENGTH));
     }
 
-    void decode(Collection<Frame> into, SharedBytes bytes)
+    void decode(Collection<Frame> into, ShareableBytes bytes)
     {
         decode(into, bytes, HEADER_LENGTH);
     }

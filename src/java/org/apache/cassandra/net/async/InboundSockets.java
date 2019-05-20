@@ -159,8 +159,7 @@ public class InboundSockets
         this(withDefaultBindAddresses(template));
     }
 
-    @VisibleForTesting
-    public InboundSockets(List<InboundConnectionSettings> templates)
+    InboundSockets(List<InboundConnectionSettings> templates)
     {
         this.sockets = bindings(templates);
     }
@@ -198,6 +197,7 @@ public class InboundSockets
 
         return new FutureCombiner(opening);
     }
+
     public Future<Void> open()
     {
         List<Future<Void>> opening = new ArrayList<>();

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.cassandra.net;
+package org.apache.cassandra.locator;
 
 import java.nio.ByteBuffer;
 
@@ -24,13 +24,12 @@ import org.junit.Test;
 
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
-import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.net.MessagingService;
 
 import static org.junit.Assert.assertEquals;
 
-public class CompactEndpointSerializationHelperTest
+public class InetAddressAndPortSerializerTest
 {
-
     @Test
     public void testRoundtrip() throws Exception
     {
@@ -48,15 +47,15 @@ public class CompactEndpointSerializationHelperTest
         ByteBuffer out;
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
-            CompactEndpointSerializationHelper.instance.serialize(address, dob, version);
+            InetAddressAndPort.serializer.serialize(address, dob, version);
             out = dob.buffer();
         }
-        assertEquals(out.remaining(), CompactEndpointSerializationHelper.instance.serializedSize(address, version));
+        assertEquals(out.remaining(), InetAddressAndPort.serializer.serializedSize(address, version));
 
         InetAddressAndPort roundtripped;
         try (DataInputBuffer dib = new DataInputBuffer(out, false))
         {
-            roundtripped = CompactEndpointSerializationHelper.instance.deserialize(dib, version);
+            roundtripped = InetAddressAndPort.serializer.deserialize(dib, version);
         }
 
         if (version >= MessagingService.VERSION_40)

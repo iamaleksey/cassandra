@@ -28,28 +28,28 @@ import org.apache.cassandra.io.util.RebufferingInputStream;
  * A specialised {@link org.apache.cassandra.io.util.DataInputPlus} implementation for deserializing large messages
  * that are split over multiple {@link org.apache.cassandra.net.async.FrameDecoder.Frame}s.
  *
- * Ensures that every underlying {@link SharedBytes} frame is released, and promptly so, as frames are consumed.
+ * Ensures that every underlying {@link ShareableBytes} frame is released, and promptly so, as frames are consumed.
  *
  * {@link #close()} <em>MUST</em> be invoked in the end.
  */
 class ChunkedInputPlus extends RebufferingInputStream
 {
-    private final PeekingIterator<SharedBytes> iter;
+    private final PeekingIterator<ShareableBytes> iter;
 
-    private ChunkedInputPlus(PeekingIterator<SharedBytes> iter)
+    private ChunkedInputPlus(PeekingIterator<ShareableBytes> iter)
     {
         super(iter.peek().get());
         this.iter = iter;
     }
 
     /**
-     * Creates a {@link ChunkedInputPlus} from the provided {@link SharedBytes} buffers.
+     * Creates a {@link ChunkedInputPlus} from the provided {@link ShareableBytes} buffers.
      *
      * The provided iterable <em>must</em> contain at least one buffer.
      */
-    static ChunkedInputPlus of(Iterable<SharedBytes> buffers)
+    static ChunkedInputPlus of(Iterable<ShareableBytes> buffers)
     {
-        PeekingIterator<SharedBytes> iter = Iterators.peekingIterator(buffers.iterator());
+        PeekingIterator<ShareableBytes> iter = Iterators.peekingIterator(buffers.iterator());
         if (!iter.hasNext())
             throw new IllegalArgumentException();
         return new ChunkedInputPlus(iter);
@@ -72,7 +72,7 @@ class ChunkedInputPlus extends RebufferingInputStream
     public void close()
     {
         buffer = null;
-        iter.forEachRemaining(SharedBytes::release);
+        iter.forEachRemaining(ShareableBytes::release);
     }
 
     /**
@@ -87,8 +87,8 @@ class ChunkedInputPlus extends RebufferingInputStream
         int bytes = 0;
         while (iter.hasNext())
         {
-            SharedBytes chunk = iter.peek();
-            bytes += chunk.readableBytes();
+            ShareableBytes chunk = iter.peek();
+            bytes += chunk.remaining();
             chunk.release();
             iter.next();
         }

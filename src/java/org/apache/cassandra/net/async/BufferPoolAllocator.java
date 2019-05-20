@@ -43,10 +43,10 @@ abstract class BufferPoolAllocator extends AbstractByteBufAllocator
         return true;
     }
 
+    /** shouldn't be invoked */
     @Override
     protected ByteBuf newHeapBuffer(int minCapacity, int maxCapacity)
     {
-        // for pre40; Netty LZ4 decoder sometimes allocates on heap explicitly for some reason
         return Unpooled.buffer(minCapacity, maxCapacity);
     }
 
