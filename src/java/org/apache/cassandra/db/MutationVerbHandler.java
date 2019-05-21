@@ -75,7 +75,7 @@ public class MutationVerbHandler implements IVerbHandler<Mutation>
 
         boolean useSameMessageID = forwardTo.useSameMessageID();
         // reuse the same Message if all ids are identical (as they will be for 4.0+ node originated messages)
-        Message<Mutation> message = useSameMessageID ? builder.withId(forwardTo.messageIds[0]).build() : null;
+        Message<Mutation> message = useSameMessageID ? builder.build() : null;
 
         for (int i = 0; i < forwardTo.targets.size(); i++)
         {

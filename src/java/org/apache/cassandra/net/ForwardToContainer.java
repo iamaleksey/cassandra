@@ -53,10 +53,14 @@ public class ForwardToContainer implements Serializable
 
     public boolean useSameMessageID()
     {
+        if (messageIds.length == 0)
+            return true;
+
         long id = messageIds[0];
         for (int i = 1; i < messageIds.length; i++)
             if (id != messageIds[i])
                 return false;
+
         return true;
     }
 
