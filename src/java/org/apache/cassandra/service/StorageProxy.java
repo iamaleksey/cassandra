@@ -1282,35 +1282,34 @@ public class StorageProxy implements StorageProxyMBean
         }
     }
 
-    // TODO: are targets shuffled? do we want them to be to spread out forwarding burden?
+    /*
+     * Send the message to the first replica of targets, and have it forward the message to others in its DC
+     *
+     * TODO: are targets shuffled? do we want them to be to spread out forwarding burden?
+     */
     private static void sendMessagesToNonlocalDC(Message<? extends IMutation> message,
                                                  EndpointsForToken targets,
                                                  AbstractWriteResponseHandler<IMutation> handler)
     {
-        /*
-         * Make the first replica responsible for forwarding the message to other
-         * replicas in the DC, add the other destinations as FORWARD_TO entries.
-         */
-        Replica first = targets.get(0);
-        EndpointsForToken rest = targets.subList(1, targets.size());
-
-        // starting with 4.0, use the same message id for all replicas
-        long[] messageIds = new long[rest.size()];
-        Arrays.fill(messageIds, message.id());
-
-        for (Replica replica : targets)
+        if (targets.size() > 1)
         {
-            MessagingService.instance().callbacks.addWithExpiration(handler,
-                                                                    message,
-                                                                    replica,
-                                                                    handler.replicaPlan.consistencyLevel(),
-                                                                    true);
-            logger.trace("Adding FWD message to {}@{}", message.id(), replica);
+            EndpointsForToken forwardToReplicas = targets.subList(1, targets.size());
+
+            for (Replica replica : forwardToReplicas)
+            {
+                MessagingService.instance().callbacks.addWithExpiration(handler, message, replica, handler.replicaPlan.consistencyLevel(), true);
+                logger.trace("Adding FWD message to {}@{}", message.id(), replica);
+            }
+
+            // starting with 4.0, use the same message id for all replicas
+            long[] messageIds = new long[forwardToReplicas.size()];
+            Arrays.fill(messageIds, message.id());
+
+            message = message.withForwardingTo(new ForwardToContainer(forwardToReplicas.endpointList(), messageIds));
         }
 
-        message = message.withForwardingTo(new ForwardToContainer(rest.endpointList(), messageIds));
-        MessagingService.instance().send(message, first.endpoint());
-        logger.trace("Sending message to {}@{}", message.id(), first);
+        MessagingService.instance().sendWriteWithCallback(message, targets.get(0), handler, true);
+        logger.trace("Sending message to {}@{}", message.id(), targets.get(0));
     }
 
     private static void performLocally(Stage stage, Replica localReplica, final Runnable runnable)
