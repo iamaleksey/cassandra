@@ -205,8 +205,11 @@ public class OutboundConnection
      * Currently being (re)connected; this may be cancelled (if closing) or waited on (for delivery)
      * Note that the work managed by this future may be performed asynchronously, and not on the eventLoop.
      * It may also be completed outside of the eventLoop, though its listeners will all be invoked on the eventLoop.
+     *
+     * This variable may be _read_ outside of the eventLoop, with the possibility of seeing a stale value,
+     * but may only be written by the eventLoop.
      */
-    private Future<?> connecting;
+    private volatile Future<?> connecting;
 
     OutboundConnection(ConnectionType type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
     {
@@ -1107,6 +1110,9 @@ public class OutboundConnection
      */
     private Future<?> requestConnect()
     {
+        // we may race with updates to this variable, but this is fine, since we only guarantee that we see a value
+        // that did at some point represent an active connection attempt - if it is stale, it will have been completed
+        // and the caller can retry (or utilise the successfully established connection)
         Future<?> inProgress = connecting;
         if (inProgress != null)
             return inProgress;
