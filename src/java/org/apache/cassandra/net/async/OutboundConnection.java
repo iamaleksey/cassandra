@@ -1227,13 +1227,13 @@ public class OutboundConnection
         //       however, it might be semantically good to do this anyway, as it means we cannot spin
         //       a thousand connections that all have failing operations in flight.
         //       but this is not probably a realistic scenario, and it potentially delays (slightly) reconnection
-        Promise<Object> onClose = AsyncPromise.uncancellable(eventLoop, future -> {
+        Promise<?> onClose = AsyncPromise.uncancellable(eventLoop, future -> {
             // ensure we will run delivery again at some point, if we have work
             // (could have multiple rounds of exceptions, with many waiting messages and no new ones)
             if (hasPending())
                 delivery.execute();
         });
-        runOnEventLoop(closeChannelTask(closeIfIs, new PromiseNotifier<>(onClose)));
+        runOnEventLoop(closeChannelTask(closeIfIs, onClose));
         return onClose;
     }
 
@@ -1241,9 +1241,10 @@ public class OutboundConnection
     {
         return closeChannelTask(closeIfIs, null);
     }
-    private Runnable closeChannelTask(Channel closeIfIs, GenericFutureListener<? extends Future<Object>> closeListener)
+    private Runnable closeChannelTask(Channel closeIfIs, Promise<?> onClose)
     {
         return () -> {
+            Future<?> closeFuture = null;
             if (closeIfIs != null && channel == closeIfIs)
             {
                 // no need to wait until the channel is closed to set ourselves as disconnected (and potentially open a new channel)
@@ -1252,12 +1253,17 @@ public class OutboundConnection
                 channel = null;
                 payloadAllocator = null;
                 scheduleMaintenanceWhileDisconnected();
-                Future<?> closeFuture = close.close().addListener(future -> {
+                closeFuture = close.close().addListener(future -> {
                     if (!future.isSuccess())
                         logger.info("Problem closing channel {}", channel, future.cause());
                 });
-                if (closeListener != null)
-                    closeFuture.addListener(closeListener);
+            }
+            if (onClose != null)
+            {
+                if (closeFuture != null)
+                    closeFuture.addListener(new PromiseNotifier(onClose));
+                else
+                    onClose.setSuccess(null);
             }
         };
     }
