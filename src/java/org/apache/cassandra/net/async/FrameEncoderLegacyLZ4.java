@@ -15,107 +15,142 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.zip.Checksum;
+import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
-import io.netty.channel.ChannelPromise;
-import io.netty.handler.codec.EncoderException;
-import io.netty.handler.codec.compression.Lz4FrameEncoder;
-import io.netty.util.ReferenceCountUtil;
-import io.netty.util.concurrent.Promise;
-import io.netty.util.concurrent.PromiseNotifier;
+import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
+import net.jpountz.xxhash.XXHash32;
 import net.jpountz.xxhash.XXHashFactory;
+import org.apache.cassandra.io.compress.BufferType;
+import org.apache.cassandra.utils.ByteBufferUtil;
+import org.apache.cassandra.utils.memory.BufferPool;
+
+import static java.lang.Integer.reverseBytes;
+import static java.lang.Math.min;
 
 @ChannelHandler.Sharable
-class FrameEncoderLegacyLZ4 extends FrameEncoderLegacy
+class FrameEncoderLegacyLZ4 extends FrameEncoder
 {
-    public static final FrameEncoderLegacyLZ4 instance = new FrameEncoderLegacyLZ4();
+    static final FrameEncoderLegacyLZ4 instance =
+        new FrameEncoderLegacyLZ4(XXHashFactory.fastestInstance().hash32(),
+                                  LZ4Factory.fastestInstance().fastCompressor());
 
-    private static final int LEGACY_COMPRESSION_BLOCK_SIZE = OutboundConnection.LargeMessageDelivery.DEFAULT_BUFFER_SIZE;
-    private static final int LEGACY_LZ4_HASH_SEED = 0x9747b28c;
+    // magic number of LZ4 block
+    private static final long MAGIC_NUMBER =
+        (long) 'L' << 56 | (long) 'Z' << 48 | (long) '4' << 40 | (long) 'B' << 32 | 'l' << 24 | 'o' << 16 | 'c' << 8  | 'k';
 
-    // Netty's Lz4FrameEncoder notifies flushes as successful when they may not be, by flushing an empty buffer ahead of the compressed buffer
-    // in reality, they need to be notified _afterwards_, so here we:
-    //   * Buffer the promises we want to notify in a list
-    //   * Swallow any normal flush invocations in FlushDeferrer
-    //   * Extend Lz4FrameEncoder to override flush() so that we can:
-    //   * - After writing compressed, but before flushing, insert a new promise notifier for our waiting promises
-    //   * - Then request an actual flush of our FlushDeferrer with its special value
+    // full length of LZ4 block header
+    private static final int HEADER_LENGTH = 8  // magic number
+                                           + 1  // token
+                                           + 4  // compressed length
+                                           + 4  // uncompressed length
+                                           + 4; // checksum
 
-    private static class WaitingPromiseWriter extends ChannelOutboundHandlerAdapter
+    private static final int MAGIC_NUMBER_OFFSET        = 0;
+    private static final int TOKEN_OFFSET               = 8;
+    private static final int COMPRESSED_LENGTH_OFFSET   = 9;
+    private static final int UNCOMPRESSED_LENGTH_OFFSET = 13;
+    private static final int CHECKSUM_OFFSET            = 17;
+
+    private static final  int MAX_BLOCK_LENGTH     = 1  << 15;
+    private static final byte TOKEN_NON_COMPRESSED = 0x10 | 5;
+    private static final byte TOKEN_COMPRESSED     = 0x20 | 5;
+
+    private static final int LEGACY_LZ4_HASH_SEED = 0x9747B28C;
+
+    private final XXHash32 xxhash;
+    private final LZ4Compressor compressor;
+
+    private FrameEncoderLegacyLZ4(XXHash32 xxhash, LZ4Compressor compressor)
     {
-        final List<Promise<?>> waiting = new ArrayList<>();
-        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception
-        {
-            ctx.write(ReferenceCountUtil.retain(msg), promise);
-            if (!waiting.isEmpty())
-            {
-                ChannelPromise waiting = AsyncChannelPromise.withListener(ctx.channel(), new PromiseNotifier<>(this.waiting.toArray(new Promise[0])));
-                this.waiting.clear();
-                ctx.write(Unpooled.EMPTY_BUFFER, waiting);
-            }
-        }
+        this.xxhash = xxhash;
+        this.compressor = compressor;
+    }
 
-        void add(Promise<?> promise)
+    private static void writeHeader(ByteBuffer frame, int frameOffset, int compressedLength, int uncompressedLength, int checksum)
+    {
+        byte token = compressedLength == uncompressedLength
+                   ? TOKEN_NON_COMPRESSED
+                   : TOKEN_COMPRESSED;
+
+        frame.putLong(frameOffset + MAGIC_NUMBER_OFFSET,        MAGIC_NUMBER                    );
+        frame.put    (frameOffset + TOKEN_OFFSET,               token                           );
+        frame.putInt (frameOffset + COMPRESSED_LENGTH_OFFSET,   reverseBytes(compressedLength)  );
+        frame.putInt (frameOffset + UNCOMPRESSED_LENGTH_OFFSET, reverseBytes(uncompressedLength));
+        frame.putInt (frameOffset + CHECKSUM_OFFSET,            reverseBytes(checksum)          );
+    }
+
+    @Override
+    ByteBuf encode(boolean isSelfContained, ByteBuffer payload)
+    {
+        ByteBuffer frame = null;
+        try
         {
-            waiting.add(promise);
+            frame = BufferPool.getAtLeast(calculateMaxFrameLength(payload), BufferType.OFF_HEAP);
+
+            int frameOffset   = 0;
+            int payloadOffset = 0;
+
+            int payloadLength = payload.remaining();
+            while (payloadOffset < payloadLength)
+            {
+                int blockLength = min(MAX_BLOCK_LENGTH, payloadLength - payloadOffset);
+                frameOffset   += compressBlock(frame, frameOffset, payload, payloadOffset, blockLength);
+                payloadOffset += blockLength;
+            }
+
+            frame.limit(frameOffset);
+            BufferPool.putUnusedPortion(frame, false);
+
+            return GlobalBufferPoolAllocator.wrap(frame);
+        }
+        catch (Throwable t)
+        {
+            if (null != frame)
+                BufferPool.put(frame, false);
+            throw t;
+        }
+        finally
+        {
+            BufferPool.put(payload, false);
         }
     }
 
-    private static class Lz4FrameEncoderWithAccurateFlushNotification extends Lz4FrameEncoder
+    private int compressBlock(ByteBuffer frame, int frameOffset, ByteBuffer payload, int payloadOffset, int blockLength)
     {
-        private final WaitingPromiseWriter promises = new WaitingPromiseWriter();
-
-        Lz4FrameEncoderWithAccurateFlushNotification(LZ4Factory factory, boolean highCompressor, int blockSize, Checksum checksum)
+        int maxCompressedLength = compressor.maxCompressedLength(blockLength);
+        int    compressedLength = compressor.compress(payload, payloadOffset, blockLength, frame, frameOffset + HEADER_LENGTH, maxCompressedLength);
+        if (compressedLength >= blockLength)
         {
-            super(factory, highCompressor, blockSize, checksum);
+            ByteBufferUtil.copyBytes(payload, payloadOffset, frame, frameOffset + HEADER_LENGTH, blockLength);
+            compressedLength = blockLength;
         }
-
-        public void write(ChannelHandlerContext ctx, Object msg, ChannelPromise promise) throws Exception
-        {
-            try
-            {
-                ByteBuf in  = (ByteBuf) msg;
-                ByteBuf out = allocateBuffer(ctx, in, isPreferDirect());
-                try
-                {
-                    encode(ctx, in, out);
-                    promises.add(promise);
-                    if (out.isReadable())
-                        ctx.write(out);
-                }
-                finally
-                {
-                    out.release();
-                }
-            }
-            catch (EncoderException e)
-            {
-                throw e;
-            }
-            catch (Throwable e)
-            {
-                throw new EncoderException(e);
-            }
-        }
+        int checksum = xxhash.hash(payload, payloadOffset, blockLength, LEGACY_LZ4_HASH_SEED) & 0xFFFFFFF;
+        writeHeader(frame, frameOffset, compressedLength, blockLength, checksum);
+        return HEADER_LENGTH + compressedLength;
     }
 
+    private int calculateMaxFrameLength(ByteBuffer payload)
+    {
+        int payloadLength = payload.remaining();
+
+        int quotient  = payloadLength / MAX_BLOCK_LENGTH;
+        int remainder = payloadLength - MAX_BLOCK_LENGTH * quotient;
+
+        int maxLength = (HEADER_LENGTH + compressor.maxCompressedLength(MAX_BLOCK_LENGTH)) * quotient;
+        if (remainder != 0)
+            maxLength += HEADER_LENGTH + compressor.maxCompressedLength(remainder);
+        return maxLength;
+    }
+
+    @Override
     void addLastTo(ChannelPipeline pipeline)
     {
-        Lz4FrameEncoderWithAccurateFlushNotification encoder = new Lz4FrameEncoderWithAccurateFlushNotification(LZ4Factory.fastestInstance(), false, LEGACY_COMPRESSION_BLOCK_SIZE, XXHashFactory.fastestInstance().newStreamingHash32(LEGACY_LZ4_HASH_SEED).asChecksum());
-        pipeline.addLast("promisefix", encoder.promises);
-        pipeline.addLast("legacyLz4", encoder);
-        pipeline.addLast("frameEncoderNone", this);
+        pipeline.addLast("frameEncoderLegacyLZ4", this);
     }
 }
