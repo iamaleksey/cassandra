@@ -21,7 +21,6 @@ import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.xxhash.XXHash32;
@@ -33,35 +32,22 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import static java.lang.Integer.reverseBytes;
 import static java.lang.Math.min;
 
+/**
+ * LZ4 {@link FrameEncoder} implementation for compressed legacy (3.0, 3.11) connections.
+ *
+ * Netty's provided implementation - {@link io.netty.handler.codec.compression.Lz4FrameEncoder} couldn't be reused
+ * for two reasons:
+ *   1. It notifies flushes as successful when they may not be, by flushing an empty buffer ahead
+ *      of the compressed buffer
+ *   2. It has very poor performance when coupled with xxhash, which we use for legacy connections -
+ *      allocating a single-byte array and making a JNI call <em>for every byte of the payload</em>
+ */
 @ChannelHandler.Sharable
 class FrameEncoderLegacyLZ4 extends FrameEncoder
 {
     static final FrameEncoderLegacyLZ4 instance =
         new FrameEncoderLegacyLZ4(XXHashFactory.fastestInstance().hash32(),
                                   LZ4Factory.fastestInstance().fastCompressor());
-
-    // magic number of LZ4 block
-    private static final long MAGIC_NUMBER =
-        (long) 'L' << 56 | (long) 'Z' << 48 | (long) '4' << 40 | (long) 'B' << 32 | 'l' << 24 | 'o' << 16 | 'c' << 8  | 'k';
-
-    // full length of LZ4 block header
-    private static final int HEADER_LENGTH = 8  // magic number
-                                           + 1  // token
-                                           + 4  // compressed length
-                                           + 4  // uncompressed length
-                                           + 4; // checksum
-
-    private static final int MAGIC_NUMBER_OFFSET        = 0;
-    private static final int TOKEN_OFFSET               = 8;
-    private static final int COMPRESSED_LENGTH_OFFSET   = 9;
-    private static final int UNCOMPRESSED_LENGTH_OFFSET = 13;
-    private static final int CHECKSUM_OFFSET            = 17;
-
-    private static final  int MAX_BLOCK_LENGTH     = 1  << 15;
-    private static final byte TOKEN_NON_COMPRESSED = 0x10 | 5;
-    private static final byte TOKEN_COMPRESSED     = 0x20 | 5;
-
-    private static final int LEGACY_LZ4_HASH_SEED = 0x9747B28C;
 
     private final XXHash32 xxhash;
     private final LZ4Compressor compressor;
@@ -72,18 +58,7 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         this.compressor = compressor;
     }
 
-    private static void writeHeader(ByteBuffer frame, int frameOffset, int compressedLength, int uncompressedLength, int checksum)
-    {
-        byte token = compressedLength == uncompressedLength
-                   ? TOKEN_NON_COMPRESSED
-                   : TOKEN_COMPRESSED;
-
-        frame.putLong(frameOffset + MAGIC_NUMBER_OFFSET,        MAGIC_NUMBER                    );
-        frame.put    (frameOffset + TOKEN_OFFSET,               token                           );
-        frame.putInt (frameOffset + COMPRESSED_LENGTH_OFFSET,   reverseBytes(compressedLength)  );
-        frame.putInt (frameOffset + UNCOMPRESSED_LENGTH_OFFSET, reverseBytes(uncompressedLength));
-        frame.putInt (frameOffset + CHECKSUM_OFFSET,            reverseBytes(checksum)          );
-    }
+    private static final int MAX_BLOCK_LENGTH = 1 << 15;
 
     @Override
     ByteBuf encode(boolean isSelfContained, ByteBuffer payload)
@@ -93,14 +68,14 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         {
             frame = BufferPool.getAtLeast(calculateMaxFrameLength(payload), BufferType.OFF_HEAP);
 
-            int frameOffset   = 0;
+            int   frameOffset = 0;
             int payloadOffset = 0;
 
             int payloadLength = payload.remaining();
             while (payloadOffset < payloadLength)
             {
                 int blockLength = min(MAX_BLOCK_LENGTH, payloadLength - payloadOffset);
-                frameOffset   += compressBlock(frame, frameOffset, payload, payloadOffset, blockLength);
+                frameOffset += compressBlock(frame, frameOffset, payload, payloadOffset, blockLength);
                 payloadOffset += blockLength;
             }
 
@@ -121,10 +96,12 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         }
     }
 
+    private static final int LEGACY_LZ4_HASH_SEED = 0x9747B28C;
+
     private int compressBlock(ByteBuffer frame, int frameOffset, ByteBuffer payload, int payloadOffset, int blockLength)
     {
-        int maxCompressedLength = compressor.maxCompressedLength(blockLength);
-        int    compressedLength = compressor.compress(payload, payloadOffset, blockLength, frame, frameOffset + HEADER_LENGTH, maxCompressedLength);
+        int frameBytesRemaining = frame.limit() - (frameOffset + HEADER_LENGTH);
+        int compressedLength = compressor.compress(payload, payloadOffset, blockLength, frame, frameOffset + HEADER_LENGTH, frameBytesRemaining);
         if (compressedLength >= blockLength)
         {
             ByteBufferUtil.copyBytes(payload, payloadOffset, frame, frameOffset + HEADER_LENGTH, blockLength);
@@ -135,22 +112,33 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         return HEADER_LENGTH + compressedLength;
     }
 
+    private static final long MAGIC_NUMBER =
+        (long) 'L' << 56 | (long) 'Z' << 48 | (long) '4' << 40 | (long) 'B' << 32 | 'l' << 24 | 'o' << 16 | 'c' << 8  | 'k';
+
+    private static final byte TOKEN_NON_COMPRESSED = 0x15;
+    private static final byte TOKEN_COMPRESSED     = 0x25;
+
+    // magic number, token, compressed length, uncompressed length, checksum
+    private static final int HEADER_LENGTH = 8 + 1 + 4 + 4 + 4;
+
+    private static void writeHeader(ByteBuffer frame, int frameOffset, int compressedLength, int uncompressedLength, int checksum)
+    {
+        byte token = compressedLength == uncompressedLength
+                   ? TOKEN_NON_COMPRESSED
+                   : TOKEN_COMPRESSED;
+
+        //noinspection PointlessArithmeticExpression
+        frame.putLong(frameOffset + 0,  MAGIC_NUMBER                    );
+        frame.put    (frameOffset + 8,  token                           );
+        frame.putInt (frameOffset + 9,  reverseBytes(compressedLength)  );
+        frame.putInt (frameOffset + 13, reverseBytes(uncompressedLength));
+        frame.putInt (frameOffset + 17, reverseBytes(checksum)          );
+    }
+
     private int calculateMaxFrameLength(ByteBuffer payload)
     {
         int payloadLength = payload.remaining();
-
-        int quotient  = payloadLength / MAX_BLOCK_LENGTH;
-        int remainder = payloadLength - MAX_BLOCK_LENGTH * quotient;
-
-        int maxLength = (HEADER_LENGTH + compressor.maxCompressedLength(MAX_BLOCK_LENGTH)) * quotient;
-        if (remainder != 0)
-            maxLength += HEADER_LENGTH + compressor.maxCompressedLength(remainder);
-        return maxLength;
-    }
-
-    @Override
-    void addLastTo(ChannelPipeline pipeline)
-    {
-        pipeline.addLast("frameEncoderLegacyLZ4", this);
+        int blockCount = payloadLength / MAX_BLOCK_LENGTH + (payloadLength % MAX_BLOCK_LENGTH != 0 ? 1 : 0);
+        return compressor.maxCompressedLength(payloadLength) + HEADER_LENGTH * blockCount;
     }
 }

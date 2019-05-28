@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static org.apache.cassandra.net.async.FrameEncoderCrc.HEADER_LENGTH;
@@ -62,10 +61,5 @@ public class FrameEncoderUnprotected extends FrameEncoder
             BufferPool.put(frame, false);
             throw t;
         }
-    }
-
-    void addLastTo(ChannelPipeline pipeline)
-    {
-        pipeline.addLast("frameEncoderCrc", this);
     }
 }

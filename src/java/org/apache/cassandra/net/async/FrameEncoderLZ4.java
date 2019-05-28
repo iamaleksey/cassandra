@@ -24,7 +24,6 @@ import java.util.zip.CRC32;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
 import net.jpountz.lz4.LZ4Compressor;
 import net.jpountz.lz4.LZ4Factory;
 import org.apache.cassandra.io.compress.BufferType;
@@ -113,10 +112,5 @@ class FrameEncoderLZ4 extends FrameEncoder
         {
             BufferPool.put(in, false);
         }
-    }
-
-    void addLastTo(ChannelPipeline pipeline)
-    {
-        pipeline.addLast("frameEncoderLZ4", this);
     }
 }

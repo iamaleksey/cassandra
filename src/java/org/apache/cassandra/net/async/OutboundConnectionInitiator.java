@@ -321,7 +321,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     if (type.isMessaging())
                     {
                         assert frameEncoder != null;
-                        frameEncoder.addLastTo(pipeline);
+                        pipeline.addLast("frameEncoder", frameEncoder);
                     }
                     pipeline.remove(this);
                 }

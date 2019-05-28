@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net.async;
 
 import java.nio.ByteBuffer;
@@ -23,7 +22,6 @@ import java.nio.ByteBuffer;
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
-import io.netty.channel.ChannelPipeline;
 import io.netty.channel.ChannelPromise;
 import org.apache.cassandra.io.compress.BufferType;
 import org.apache.cassandra.utils.memory.BufferPool;
@@ -139,6 +137,4 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
         ByteBuf write = encode(payload.isSelfContained, payload.buffer);
         ctx.write(write, promise);
     }
-
-    abstract void addLastTo(ChannelPipeline pipeline);
 }

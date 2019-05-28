@@ -22,7 +22,6 @@ import java.nio.ByteBuffer;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandler;
-import io.netty.channel.ChannelPipeline;
 
 @ChannelHandler.Sharable
 class FrameEncoderLegacy extends FrameEncoder
@@ -32,10 +31,5 @@ class FrameEncoderLegacy extends FrameEncoder
     ByteBuf encode(boolean isSelfContained, ByteBuffer buffer)
     {
         return GlobalBufferPoolAllocator.wrap(buffer);
-    }
-
-    void addLastTo(ChannelPipeline pipeline)
-    {
-        pipeline.addLast("frameEncoderNone", this);
     }
 }
