@@ -202,9 +202,13 @@ public class OutboundConnection
     private Future<?> whileDisconnected;
 
     /**
-     * Currently being (re)connected; this may be cancelled (if closing) or waited on (for delivery)
-     * Note that the work managed by this future may be performed asynchronously, and not on the eventLoop.
-     * It may also be completed outside of the eventLoop, though its listeners will all be invoked on the eventLoop.
+     * Currently (or scheduled to) (re)connecting; this may be cancelled (if closing) or waited on (for delivery)
+     * Note:
+     *
+     *  - The work managed by this future may be performed asynchronously, and not on the eventLoop.
+     *  - It may be completed outside of the eventLoop, though its listeners will all be invoked on the eventLoop.
+     *  - On success, we may not have connected, we may have only initiated a connection that was scheduled
+     *    (however semantically this is no different to a successful connection that has since disconnected)
      *
      * This variable may be _read_ outside of the eventLoop, with the possibility of seeing a stale value,
      * but may only be written by the eventLoop.
