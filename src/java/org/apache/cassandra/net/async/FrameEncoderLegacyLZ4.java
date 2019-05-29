@@ -31,6 +31,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Integer.reverseBytes;
 import static java.lang.Math.min;
+import static org.apache.cassandra.net.async.LegacyLZ4Constants.*;
 
 /**
  * LZ4 {@link FrameEncoder} implementation for compressed legacy (3.0, 3.11) connections.
@@ -58,8 +59,6 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         this.compressor = compressor;
     }
 
-    private static final int MAX_BLOCK_LENGTH = 1 << 15;
-
     @Override
     ByteBuf encode(boolean isSelfContained, ByteBuffer payload)
     {
@@ -74,7 +73,7 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
             int payloadLength = payload.remaining();
             while (payloadOffset < payloadLength)
             {
-                int blockLength = min(MAX_BLOCK_LENGTH, payloadLength - payloadOffset);
+                int blockLength = min(DEFAULT_BLOCK_LENGTH, payloadLength - payloadOffset);
                 frameOffset += compressBlock(frame, frameOffset, payload, payloadOffset, blockLength);
                 payloadOffset += blockLength;
             }
@@ -96,8 +95,6 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
         }
     }
 
-    private static final int LEGACY_LZ4_HASH_SEED = 0x9747B28C;
-
     private int compressBlock(ByteBuffer frame, int frameOffset, ByteBuffer payload, int payloadOffset, int blockLength)
     {
         int frameBytesRemaining = frame.limit() - (frameOffset + HEADER_LENGTH);
@@ -107,19 +104,13 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
             ByteBufferUtil.copyBytes(payload, payloadOffset, frame, frameOffset + HEADER_LENGTH, blockLength);
             compressedLength = blockLength;
         }
-        int checksum = xxhash.hash(payload, payloadOffset, blockLength, LEGACY_LZ4_HASH_SEED) & 0xFFFFFFF;
+        int checksum = xxhash.hash(payload, payloadOffset, blockLength, XXHASH_SEED) & XXHASH_MASK;
         writeHeader(frame, frameOffset, compressedLength, blockLength, checksum);
         return HEADER_LENGTH + compressedLength;
     }
 
-    private static final long MAGIC_NUMBER =
-        (long) 'L' << 56 | (long) 'Z' << 48 | (long) '4' << 40 | (long) 'B' << 32 | 'l' << 24 | 'o' << 16 | 'c' << 8  | 'k';
-
     private static final byte TOKEN_NON_COMPRESSED = 0x15;
     private static final byte TOKEN_COMPRESSED     = 0x25;
-
-    // magic number, token, compressed length, uncompressed length, checksum
-    private static final int HEADER_LENGTH = 8 + 1 + 4 + 4 + 4;
 
     private static void writeHeader(ByteBuffer frame, int frameOffset, int compressedLength, int uncompressedLength, int checksum)
     {
@@ -127,18 +118,17 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
                    ? TOKEN_NON_COMPRESSED
                    : TOKEN_COMPRESSED;
 
-        //noinspection PointlessArithmeticExpression
-        frame.putLong(frameOffset + 0,  MAGIC_NUMBER                    );
-        frame.put    (frameOffset + 8,  token                           );
-        frame.putInt (frameOffset + 9,  reverseBytes(compressedLength)  );
-        frame.putInt (frameOffset + 13, reverseBytes(uncompressedLength));
-        frame.putInt (frameOffset + 17, reverseBytes(checksum)          );
+        frame.putLong(frameOffset + MAGIC_NUMBER_OFFSET,        MAGIC_NUMBER                    );
+        frame.put    (frameOffset + TOKEN_OFFSET,               token                           );
+        frame.putInt (frameOffset + COMPRESSED_LENGTH_OFFSET,   reverseBytes(compressedLength)  );
+        frame.putInt (frameOffset + UNCOMPRESSED_LENGTH_OFFSET, reverseBytes(uncompressedLength));
+        frame.putInt (frameOffset + CHECKSUM_OFFSET,            reverseBytes(checksum)          );
     }
 
     private int calculateMaxFrameLength(ByteBuffer payload)
     {
         int payloadLength = payload.remaining();
-        int blockCount = payloadLength / MAX_BLOCK_LENGTH + (payloadLength % MAX_BLOCK_LENGTH != 0 ? 1 : 0);
+        int blockCount = payloadLength / DEFAULT_BLOCK_LENGTH + (payloadLength % DEFAULT_BLOCK_LENGTH != 0 ? 1 : 0);
         return compressor.maxCompressedLength(payloadLength) + HEADER_LENGTH * blockCount;
     }
 }
