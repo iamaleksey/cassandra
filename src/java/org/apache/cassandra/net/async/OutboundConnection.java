@@ -22,7 +22,6 @@ import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
-import java.util.Collections;
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -30,7 +29,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
-import java.util.function.Supplier;
+
+import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
@@ -40,11 +40,9 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.channel.ChannelPromise;
 import io.netty.channel.EventLoop;
 import io.netty.channel.unix.Errors;
 import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
 import io.netty.util.concurrent.Promise;
 import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
@@ -91,7 +89,7 @@ import static org.apache.cassandra.utils.Throwables.isCausedBy;
  *
  * All methods are safe to invoke from any thread unless otherwise stated.
  */
-@SuppressWarnings("WeakerAccess")
+@SuppressWarnings({ "WeakerAccess", "FieldMayBeFinal", "NonAtomicOperationOnVolatileField", "SameParameterValue" })
 public class OutboundConnection
 {
     static final Logger logger = LoggerFactory.getLogger(OutboundConnection.class);
@@ -153,75 +151,143 @@ public class OutboundConnection
         return (pendingCount << pendingByteBits) | pendingBytes;
     }
 
-    /*
-     * The following four fields define our connection behaviour; the template contains the user-specified desired properties,
-     * and the settings are produced by combining those specifications with any system defaults and knowledge about the endpoint.
-     *
-     * New templates may be provided by external calls, at which point we will disconnect reconnect to enact any modifications.
-     * The messaging version is negotiated on each connection attempt, as it may change at any time.
-     * The settings are generated from the template on every connection attempt, as any system-wide properties,
-     * as well as implied defaults based on messagingVersion (e.g. port to connect on with encryption) may change.
-     */
-
     private final ConnectionType type;
-    // settings is updated whenever template is, which may occur in advance of a reconnection attempt;
-    // in this scenario, they briefly do not represent those currently in use, but those we intend to use imminently
-    private volatile OutboundConnectionSettings template;
-    private volatile OutboundConnectionSettings settings;
-    // should only be updated while we are disconnected, and by the event loop
-    private volatile int messagingVersion;
-    private volatile FrameEncoder.PayloadAllocator payloadAllocator;
 
-    /*
-     * All of the volatile fields may only be updated by the eventLoop.
-     * They should be read extremely carefully by other threads, and updated carefully by the eventLoop if so read.
-     *
-     * For example, the deliveryThread will access the {@link channel} concurrently with the eventLoop under normal operation,
-     * so any attempt to close the channel must ensure the deliveryThread has acquiesced first.
-     *
-     * The AtomicReference {@link closing} may be read and written by any thread, but once set should never be updated.
-     *
-     * Those that are not final, volatile or atomic may only be accessed by the eventLoop; for either read or write.
+    /**
+     * Contains the user-specified properties for the connection, with defaults filled in at connection time.
+     * New templates may be provided by external calls, at which point we will disconnect reconnect to enact any modifications.
      */
+    private OutboundConnectionSettings template;
 
-    /** The underlying Netty channel we are connected to our endpoint via; this may be closed, or null */
-    private volatile Channel channel;
-    /** We cannot depend on channel.isOpen, as we may be closing it asynchronously */
-    private volatile boolean isConnected;
-    /** If we are not connected, are trying to connect, and have failed to connect at least once */
-    private volatile boolean isFailingToConnect;
+    private static class State
+    {
+        static final State CLOSED  = new State(Kind.CLOSED);
 
-    /** True => connection is permanently closed. */
-    private volatile boolean isClosed;
+        enum Kind { ESTABLISHED, CONNECTING, DORMANT, CLOSED }
+
+        final Kind kind;
+
+        State(Kind kind)
+        {
+            this.kind = kind;
+        }
+
+        boolean isEstablished()  { return kind == Kind.ESTABLISHED; }
+        boolean isConnecting()   { return kind == Kind.CONNECTING; }
+        boolean isDisconnected() { return kind == Kind.CONNECTING || kind == Kind.DORMANT; }
+        boolean isClosed()       { return kind == Kind.CLOSED; }
+
+        Established  established()  { return (Established)  this; }
+        Connecting   connecting()   { return (Connecting)   this; }
+        Disconnected disconnected() { return (Disconnected) this; }
+    }
+
+    /**
+     * We have successfully negotiated a channel, and believe it to still be valid.
+     *
+     * Before using this, we should check isConnected() to check the Channel hasn't
+     * become invalid.
+     */
+    private static class Established extends State
+    {
+        final int messagingVersion;
+        final Channel channel;
+        final FrameEncoder.PayloadAllocator payloadAllocator;
+        final OutboundConnectionSettings settings;
+
+        Established(int messagingVersion, Channel channel, FrameEncoder.PayloadAllocator payloadAllocator, OutboundConnectionSettings settings)
+        {
+            super(Kind.ESTABLISHED);
+            this.messagingVersion = messagingVersion;
+            this.channel = channel;
+            this.payloadAllocator = payloadAllocator;
+            this.settings = settings;
+        }
+
+        boolean isConnected() { return channel.isOpen(); }
+    }
+
+    private static class Disconnected extends State
+    {
+        /** Periodic message expiry scheduled while we are disconnected; this will be cancelled and cleared each time we connect */
+        final Future<?> maintenance;
+        Disconnected(Kind kind, Future<?> maintenance)
+        {
+            super(kind);
+            this.maintenance = maintenance;
+        }
+
+        public static Disconnected dormant(Future<?> maintenance)
+        {
+            return new Disconnected(Kind.DORMANT, maintenance);
+        }
+    }
+
+    private static class Connecting extends Disconnected
+    {
+        /**
+         * Currently (or scheduled to) (re)connect; this may be cancelled (if closing) or waited on (for delivery)
+         *
+         *  - The work managed by this future is partially performed asynchronously, not necessarily on the eventLoop.
+         *  - It is only completed on the eventLoop
+         *  - It may not be executing, but might be scheduled to be submitted if {@link #scheduled} is not null
+         */
+        final Future<Result<MessagingSuccess>> attempt;
+
+        /**
+         * If we are retrying to connect with some delay, this represents the scheduled inititation of another attempt
+         */
+        @Nullable
+        final Future<?> scheduled;
+
+        /**
+         * true iff we are retrying to connect after some failure (immediately or following a delay)
+         */
+        final boolean isFailingToConnect;
+
+        Connecting(Disconnected previous, Future<Result<MessagingSuccess>> attempt)
+        {
+            this(previous, attempt, null);
+        }
+
+        Connecting(Disconnected previous, Future<Result<MessagingSuccess>> attempt, Future<?> scheduled)
+        {
+            super(Kind.CONNECTING, previous.maintenance);
+            this.attempt = attempt;
+            this.scheduled = scheduled;
+            this.isFailingToConnect = scheduled != null || (previous.isConnecting() && previous.connecting().isFailingToConnect);
+        }
+
+        /**
+         * Cancel the connection attempt
+         *
+         * No cleanup is needed here, as {@link #attempt} is only completed on the eventLoop,
+         * so we have either already invoked the callbacks and are no longer in {@link #state},
+         * or the {@link OutboundConnectionInitiator} will handle our successful cancellation
+         * when it comes to complete, by closing the channel (if we could not cancel it before then)
+         */
+        void cancel()
+        {
+            if (scheduled != null)
+                scheduled.cancel(true);
+
+            // we guarantee that attempt is only ever completed by the eventLoop
+            boolean cancelled = attempt.cancel(true);
+            assert cancelled;
+        }
+    }
+
+    private volatile State state;
+
     /** The connection is being permanently closed */
     private volatile Future<Void> closing;
     /** The connection is being permanently closed in the near future */
     private volatile Future<Void> scheduledClose;
 
-    /** Periodic message expiry scheduled while we are disconnected; this will be cancelled and cleared each time we connect */
-    private Future<?> whileDisconnected;
-
-    /**
-     * Currently (or scheduled to) (re)connecting; this may be cancelled (if closing) or waited on (for delivery)
-     * Note:
-     *
-     *  - The work managed by this future may be performed asynchronously, and not on the eventLoop.
-     *  - It may be completed outside of the eventLoop, though its listeners will all be invoked on the eventLoop.
-     *  - On success, we may not have connected, we may have only initiated a connection that was scheduled
-     *    (however semantically this is no different to a successful connection that has since disconnected)
-     *
-     * This variable may be _read_ outside of the eventLoop, with the possibility of seeing a stale value,
-     * but may only be written by the eventLoop.
-     */
-    private volatile Future<?> connecting;
-
     OutboundConnection(ConnectionType type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
     {
-        // use the best guessed messaging version for a node
-        // this could be wrong, e.g. because the node is upgraded between gossip arrival and our connection attempt
-        this.messagingVersion = template.endpointToVersion().get(template.to);
         this.template = template;
-        this.settings = template.withDefaults(type, messagingVersion);
+        OutboundConnectionSettings settings = template.withDefaults(type, template.endpointToVersion().get(template.to));
         this.type = type;
         this.eventLoop = settings.socketFactory.defaultGroup().next();
         this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
@@ -230,9 +296,9 @@ public class OutboundConnection
         this.debug = settings.debug;
         this.queue = new OutboundMessageQueue(this::onExpired);
         this.delivery = type == ConnectionType.LARGE_MESSAGES
-                        ? new LargeMessageDelivery()
+                        ? new LargeMessageDelivery(settings.socketFactory.synchronousWorkExecutor)
                         : new EventLoopDelivery();
-        scheduleMaintenanceWhileDisconnected();
+        setDisconnected();
     }
 
     /**
@@ -240,7 +306,7 @@ public class OutboundConnection
      */
     public void enqueue(Message message) throws ClosedChannelException
     {
-        if (isClosed())
+        if (isClosing())
             throw new ClosedChannelException();
 
         final int canonicalSize = canonicalSize(message);
@@ -268,7 +334,7 @@ public class OutboundConnection
         // we might race with the channel closing; if this happens, to ensure this message eventually arrives
         // we need to remove ourselves from the queue and throw a ClosedChannelException, so that another channel
         // can be opened in our place to try and send on.
-        if (isClosed() && queue.remove(message))
+        if (isClosing() && queue.remove(message))
         {
             releaseCapacity(1, canonicalSize);
             throw new ClosedChannelException();
@@ -322,7 +388,8 @@ public class OutboundConnection
                 continue;
             }
 
-            if (isFailingToConnect)
+            State state = this.state;
+            if (state.isConnecting() && state.connecting().isFailingToConnect)
             {
                 outcome = INSUFFICIENT_ENDPOINT;
                 break;
@@ -379,7 +446,7 @@ public class OutboundConnection
                           FBUtilities.prettyPrintMemory(pendingBytes()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.endpoint.using()),
                           FBUtilities.prettyPrintMemory(reserveCapacityInBytes.global.using()));
-        callbacks.onOverloaded(message, settings.to);
+        callbacks.onOverloaded(message, template.to);
     }
 
     /**
@@ -393,7 +460,7 @@ public class OutboundConnection
         expiredCount += 1;
         expiredBytes += canonicalSize(message);
         noSpamLogger.warn("{} dropping message of type {} whose timeout expired before reaching the network", id(), message.verb());
-        callbacks.onExpired(message, settings.to);
+        callbacks.onExpired(message, template.to);
         return true;
     }
 
@@ -402,14 +469,14 @@ public class OutboundConnection
      *
      * Only to be invoked by the delivery thread
      */
-    private void onFailedSerialize(Message<?> message, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable t)
+    private void onFailedSerialize(Message<?> message, int messagingVersion, int bytesWrittenToNetwork, Throwable t)
     {
         JVMStabilityInspector.inspectThrowable(t, false);
         releaseCapacity(1, canonicalSize(message));
         errorCount += 1;
         errorBytes += message.serializedSize(messagingVersion);
         logger.warn("{} dropping message of type {} due to error", id(), message.verb(), t);
-        callbacks.onFailedSerialize(message, settings.to, messagingVersion, wasPartiallyWrittenToNetwork, t);
+        callbacks.onFailedSerialize(message, template.to, messagingVersion, bytesWrittenToNetwork, t);
     }
 
     /**
@@ -420,7 +487,7 @@ public class OutboundConnection
     private void onClosed(Message<?> message)
     {
         releaseCapacity(1, canonicalSize(message));
-        callbacks.onDiscardOnClose(message, settings.to);
+        callbacks.onDiscardOnClose(message, template.to);
     }
 
     /**
@@ -590,8 +657,8 @@ public class OutboundConnection
                     stopAndRun.getAndSet(null).run();
                 }
 
-                Channel channel = OutboundConnection.this.channel;
-                if (!isConnected() || !isConnected(channel))
+                State state = OutboundConnection.this.state;
+                if (!state.isEstablished() || !state.established().isConnected())
                 {
                     // if we have messages yet to deliver, or a task to run, we need to reconnect and try again
                     // we try to reconnect before running another stopAndRun so that we do not infinite loop in close
@@ -603,7 +670,7 @@ public class OutboundConnection
                     break;
                 }
 
-                if (!doRun(channel))
+                if (!doRun(state.established()))
                     break;
             }
 
@@ -614,7 +681,7 @@ public class OutboundConnection
          * @return true if we should run again immediately;
          *         always false for eventLoop executor, as want to service other channels
          */
-        abstract boolean doRun(Channel channel);
+        abstract boolean doRun(Established established);
 
         /**
          * Schedule a task to run later on the delivery thread while delivery is not in progress,
@@ -670,7 +737,7 @@ public class OutboundConnection
          * If there is more work to be done, we submit ourselves for execution once the eventLoop has time.
          */
         @SuppressWarnings("resource")
-        boolean doRun(Channel channel)
+        boolean doRun(Established established)
         {
             if (!isWritable)
                 return false;
@@ -683,6 +750,9 @@ public class OutboundConnection
             if (maxSendBytes == 0)
                 return false;
 
+            OutboundConnectionSettings settings = established.settings;
+            int messagingVersion = established.messagingVersion;
+
             FrameEncoder.Payload sending = null;
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
             int sendingBytes = 0;
@@ -692,7 +762,7 @@ public class OutboundConnection
                 if (withLock == null)
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
 
-                sending = payloadAllocator.allocate(true, maxSendBytes);
+                sending = established.payloadAllocator.allocate(true, maxSendBytes);
                 DataOutputBufferFixed out = new DataOutputBufferFixed(sending.buffer);
 
                 Message<?> next;
@@ -720,7 +790,8 @@ public class OutboundConnection
 
                             sending.release();
                             sending = null; // set to null to prevent double-release if we fail to allocate our new buffer
-                            sending = payloadAllocator.allocate(true, messageSize);
+                            sending = established.payloadAllocator.allocate(true, messageSize);
+                            //noinspection IOResourceOpenedButNotSafelyClosed
                             out = new DataOutputBufferFixed(sending.buffer);
                         }
 
@@ -736,7 +807,7 @@ public class OutboundConnection
                     }
                     catch (Throwable t)
                     {
-                        onFailedSerialize(next, messagingVersion, false, t);
+                        onFailedSerialize(next, messagingVersion, 0, t);
 
                         assert sending != null;
                         // reset the buffer to ignore the message we failed to serialize
@@ -749,7 +820,7 @@ public class OutboundConnection
 
                 sending.finish();
                 debug.onSendSmallFrame(sendingCount, sendingBytes);
-                ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(channel, sending);
+                ChannelFuture flushResult = AsyncChannelPromise.writeAndFlush(established.channel, sending);
                 sending = null;
 
                 if (flushResult.isSuccess())
@@ -796,7 +867,7 @@ public class OutboundConnection
                         {
                             errorCount += sendingCountFinal;
                             errorBytes += sendingBytesFinal;
-                            invalidateChannel(channel, future.cause());
+                            invalidateChannel(established, future.cause());
                             debug.onFailedSmallFrame(sendingCountFinal, sendingBytesFinal);
                         }
                     });
@@ -807,7 +878,7 @@ public class OutboundConnection
             {
                 errorCount += sendingCount;
                 errorBytes += sendingBytes;
-                invalidateChannel(channel, t);
+                invalidateChannel(established, t);
             }
             finally
             {
@@ -822,17 +893,6 @@ public class OutboundConnection
             }
 
             return false;
-        }
-
-        private void invalidateChannel(Channel channel, Throwable cause)
-        {
-            JVMStabilityInspector.inspectThrowable(cause, false);
-            if (isCausedByConnectionReset(cause))
-                logger.info("{} channel closed by provider", id(), cause);
-            else
-                logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
-
-            closeChannelNow(channel);
         }
 
         void stopAndRunOnEventLoop(Runnable run)
@@ -861,9 +921,9 @@ public class OutboundConnection
     {
         static final int DEFAULT_BUFFER_SIZE = 32 * 1024;
 
-        LargeMessageDelivery()
+        LargeMessageDelivery(ExecutorService executor)
         {
-            super(settings.socketFactory.synchronousWorkExecutor);
+            super(executor);
         }
 
         /**
@@ -875,7 +935,7 @@ public class OutboundConnection
             try
             {
                 priorThreadName = Thread.currentThread().getName();
-                threadName = "Messaging-OUT-" + settings.from + "->" + settings.to + '-' + type;
+                threadName = "Messaging-OUT-" + template.from() + "->" + template.to + '-' + type;
                 Thread.currentThread().setName(threadName);
 
                 super.run();
@@ -887,7 +947,7 @@ public class OutboundConnection
             }
         }
 
-        boolean doRun(Channel channel)
+        boolean doRun(Established established)
         {
             Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
             if (send == null)
@@ -896,14 +956,14 @@ public class OutboundConnection
             AsyncMessageOutputPlus out = null;
             try
             {
-                int messageSize = send.serializedSize(messagingVersion);
-                out = new AsyncMessageOutputPlus(channel, DEFAULT_BUFFER_SIZE, messageSize, payloadAllocator);
+                int messageSize = send.serializedSize(established.messagingVersion);
+                out = new AsyncMessageOutputPlus(established.channel, DEFAULT_BUFFER_SIZE, messageSize, established.payloadAllocator);
                 // actual message size for this version is larger than permitted maximum
                 if (messageSize > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
                     throw new Message.OversizedMessageException(messageSize);
 
-                Tracing.instance.traceOutgoingMessage(send, settings.connectTo);
-                Message.serializer.serialize(send, out, messagingVersion);
+                Tracing.instance.traceOutgoingMessage(send, established.settings.connectTo);
+                Message.serializer.serialize(send, out, established.messagingVersion);
 
                 if (out.position() != messageSize)
                     throw new InvalidSerializedSizeException(messageSize, out.position());
@@ -926,14 +986,23 @@ public class OutboundConnection
                                                || cause instanceof Errors.NativeIoException
                                                || cause instanceof AsyncChannelOutputPlus.FlushException))
                     {
-                        // close the channel; this runs on the event loop, so we wait for this to complete to avoid racing with it
-                        closeChannelNow(channel).awaitUninterruptibly();
+                        // close the channel, and wait for eventLoop to execute
+                        disconnectNow(established).awaitUninterruptibly();
                         tryAgain = false;
+                        try
+                        {
+                            // after closing, wait until we are signalled about the in flight writes;
+                            // this ensures flushedToNetwork() is correct below
+                            out.waitUntilFlushed(0, 0);
+                        }
+                        catch (Throwable ignore)
+                        {
+                            // irrelevant
+                        }
                     }
                 }
 
-                // note: we depend on closeChannelNow().awaitUninterruptibly for correctness of isPartiallyWrittenToNetwork
-                onFailedSerialize(send, messagingVersion, out != null && out.flushedToNetwork() > 0, t);
+                onFailedSerialize(send, established.messagingVersion, out == null ? 0 : (int) out.flushedToNetwork(), t);
                 return tryAgain;
             }
         }
@@ -961,149 +1030,184 @@ public class OutboundConnection
         return message.serializedSize(current_version);
     }
 
+    private void invalidateChannel(Established established, Throwable cause)
+    {
+        JVMStabilityInspector.inspectThrowable(cause, false);
+
+        if (state != established)
+            return; // do nothing; channel already invalidated
+
+        if (isCausedByConnectionReset(cause))
+            logger.info("{} channel closed by provider", id(), cause);
+        else
+            logger.error("{} channel in potentially inconsistent state after error; closing", id(), cause);
+
+        disconnectNow(established);
+    }
+
     /**
      *  Attempt to open a new channel to the remote endpoint.
      *
-     *  Most of the actual work is performed by OutboundConnectionInitiator, this class just manages
+     *  Most of the actual work is performed by OutboundConnectionInitiator, this method just manages
      *  our book keeping on either success or failure.
      *
-     *  All methods and state in this class are intended only to be accessed by the eventLoop
+     *  This method is only to be invoked by the eventLoop, and the inner class' methods should only be evaluated by the eventtLoop
      */
-    class Connect
+    Future<?> initiate()
     {
-        /**
-         * If we fail to connect, we want to try and connect again before any messages timeout.
-         * However, we update this each time to ensure we do not retry unreasonably often, and settle on a periodicity
-         * that might lead to timeouts in some aggressive systems.
-         */
-        private long retryRateMillis = DatabaseDescriptor.getMinRpcTimeout(MILLISECONDS) / 2;
-
-        /**
-         * If we failed for any reason, try again
-         */
-        void onFailure(Throwable cause)
+        class Initiate
         {
-            if (cause instanceof ConnectException)
-                noSpamLogger.info("{} failed to connect", id(), cause);
-            else
-                noSpamLogger.error("{} failed to connect", id(), cause);
+            /**
+             * If we fail to connect, we want to try and connect again before any messages timeout.
+             * However, we update this each time to ensure we do not retry unreasonably often, and settle on a periodicity
+             * that might lead to timeouts in some aggressive systems.
+             */
+            long retryRateMillis = DatabaseDescriptor.getMinRpcTimeout(MILLISECONDS) / 2;
 
-            JVMStabilityInspector.inspectThrowable(cause, false);
-            isFailingToConnect = true;
-            if (hasPending())
-                connecting = eventLoop.schedule(this::attempt, max(100, retryRateMillis), MILLISECONDS);
-            else
-                assert connecting == null;
+            // our connection settings, possibly updated on retry
+            int messagingVersion = template.endpointToVersion().get(template.to);
+            OutboundConnectionSettings settings;
 
-            retryRateMillis = min(1000, retryRateMillis * 2);
-        }
-
-        void onCompletedHandshake(Result<MessagingSuccess> result)
-        {
-            switch (result.outcome)
+            /**
+             * If we failed for any reason, try again
+             */
+            void onFailure(Throwable cause)
             {
-                case SUCCESS:
-                    // it is expected that close, if successful, has already cancelled us; so we do not need to worry about leaking connections
-                    assert !isClosed;
-                    whileDisconnected.cancel(false);
-                    whileDisconnected = null;
-                    MessagingSuccess success = result.success();
-                    if (messagingVersion != success.messagingVersion)
-                    {
-                        messagingVersion = success.messagingVersion;
-                        settings = template.withDefaults(type, messagingVersion);
-                    }
-                    debug.onConnect(messagingVersion, settings);
-                    payloadAllocator = success.allocator;
-                    channel = success.channel;
+                if (cause instanceof ConnectException)
+                    noSpamLogger.info("{} failed to connect", id(), cause);
+                else
+                    noSpamLogger.error("{} failed to connect", id(), cause);
 
-                    channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
-                        @Override
-                        public void channelInactive(ChannelHandlerContext ctx) {
-                            if (ctx.channel() == channel)
-                            {
-                                logger.info("{} channel closed by provider", id());
-                                closeChannelNow(channel);
-                            }
-                            ctx.fireChannelInactive();
-                        }
+                JVMStabilityInspector.inspectThrowable(cause, false);
 
-                        @Override
-                        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                if (hasPending())
+                {
+                    Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
+                    state = new Connecting(state.disconnected(), result, eventLoop.schedule(() -> attempt(result), max(100, retryRateMillis), MILLISECONDS));
+                    retryRateMillis = min(1000, retryRateMillis * 2);
+                }
+                else
+                {
+                    // this Initiate will be discarded
+                    state = Disconnected.dormant(state.disconnected().maintenance);
+                }
+            }
+
+            void onCompletedHandshake(Result<MessagingSuccess> result)
+            {
+                switch (result.outcome)
+                {
+                    case SUCCESS:
+                        // it is expected that close, if successful, has already cancelled us; so we do not need to worry about leaking connections
+                        assert !state.isClosed();
+
+                        MessagingSuccess success = result.success();
+                        if (messagingVersion != success.messagingVersion)
                         {
-                            if (isCausedByConnectionReset(cause))
-                                logger.info("{} channel closed by provider", id(), cause);
-                            else
-                                logger.error("{} unexpected error; closing", id(), cause);
-
-                            closeChannelGracefully(channel);
+                            // TODO: is this incorrect, since we've already connected? we shouldn't be updating our settings after successfully negotiating
+                            //       for instance, should we ensure all connection-modifying parameters are consistent between versions
+                            //       e.g. crc becomes crc-if-greatereq-40
+                            // TODO: test case for this scenario - sending incompatible options for negotiated version
+                            settings = template.withDefaults(type, messagingVersion);
+                            messagingVersion = success.messagingVersion;
                         }
-                    });
+                        debug.onConnect(messagingVersion, settings);
 
-                    isFailingToConnect = false;
-                    isConnected = true;
-                    ++successfulConnections;
+                        state.disconnected().maintenance.cancel(false);
 
-                    logger.info("{} successfully connected, version = {}, compress = {}, encryption = {}",
-                                id(true),
-                                messagingVersion,
-                                settings.withCompression,
-                                encryptionLogStatement(settings.encryption));
-                    break;
+                        FrameEncoder.PayloadAllocator payloadAllocator = success.allocator;
+                        Channel channel = success.channel;
+                        Established established = new Established(messagingVersion, channel, payloadAllocator, settings);
+                        state = established;
+                        channel.pipeline().addLast("handleExceptionalStates", new ChannelInboundHandlerAdapter() {
+                            @Override
+                            public void channelInactive(ChannelHandlerContext ctx)
+                            {
+                                disconnectNow(established);
+                                ctx.fireChannelInactive();
+                            }
 
-                case RETRY:
-                    if (logger.isTraceEnabled())
-                        logger.trace("{} incorrect legacy peer version predicted; reconnecting", id());
-                    // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
-                    messagingVersion = result.retry().withMessagingVersion;
-                    settings = template.withDefaults(type, messagingVersion);
-                    settings.endpointToVersion.set(settings.to, messagingVersion);
-                    attempt();
-                    break;
+                            @Override
+                            public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
+                            {
+                                invalidateChannel(established, cause);
+                            }
+                        });
+                        ++successfulConnections;
 
-                case INCOMPATIBLE:
-                    // we cannot communicate with this peer given its messaging version; mark this as any other failure, and continue trying
-                    Throwable t = new IOException(String.format("Incompatible peer: %s, messaging version: %s",
-                                                                settings.to, result.incompatible().maxMessagingVersion));
-                    t.fillInStackTrace();
-                    onFailure(t);
-                    break;
+                        logger.info("{} successfully connected, version = {}, framing = {}, encryption = {}",
+                                    id(true),
+                                    messagingVersion,
+                                    settings.framing,
+                                    encryptionLogStatement(settings.encryption));
+                        break;
 
-                default:
-                    throw new AssertionError();
+                    case RETRY:
+                        if (logger.isTraceEnabled())
+                            logger.trace("{} incorrect legacy peer version predicted; reconnecting", id());
+
+                        // the messaging version we connected with was incorrect; try again with the one supplied by the remote host
+                        messagingVersion = result.retry().withMessagingVersion;
+                        settings.endpointToVersion.set(settings.to, messagingVersion);
+
+                        initiate();
+                        break;
+
+                    case INCOMPATIBLE:
+                        // we cannot communicate with this peer given its messaging version; mark this as any other failure, and continue trying
+                        Throwable t = new IOException(String.format("Incompatible peer: %s, messaging version: %s",
+                                                                    settings.to, result.incompatible().maxMessagingVersion));
+                        t.fillInStackTrace();
+                        onFailure(t);
+                        break;
+
+                    default:
+                        throw new AssertionError();
+                }
             }
-        }
 
-        /**
-         * Initiate all the actions required to establish a working, valid connection. This includes
-         * opening the socket, negotiating the internode messaging handshake, and setting up the working
-         * Netty {@link Channel}. However, this method will not block for all those actions: it will only
-         * kick off the connection attempt, setting the @{link #connecting} future to track its completion.
-         *
-         * Note: this should only be invoked on the event loop.
-         */
-        void attempt()
-        {
-            ++connectionAttempts;
-            // system defaults etc might have changed, so refresh before connect
-            settings = template.withDefaults(type, messagingVersion);
-            if (messagingVersion > settings.acceptVersions.max)
+            /**
+             * Initiate all the actions required to establish a working, valid connection. This includes
+             * opening the socket, negotiating the internode messaging handshake, and setting up the working
+             * Netty {@link Channel}. However, this method will not block for all those actions: it will only
+             * kick off the connection attempt, setting the @{link #connecting} future to track its completion.
+             *
+             * Note: this should only be invoked on the event loop.
+             */
+            private void attempt(Promise<Result<MessagingSuccess>> result)
             {
-                messagingVersion = settings.acceptVersions.max;
+                ++connectionAttempts;
+
                 settings = template.withDefaults(type, messagingVersion);
-                assert messagingVersion <= settings.acceptVersions.max;
+                if (messagingVersion > settings.acceptVersions.max)
+                {
+                    messagingVersion = settings.acceptVersions.max;
+                    settings = template.withDefaults(type, messagingVersion);
+                    assert messagingVersion <= settings.acceptVersions.max;
+                }
+
+
+                initiateMessaging(eventLoop, type, settings, messagingVersion, result)
+                .addListener(future -> {
+                    if (future.isCancelled())
+                        return;
+                    if (future.isSuccess()) //noinspection unchecked
+                        onCompletedHandshake((Result<MessagingSuccess>) future.getNow());
+                    else
+                        onFailure(future.cause());
+                });
             }
-            connecting = initiateMessaging(eventLoop, type, settings, messagingVersion)
-                         .addListener(future -> {
-                             connecting = null;
-                             if (future.isCancelled())
-                                 return;
-                             if (future.isSuccess()) //noinspection unchecked
-                                 onCompletedHandshake((Result<MessagingSuccess>) future.getNow());
-                             else
-                                 onFailure(future.cause());
-                         });
+
+            Future<Result<MessagingSuccess>> initiate()
+            {
+                Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
+                state = new Connecting(state.disconnected(), result);
+                attempt(result);
+                return result;
+            }
         }
+
+        return new Initiate().initiate();
     }
 
     /**
@@ -1117,9 +1221,11 @@ public class OutboundConnection
         // we may race with updates to this variable, but this is fine, since we only guarantee that we see a value
         // that did at some point represent an active connection attempt - if it is stale, it will have been completed
         // and the caller can retry (or utilise the successfully established connection)
-        Future<?> inProgress = connecting;
-        if (inProgress != null)
-            return inProgress;
+        {
+            State state = this.state;
+            if (state.isConnecting())
+                return state.connecting().attempt;
+        }
 
         Promise<Object> promise = AsyncPromise.uncancellable(eventLoop);
         runOnEventLoop(() -> {
@@ -1127,20 +1233,25 @@ public class OutboundConnection
             {
                 promise.tryFailure(new ClosedChannelException());
             }
-            else if (isConnected())  // already connected
+            else if (state.isEstablished() && state.established().isConnected())  // already connected
             {
                 promise.trySuccess(null);
             }
             else
             {
-                if (connecting == null)
+                if (state.isEstablished())
+                    setDisconnected();
+
+                if (!state.isConnecting())
                 {
                     assert eventLoop.inEventLoop();
-                    assert connecting == null;
                     assert !isConnected();
-                    new Connect().attempt();
+                    initiate().addListener(new PromiseNotifier<>(promise));
                 }
-                connecting.addListener(new PromiseNotifier<>(promise));
+                else
+                {
+                    state.connecting().attempt.addListener(new PromiseNotifier<>(promise));
+                }
             }
         });
         return promise;
@@ -1162,37 +1273,41 @@ public class OutboundConnection
         if (!Objects.equals(newTemplate.applicationReserveSendQueueEndpointCapacityInBytes, template.applicationReserveSendQueueEndpointCapacityInBytes)) throw new IllegalArgumentException();
         if (newTemplate.applicationReserveSendQueueGlobalCapacityInBytes != template.applicationReserveSendQueueGlobalCapacityInBytes) throw new IllegalArgumentException();
 
-        Promise<Void> done = AsyncPromise.uncancellable(eventLoop);
+        logger.info("{} updating connection settings", id());
 
+        Promise<Void> done = AsyncPromise.uncancellable(eventLoop);
         delivery.stopAndRunOnEventLoop(() -> {
             template = newTemplate;
-            settings = template.withDefaults(type, messagingVersion);
             // delivery will immediately continue after this, triggering a reconnect if necessary;
             // this might mean a slight delay for large message delivery, as the connect will be scheduled
             // asynchronously, so we must wait for a second turn on the eventLoop
-            closeChannelTask(channel).run();
+            if (state.isEstablished())
+            {
+                disconnectNow(state.established());
+            }
+            else if (state.isConnecting())
+            {
+                // cancel any in-flight connection attempt and restart with new template
+                state.connecting().cancel();
+                initiate();
+            }
             done.setSuccess(null);
         });
         return done;
     }
 
     /**
-     * Schedules regular cleaning of the connection's state while it is disconnected from its remote endpoint.
-     *
-     * To be run only by the eventLoop or in the constructor
+     * Close any currently open connection, forcing a reconnect if there are messages outstanding
+     * (or leaving it closed for now otherwise)
      */
-    private void scheduleMaintenanceWhileDisconnected()
+    public boolean interrupt()
     {
-        assert whileDisconnected == null;
-        whileDisconnected = eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS);
-    }
+        State state = this.state;
+        if (!state.isEstablished())
+            return false;
 
-    /**
-     * See {@link #closeChannelGracefully(Channel, Promise)}
-     */
-    private void closeChannelGracefully(Channel closeIfIs)
-    {
-        delivery.stopAndRunOnEventLoop(closeChannelTask(closeIfIs));
+        disconnectGracefully(state.established());
+        return true;
     }
 
     /**
@@ -1205,79 +1320,50 @@ public class OutboundConnection
      * and promptly get the connection going again; the close is considered to have succeeded as soon as we
      * have set our internal state.
      */
-    private Promise<Void> closeChannelGracefully(Channel closeIfIs, Promise<Void> done)
+    private void disconnectGracefully(Established closeIfIs)
     {
-        if (!done.setUncancellable())
-            throw new IllegalStateException();
-
         // delivery will immediately continue after this, triggering a reconnect if necessary;
         // this might mean a slight delay for large message delivery, as the connect will be scheduled
         // asynchronously, so we must wait for a second turn on the eventLoop
-        delivery.stopAndRunOnEventLoop(() -> {
-            closeChannelTask(closeIfIs).run();
-            done.setSuccess(null);
-        });
-        return done;
+        delivery.stopAndRunOnEventLoop(() -> disconnectNow(closeIfIs));
     }
 
     /**
      * The channel is already known to be invalid, so there's no point waiting for a clean break in delivery.
      *
-     * Delivery will be executed again if necessary after this completes.
+     * Delivery will be executed again as soon as we have logically closed the channel; we do not wait
+     * for the channel to actually be closed.
+     *
+     * The Future returned _does_ wait for the channel to be completely closed, so that callers can wait to be sure
+     * all writes have been completed either successfully or not.
      */
-    private Future<?> closeChannelNow(Channel closeIfIs)
+    private Future<?> disconnectNow(Established closeIfIs)
     {
-        // TODO: we only really are required to wait until the close completes for Verifier purposes
-        //       however, it might be semantically good to do this anyway, as it means we cannot spin
-        //       a thousand connections that all have failing operations in flight.
-        //       but this is not probably a realistic scenario, and it potentially delays (slightly) reconnection
-        Promise<?> onClose = AsyncPromise.uncancellable(eventLoop, future -> {
-            // ensure we will run delivery again at some point, if we have work
-            // (could have multiple rounds of exceptions, with many waiting messages and no new ones)
-            if (hasPending())
-                delivery.execute();
-        });
-        runOnEventLoop(closeChannelTask(closeIfIs, onClose));
-        return onClose;
-    }
-
-    private Runnable closeChannelTask(Channel closeIfIs)
-    {
-        return closeChannelTask(closeIfIs, null);
-    }
-    private Runnable closeChannelTask(Channel closeIfIs, Promise<?> onClose)
-    {
-        return () -> {
-            Future<?> closeFuture = null;
-            if (closeIfIs != null && channel == closeIfIs)
+        return runOnEventLoop(() -> {
+            if (state == closeIfIs)
             {
                 // no need to wait until the channel is closed to set ourselves as disconnected (and potentially open a new channel)
-                Channel close = channel;
-                isConnected = false;
-                channel = null;
-                payloadAllocator = null;
-                scheduleMaintenanceWhileDisconnected();
-                closeFuture = close.close().addListener(future -> {
-                    if (!future.isSuccess())
-                        logger.info("Problem closing channel {}", channel, future.cause());
-                });
+                setDisconnected();
+                if (hasPending())
+                    delivery.execute();
+                closeIfIs.channel.close()
+                                 .addListener(future -> {
+                                     if (!future.isSuccess())
+                                         logger.info("Problem closing channel {}", closeIfIs, future.cause());
+                                 });
             }
-            if (onClose != null)
-            {
-                if (closeFuture != null)
-                    closeFuture.addListener(new PromiseNotifier(onClose));
-                else
-                    onClose.setSuccess(null);
-            }
-        };
+        });
     }
 
     /**
-     * Interrupt the connection, i.e. close any currently open connection and force a reconnect, without losing any messages.
+     * Schedules regular cleaning of the connection's state while it is disconnected from its remote endpoint.
+     *
+     * To be run only by the eventLoop or in the constructor
      */
-    public Future<Void> interrupt()
+    private void setDisconnected()
     {
-        return closeChannelGracefully(channel, new AsyncPromise<>(eventLoop));
+        assert state == null || state.isEstablished();
+        state = Disconnected.dormant(eventLoop.scheduleAtFixedRate(queue::maybePruneExpired, 100L, 100L, TimeUnit.MILLISECONDS));
     }
 
     /**
@@ -1330,10 +1416,8 @@ public class OutboundConnection
         Runnable eventLoopCleanup = () -> {
             Runnable onceNotConnecting = () -> {
                 // start by setting ourselves to definitionally closed
-                Channel closeChannel = channel;
-                isConnected = false;
-                isClosed = true;
-                channel = null;
+                State state = this.state;
+                this.state = State.CLOSED;
 
                 try
                 {
@@ -1344,14 +1428,17 @@ public class OutboundConnection
                     delivery.terminate();
 
                     // stop periodic cleanup
-                    if (whileDisconnected != null)
-                        whileDisconnected.cancel(true);
-                    whileDisconnected = null;
-
-                    // close the channel
-                    if (closeChannel == null) closing.setSuccess(null);
-                    else closeChannel.close().addListener(new PromiseNotifier<>(closing));
-                    closeChannel = null;
+                    if (state.isDisconnected())
+                    {
+                        state.disconnected().maintenance.cancel(true);
+                        closing.setSuccess(null);
+                    }
+                    else
+                    {
+                        assert state.isEstablished();
+                        state.established().channel.close()
+                                                   .addListener(new PromiseNotifier<>(closing));
+                    }
                 }
                 catch (Throwable t)
                 {
@@ -1359,9 +1446,8 @@ public class OutboundConnection
                     closing.trySuccess(null);
                     try
                     {
-                        // could be null when we start cleanup
-                        if (closeChannel != null)
-                            closeChannel.close();
+                        if (state.isEstablished())
+                            state.established().channel.close();
                     }
                     catch (Throwable t2)
                     {
@@ -1372,11 +1458,18 @@ public class OutboundConnection
                 }
             };
 
-            // stop any in-flight connection attempts, which may be asynchronous
-            if (connecting != null && !connecting.cancel(true) && !connecting.isCancelled())
-                connecting.addListener(future -> onceNotConnecting.run());
+            if (state.isConnecting())
+            {
+                // stop any in-flight connection attempts; these should be running on the eventLoop, so we should
+                // be able to cleanly cancel them, but executing on a listener guarantees correct semantics either way
+                Connecting connecting = state.connecting();
+                connecting.cancel();
+                connecting.attempt.addListener(future -> onceNotConnecting.run());
+            }
             else
+            {
                 onceNotConnecting.run();
+            }
         };
 
         /*
@@ -1406,7 +1499,7 @@ public class OutboundConnection
                         delivery.stopAndRunOnEventLoop(eventLoopCleanup);
                     else
                         delivery.stopAndRun(() -> {
-                            if (isFailingToConnect)
+                            if (state.isConnecting() && state.connecting().isFailingToConnect)
                                 clearQueue.run();
                             run();
                         });
@@ -1440,24 +1533,28 @@ public class OutboundConnection
 
     public boolean isConnected()
     {
-        return isConnected;
+        State state = this.state;
+        return state.isEstablished() && state.established().isConnected();
     }
 
-    private static boolean isConnected(Channel channel)
+    boolean isClosing()
     {
-        return channel != null && channel.isOpen();
+        return closing != null;
     }
 
     boolean isClosed()
     {
-        return isClosed;
+        return state.isClosed();
     }
 
     private String id(boolean includeReal)
     {
-        Channel channel = this.channel;
-        if (!includeReal || channel == null)
+        State state = this.state;
+        if (!includeReal || !state.isEstablished())
             return id();
+        Established established = state.established();
+        Channel channel = established.channel;
+        OutboundConnectionSettings settings = established.settings;
         return SocketFactory.channelId(settings.from, (InetSocketAddress) channel.remoteAddress(),
                                        settings.to, (InetSocketAddress) channel.localAddress(),
                                        type, channel.id().asShortText());
@@ -1465,9 +1562,16 @@ public class OutboundConnection
 
     private String id()
     {
-        Channel channel = this.channel;
+        State state = this.state;
+        Channel channel = null;
+        OutboundConnectionSettings settings = template;
+        if (state.isEstablished())
+        {
+            channel = state.established().channel;
+            settings = state.established().settings;
+        }
         String channelId = channel != null ? channel.id().asShortText() : "[no-channel]";
-        return SocketFactory.channelId(settings.from, settings.to, type, channelId);
+        return SocketFactory.channelId(settings.from(), settings.to, type, channelId);
     }
 
     @Override
@@ -1570,13 +1674,17 @@ public class OutboundConnection
     @VisibleForTesting
     OutboundConnectionSettings settings()
     {
-        return settings;
+        State state = this.state;
+        return state.isEstablished() ? state.established().settings
+                                     : template.withDefaults(type, template.endpointToVersion().get(template.to));
     }
 
     @VisibleForTesting
     int messagingVersion()
     {
-        return messagingVersion;
+        State state = this.state;
+        return state.isEstablished() ? state.established().messagingVersion
+                                     : template.endpointToVersion().get(template.to);
     }
 
     @VisibleForTesting
@@ -1588,7 +1696,8 @@ public class OutboundConnection
     @VisibleForTesting
     Channel unsafeGetChannel()
     {
-        return channel;
+        State state = this.state;
+        return state.isEstablished() ? state.established().channel : null;
     }
 
     @VisibleForTesting

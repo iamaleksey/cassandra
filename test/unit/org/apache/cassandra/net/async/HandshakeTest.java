@@ -28,6 +28,7 @@ import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
+import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
@@ -74,13 +75,14 @@ public class HandshakeTest
         {
             inbound.open();
             InetAddressAndPort endpoint = inbound.sockets().stream().map(s -> s.settings.bindAddress).findFirst().get();
+            EventLoop eventLoop = factory.defaultGroup().next();
             Future<Result<MessagingSuccess>> future =
-            initiateMessaging(factory.defaultGroup().next(),
+            initiateMessaging(eventLoop,
                               SMALL_MESSAGES,
                               new OutboundConnectionSettings(endpoint)
                                                     .withAcceptVersions(acceptOutbound)
                                                     .withDefaults(SMALL_MESSAGES, req),
-                              req);
+                              req, new AsyncPromise<>(eventLoop));
             return future.get();
         }
         finally

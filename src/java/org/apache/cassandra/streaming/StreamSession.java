@@ -179,7 +179,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
     public StreamSession(StreamOperation streamOperation, InetAddressAndPort peer, StreamConnectionFactory factory,
                          int index, UUID pendingRepair, PreviewKind previewKind)
     {
-        this(streamOperation, new OutboundConnectionSettings(peer).withCompression(false), factory, index, pendingRepair, previewKind);
+        this(streamOperation, new OutboundConnectionSettings(peer), factory, index, pendingRepair, previewKind);
     }
     /**
      * Create new streaming session with the peer.

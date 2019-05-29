@@ -27,7 +27,7 @@ import io.netty.util.concurrent.Future;
  */
 public class FutureResult<V> extends FutureDelegate<V>
 {
-    private final Future<?> cancel;
+    private final Future<?> tryCancel;
 
     /**
      * @param result the Future that will be completed by {@link #cancel}
@@ -36,25 +36,12 @@ public class FutureResult<V> extends FutureDelegate<V>
     public FutureResult(Future<V> result, Future<?> cancel)
     {
         super(result);
-        this.cancel = cancel;
-    }
-
-    public boolean isCancellable()
-    {
-        return cancel.isCancellable();
+        this.tryCancel = cancel;
     }
 
     public boolean cancel(boolean b)
     {
-        if (!cancel.cancel(b))
-            return false;
-        delegate.cancel(true);
-        return true;
+        tryCancel.cancel(true);
+        return delegate.cancel(b);
     }
-
-    public boolean isCancelled()
-    {
-        return cancel.isCancelled();
-    }
-
 }

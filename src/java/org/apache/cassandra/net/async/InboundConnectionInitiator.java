@@ -51,7 +51,7 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.AcceptVersions;
-import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.async.OutboundConnectionSettings.Framing;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.streaming.async.StreamingInboundHandler;
 
@@ -372,11 +372,11 @@ public class InboundConnectionInitiator
         private void setupStreamingPipeline(InetAddressAndPort from, ChannelHandlerContext ctx)
         {
             handshakeTimeout.cancel(true);
+            assert initiate.framing == Framing.UNPROTECTED;
 
             ChannelPipeline pipeline = ctx.pipeline();
             Channel channel = ctx.channel();
 
-            // TODO: cleanup pre40 vs post40
             if (from == null)
             {
                 InetSocketAddress address = (InetSocketAddress) channel.remoteAddress();
@@ -384,14 +384,6 @@ public class InboundConnectionInitiator
             }
 
             pipeline.replace(this, "streamInbound", new StreamingInboundHandler(from, current_version, null));
-
-            // pass a custom recv ByteBuf allocator to the channel. the default recv ByteBuf size is 1k, but in streaming we're
-            // dealing with large bulk blocks of data, let's default to larger sizes
-            // TODO we should be allocating fixed size large buffers here, and accumulating within them
-            //      at no point on a large messages or streaming connection does it make sense to do otherwise
-            //      on a small connection it might offer benefit to allocate tiny buffers, but it still seems unlikely
-            //      since the buffer lifetime is limited; we just run the risk of needing to allocate two or more to read a message.
-            ctx.channel().config().setRecvByteBufAllocator(new AdaptiveRecvByteBufAllocator(1 << 10, 1 << 13, 1 << 16));
         }
 
         @VisibleForTesting
@@ -410,26 +402,45 @@ public class InboundConnectionInitiator
             }
 
             FrameDecoder frameDecoder;
-            if (initiate.withCompression && useMessagingVersion >= VERSION_40)
-                frameDecoder = FrameDecoderLZ4.fast(allocator);
-            else if (initiate.withCompression)
-                frameDecoder = new FrameDecoderLegacyLZ4(allocator, useMessagingVersion);
-            else if (initiate.withCrc)
-                frameDecoder = FrameDecoderCrc.create(allocator);
-            else if (useMessagingVersion >= VERSION_40)
-                frameDecoder = new FrameDecoderUnprotected(allocator);
-            else
-                frameDecoder = new FrameDecoderLegacy(allocator, useMessagingVersion);
+            switch (initiate.framing)
+            {
+                case LZ4:
+                {
+                    if (useMessagingVersion >= VERSION_40)
+                        frameDecoder = FrameDecoderLZ4.fast(allocator);
+                    else
+                        frameDecoder = new FrameDecoderLegacyLZ4(allocator, useMessagingVersion);
+                    break;
+                }
+                case CRC:
+                {
+                    if (useMessagingVersion >= VERSION_40)
+                    {
+                        frameDecoder = FrameDecoderCrc.create(allocator);
+                        break;
+                    }
+                }
+                case UNPROTECTED:
+                {
+                    if (useMessagingVersion >= VERSION_40)
+                        frameDecoder = new FrameDecoderUnprotected(allocator);
+                    else
+                        frameDecoder = new FrameDecoderLegacy(allocator, useMessagingVersion);
+                    break;
+                }
+                default:
+                    throw new AssertionError();
+            }
 
             frameDecoder.addLastTo(pipeline);
 
             InboundMessageHandler handler =
                 settings.handlers.apply(from).createHandler(frameDecoder, initiate.type, pipeline.channel(), useMessagingVersion);
 
-            logger.info("{} connection established, version = {}, compress = {}, encryption = {}",
+            logger.info("{} connection established, version = {}, framing = {}, encryption = {}",
                         handler.id(true),
                         useMessagingVersion,
-                        initiate.withCompression,
+                        initiate.framing,
                         pipeline.get("ssl") != null ? encryptionLogStatement(settings.encryption) : "disabled");
 
             pipeline.addLast("deserialize", handler);

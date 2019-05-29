@@ -29,7 +29,7 @@ public interface OutboundMessageCallbacks
     void onExpired(Message<?> message, InetAddressAndPort peer);
 
     /** A message was not fully or successfully serialized to a frame because an exception was thrown */
-    void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable failure);
+    void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, int bytesWrittenToNetwork, Throwable failure);
 
     /** A message was not sent because the connection was forcibly closed */
     void onDiscardOnClose(Message<?> message, InetAddressAndPort peer);

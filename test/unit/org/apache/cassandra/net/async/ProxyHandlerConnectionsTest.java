@@ -55,6 +55,7 @@ import org.apache.cassandra.utils.Pair;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.async.ConnectionTest.SETTINGS;
+import static org.apache.cassandra.net.async.OutboundConnectionSettings.Framing.CRC;
 
 public class ProxyHandlerConnectionsTest
 {
@@ -260,7 +261,7 @@ public class ProxyHandlerConnectionsTest
             });
             tryConnect(outbound, 1, SECONDS, false);
             Assert.assertTrue(!outbound.isConnected());
-            if (settings.right.withCrc())
+            if (settings.right.framing == CRC)
             {
                 Assert.assertEquals(2, outbound.connectionAttempts());
                 Assert.assertEquals(0, outbound.successfulConnections());

@@ -44,6 +44,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
 import static org.apache.cassandra.net.async.Crc.*;
 import static org.apache.cassandra.net.async.Crc.computeCrc32;
+import static org.apache.cassandra.net.async.OutboundConnectionSettings.*;
 
 /**
  * Messages for the handshake phase of the internode protocol.
@@ -102,17 +103,15 @@ public class HandshakeProtocol
         // if the remote peer supports any, the newest supported version will be selected; otherwise the nearest supported version
         final AcceptVersions acceptVersions;
         final ConnectionType type;
-        final boolean withCrc;
-        final boolean withCompression;
+        final Framing framing;
         final InetAddressAndPort from;
 
-        Initiate(int requestMessagingVersion, AcceptVersions acceptVersions, ConnectionType type, boolean withCompression, boolean withCrc, InetAddressAndPort from)
+        Initiate(int requestMessagingVersion, AcceptVersions acceptVersions, ConnectionType type, Framing framing, InetAddressAndPort from)
         {
             this.requestMessagingVersion = requestMessagingVersion;
             this.acceptVersions = acceptVersions;
             this.type = type;
-            this.withCompression = withCompression;
-            this.withCrc = withCrc;
+            this.framing = framing;
             this.from = from;
         }
 
@@ -122,13 +121,11 @@ public class HandshakeProtocol
             int flags = 0;
             if (type.isMessaging())
                 flags |= type.twoBitID();
-            if (withCompression)
-                flags |= 1 << 2;
             if (type.isStreaming())
                 flags |= 1 << 3;
-            if (withCrc)
-                flags |= 1 << 4;
 
+            // framing id is split over 2nd and 4th bits, for backwards compatibility
+            flags |= ((framing.id & 1) << 2) | ((framing.id & 2) << 3);
             flags |= (requestMessagingVersion << 8);
 
             if (requestMessagingVersion < VERSION_40 || acceptVersions.max < VERSION_40)
@@ -176,9 +173,10 @@ public class HandshakeProtocol
                 int requestedMessagingVersion = getBits(flags, 8, 8);
                 int minMessagingVersion = getBits(flags, 16, 8);
                 int maxMessagingVersion = getBits(flags, 24, 8);
-                boolean withCompression = getBits(flags, 2, 1) == 1;
+                int framingBits = getBits(flags, 2, 1) | (getBits(flags, 4, 1) << 1);
+                Framing framing = Framing.forId(framingBits);
+
                 boolean isStream = getBits(flags, 3, 1) == 1;
-                boolean withCrc = getBits(flags, 4, 1) == 1;
 
                 ConnectionType type = isStream
                                     ? ConnectionType.STREAMING
@@ -200,7 +198,7 @@ public class HandshakeProtocol
                 return new Initiate(requestedMessagingVersion,
                                     minMessagingVersion == 0 && maxMessagingVersion == 0
                                         ? null : new AcceptVersions(minMessagingVersion, maxMessagingVersion),
-                                    type, withCompression, withCrc, from);
+                                    type, framing, from);
 
             }
             catch (EOFException e)
@@ -218,8 +216,7 @@ public class HandshakeProtocol
 
             Initiate that = (Initiate)other;
             return    this.type == that.type
-                   && this.withCompression == that.withCompression
-                   && this.withCrc == that.withCrc
+                   && this.framing == that.framing
                    && this.requestMessagingVersion == that.requestMessagingVersion
                    && Objects.equals(this.acceptVersions, that.acceptVersions);
         }
@@ -227,13 +224,11 @@ public class HandshakeProtocol
         @Override
         public String toString()
         {
-            return String.format("Initiate(request: %d, min: %d, max: %d, type: %s, compress: %b, from: %s)",
+            return String.format("Initiate(request: %d, min: %d, max: %d, type: %s, framing: %b, from: %s)",
                                  requestMessagingVersion,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.min,
                                  acceptVersions == null ? requestMessagingVersion : acceptVersions.max,
-                                 type,
-                                 withCompression,
-                                 from);
+                                 type, framing, from);
         }
     }
 
