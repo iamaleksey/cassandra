@@ -218,15 +218,15 @@ public class Verifier
 
     static class FailedSerializeEvent extends SimpleMessageEvent
     {
-        final boolean wasPartiallyWrittenToNetwork;
+        final int bytesWrittenToNetwork;
         final Throwable failure;
-        FailedSerializeEvent(long at, long messageId, boolean wasPartiallyWrittenToNetwork, Throwable failure)
+        FailedSerializeEvent(long at, long messageId, int bytesWrittenToNetwork, Throwable failure)
         {
             super(FAILED_SERIALIZE, at, messageId);
-            this.wasPartiallyWrittenToNetwork = wasPartiallyWrittenToNetwork;
+            this.bytesWrittenToNetwork = bytesWrittenToNetwork;
             this.failure = failure;
         }
-        public String toString() { return String.format("FAILED_SERIALIZE{written=%b, failure=%s}", wasPartiallyWrittenToNetwork, failure); }
+        public String toString() { return String.format("FAILED_SERIALIZE{written=%b, failure=%s}", bytesWrittenToNetwork, failure); }
     }
 
     static class ExpiredMessageEvent extends SimpleMessageEvent
@@ -295,10 +295,10 @@ public class Verifier
         long at = nextId();
         events.put(at, new SimpleMessageEvent(FINISH_SERIALIZE_LARGE, at, messageId));
     }
-    void onFailedSerialize(long messageId, boolean wasPartiallyWrittenToNetwork, Throwable failure)
+    void onFailedSerialize(long messageId, int bytesWrittenToNetwork, Throwable failure)
     {
         long at = nextId();
-        events.put(at, new FailedSerializeEvent(at, messageId, wasPartiallyWrittenToNetwork, failure));
+        events.put(at, new FailedSerializeEvent(at, messageId, bytesWrittenToNetwork, failure));
     }
     void onExpiredBeforeSend(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
     {
@@ -800,7 +800,7 @@ public class Verifier
                         else
                             assert e.failure instanceof InvalidSerializedSizeException || e.failure instanceof Connection.IntentionalIOException || e.failure instanceof Connection.IntentionalRuntimeException || e.failure instanceof BufferOverflowException;
 
-                        if (!e.wasPartiallyWrittenToNetwork)
+                        if (e.bytesWrittenToNetwork == 0) // TODO: use header size
                             messages.remove(m.message.id());
 
                         InvalidSerializedSizeException ex;
@@ -809,7 +809,7 @@ public class Verifier
                             || ((ex = (InvalidSerializedSizeException) e.failure).expectedSize <= DEFAULT_BUFFER_SIZE && ex.actualSizeAtLeast <= DEFAULT_BUFFER_SIZE)
                             || (ex.expectedSize > DEFAULT_BUFFER_SIZE && ex.actualSizeAtLeast < DEFAULT_BUFFER_SIZE))
                         {
-                            assert !e.wasPartiallyWrittenToNetwork;
+                            assert e.bytesWrittenToNetwork == 0;
                         }
 
                         m.require(FAILED_SERIALIZE, this, SERIALIZE);

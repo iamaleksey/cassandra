@@ -365,7 +365,7 @@ public class AsyncPromise<V> implements Promise<V>
         }
         catch (Throwable t)
         {
-            logger.error("Failed too invoke listener {} to {}", listener, future, t);
+            logger.error("Failed to invoke listener {} to {}", listener, future, t);
         }
     }
 

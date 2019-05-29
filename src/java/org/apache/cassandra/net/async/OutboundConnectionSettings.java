@@ -35,7 +35,9 @@ import org.apache.cassandra.net.EndpointMessagingVersions;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.CoalescingStrategies;
 import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
+import org.apache.cassandra.utils.FBUtilities;
 
+import static org.apache.cassandra.config.DatabaseDescriptor.getEndpointSnitch;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.instance;
 import static org.apache.cassandra.net.async.SocketFactory.encryptionLogStatement;
@@ -53,12 +55,41 @@ public class OutboundConnectionSettings
      */
     private static final boolean INTRADC_TCP_NODELAY = Boolean.parseBoolean(System.getProperty(INTRADC_TCP_NODELAY_PROPERTY, "true"));
 
+    public enum Framing
+    {
+        // for  < VERSION_40, implies no framing
+        // for >= VERSION_40, uses simple unprotected frames with header crc but no payload protection
+        UNPROTECTED(0),
+        // for  < VERSION_40, uses the jpountz framing format
+        // for >= VERSION_40, uses our framing format with header crc24
+        LZ4(1),
+        // for  < VERSION_40, implies UNPROTECTED
+        // for >= VERSION_40, uses simple frames with separate header and payload crc
+        CRC(2);
+
+        public static Framing forId(int id)
+        {
+            switch (id)
+            {
+                case 0: return UNPROTECTED;
+                case 1: return LZ4;
+                case 2: return CRC;
+            }
+            throw new IllegalStateException();
+        }
+
+        final int id;
+        Framing(int id)
+        {
+            this.id = id;
+        }
+    }
+
     public final IInternodeAuthenticator authenticator;
     public final InetAddressAndPort to;
     public final InetAddressAndPort connectTo; // may be represented by a different IP address on this node's local network
     public final EncryptionOptions encryption;
-    public final Boolean withCompression;
-    public final Boolean withCrc;
+    public final Framing framing;
     public final CoalescingStrategy coalescingStrategy;
     public final Integer socketSendBufferSizeInBytes;
     // TODO: document these, and perhaps derive defaults from system memory settings?
@@ -83,15 +114,15 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings(InetAddressAndPort to, InetAddressAndPort preferred)
     {
-        this(null, to, preferred, null, null, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null, null, null, null, null);
+        this(null, to, preferred, null, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null, null, null, null, null);
     }
 
     private OutboundConnectionSettings(IInternodeAuthenticator authenticator,
                                        InetAddressAndPort to,
                                        InetAddressAndPort connectTo,
                                        EncryptionOptions encryption,
-                                       Boolean withCompression,
-                                       Boolean withCrc, CoalescingStrategy coalescingStrategy,
+                                       Framing framing,
+                                       CoalescingStrategy coalescingStrategy,
                                        Integer socketSendBufferSizeInBytes,
                                        Integer applicationSendQueueCapacityInBytes,
                                        Integer applicationReserveSendQueueEndpointCapacityInBytes,
@@ -108,12 +139,16 @@ public class OutboundConnectionSettings
                                        OutboundDebugCallbacks debug,
                                        EndpointMessagingVersions endpointToVersion)
     {
+        Preconditions.checkArgument(socketSendBufferSizeInBytes == null || socketSendBufferSizeInBytes == 0 || socketSendBufferSizeInBytes >= 1 << 10, "illegal socket send buffer size: " + socketSendBufferSizeInBytes);
+        Preconditions.checkArgument(applicationSendQueueCapacityInBytes == null || applicationSendQueueCapacityInBytes >= 1 << 10, "illegal application send queue capacity: " + applicationSendQueueCapacityInBytes);
+        Preconditions.checkArgument(tcpUserTimeoutInMS == null || tcpUserTimeoutInMS >= 0, "tcp user timeout must be non negative: " + tcpUserTimeoutInMS);
+        Preconditions.checkArgument(tcpConnectTimeoutInMS == null || tcpConnectTimeoutInMS > 0, "tcp connect timeout must be positive: " + tcpConnectTimeoutInMS);
+
         this.authenticator = authenticator;
         this.to = to;
         this.connectTo = connectTo;
         this.encryption = encryption;
-        this.withCompression = withCompression;
-        this.withCrc = withCrc;
+        this.framing = framing;
         this.coalescingStrategy = coalescingStrategy;
         this.socketSendBufferSizeInBytes = socketSendBufferSizeInBytes;
         this.applicationSendQueueCapacityInBytes = applicationSendQueueCapacityInBytes;
@@ -142,34 +177,17 @@ public class OutboundConnectionSettings
         return encryption != null;
     }
 
-    public boolean withCompression()
-    {
-        return withCompression != null && withCompression;
-    }
-
-    public boolean withCrc()
-    {
-        return withCrc != null && withCrc;
-    }
-
-    public EndpointMessagingVersions endpointToVersion()
-    {
-        if (endpointToVersion == null)
-            return instance().versions;
-        return endpointToVersion;
-    }
-
     public String toString()
     {
-        return String.format("peer: (%s, %s), compression: %s, encryption: %s, coalesce: %s",
-                             to, connectTo, withCompression, encryptionLogStatement(encryption),
+        return String.format("peer: (%s, %s), framing: %s, encryption: %s, coalesce: %s",
+                             to, connectTo, framing, encryptionLogStatement(encryption),
                              coalescingStrategy != null ? coalescingStrategy : CoalescingStrategies.Strategy.DISABLED);
     }
 
     public OutboundConnectionSettings withAuthenticator(IInternodeAuthenticator authenticator)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -178,8 +196,8 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings toEndpoint(InetAddressAndPort endpoint)
     {
-        return new OutboundConnectionSettings(authenticator, endpoint, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, endpoint, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -187,36 +205,26 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withConnectTo(InetAddressAndPort connectTo)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
     }
 
-    public OutboundConnectionSettings withEncryption(ServerEncryptionOptions encryptionOptions)
+    public OutboundConnectionSettings withEncryption(ServerEncryptionOptions encryption)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryptionOptions, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
     }
 
     @SuppressWarnings("unused")
-    public OutboundConnectionSettings withCompression(boolean compress)
+    public OutboundConnectionSettings withFraming(Framing framing)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, compress,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
-                                              applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
-                                              tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
-    }
-
-    public OutboundConnectionSettings withCrc(boolean crc)
-    {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              crc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -224,8 +232,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withCoalescingStrategy(CoalescingStrategy coalescingStrategy)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -233,8 +241,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withSocketSendBufferSizeInBytes(int socketSendBufferSizeInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -243,8 +251,8 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withApplicationSendQueueCapacityInBytes(int applicationSendQueueCapacityInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -252,8 +260,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withApplicationReserveSendQueueCapacityInBytes(Integer applicationReserveSendQueueEndpointCapacityInBytes, ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -262,8 +270,8 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withTcpNoDelay(boolean tcpNoDelay)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -272,8 +280,8 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withNettyBufferBounds(WriteBufferWaterMark nettyBufferBounds)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -281,8 +289,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withTcpConnectTimeoutInMS(int tcpConnectTimeoutInMS)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -290,8 +298,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withTcpUserTimeoutInMS(int tcpUserTimeoutInMS)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -299,8 +307,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withAcceptVersions(AcceptVersions acceptVersions)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -308,8 +316,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withFrom(InetAddressAndPort from)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -317,8 +325,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withSocketFactory(SocketFactory socketFactory)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -326,8 +334,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withCallbacks(OutboundMessageCallbacks callbacks)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -335,8 +343,8 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withDebugCallbacks(OutboundDebugCallbacks debug)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, withCompression,
-                                              withCrc, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -355,116 +363,138 @@ public class OutboundConnectionSettings
         return withApplicationReserveSendQueueCapacityInBytes(applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes);
     }
 
+    public IInternodeAuthenticator authenticator()
+    {
+        return authenticator != null ? authenticator : DatabaseDescriptor.getInternodeAuthenticator();
+    }
+
+    public EndpointMessagingVersions endpointToVersion()
+    {
+        if (endpointToVersion == null)
+            return instance().versions;
+        return endpointToVersion;
+    }
+
+    public InetAddressAndPort from()
+    {
+        return from != null ? from : FBUtilities.getBroadcastAddressAndPort();
+    }
+
+    public OutboundDebugCallbacks debug()
+    {
+        return debug != null ? debug : OutboundDebugCallbacks.NONE;
+    }
+
+    public EncryptionOptions encryption()
+    {
+        return encryption != null ? encryption : defaultEncryptionOptions(to);
+    }
+
+    public SocketFactory socketFactory()
+    {
+        return socketFactory != null ? socketFactory : instance().socketFactory;
+    }
+
+    public OutboundMessageCallbacks callbacks()
+    {
+        return callbacks != null ? callbacks : instance().callbacks;
+    }
+
+    public CoalescingStrategy coalescingStrategy(ConnectionType type)
+    {
+        return coalescingStrategy != null ? coalescingStrategy : defaultCoalescingStrategy(to, type);
+    }
+
+    public int socketSendBufferSizeInBytes()
+    {
+        return socketSendBufferSizeInBytes != null ? socketSendBufferSizeInBytes
+                                                   : DatabaseDescriptor.getInternodeSocketSendBufferSizeInBytes();
+    }
+
+    public int applicationSendQueueCapacityInBytes()
+    {
+        return applicationSendQueueCapacityInBytes != null ? applicationSendQueueCapacityInBytes
+                                                           : DatabaseDescriptor.getInternodeApplicationSendQueueCapacityInBytes();
+    }
+
+    public ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes()
+    {
+        return applicationReserveSendQueueGlobalCapacityInBytes != null ? applicationReserveSendQueueGlobalCapacityInBytes
+                                                                        : instance().outboundGlobalReserveLimit;
+    }
+
+    public int applicationReserveSendQueueEndpointCapacityInBytes()
+    {
+        return applicationReserveSendQueueEndpointCapacityInBytes != null ? applicationReserveSendQueueEndpointCapacityInBytes
+                                                                          : DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes();
+    }
+
+    public int tcpConnectTimeoutInMS()
+    {
+        return tcpConnectTimeoutInMS != null ? tcpConnectTimeoutInMS
+                                             : DatabaseDescriptor.getInternodeTcpConnectTimeoutInMS();
+    }
+
+    public int tcpUserTimeoutInMS()
+    {
+        return tcpUserTimeoutInMS != null ? tcpUserTimeoutInMS
+                                          : DatabaseDescriptor.getInternodeTcpUserTimeoutInMS();
+    }
+
+    public boolean tcpNoDelay()
+    {
+        if (tcpNoDelay != null)
+            return tcpNoDelay;
+
+        if (isInLocalDC(getEndpointSnitch(), getBroadcastAddressAndPort(), to))
+            return INTRADC_TCP_NODELAY;
+
+        return DatabaseDescriptor.getInterDCTcpNoDelay();
+    }
+
+    public AcceptVersions acceptVersions(ConnectionType type)
+    {
+        return acceptVersions != null ? acceptVersions
+                                      : type.isMessaging()
+                                        ? MessagingService.accept_messaging
+                                        : MessagingService.accept_streaming;
+    }
+
+    public InetAddressAndPort connectTo(int messagingVersion)
+    {
+        InetAddressAndPort connectTo = this.connectTo;
+        if (connectTo == null)
+            connectTo = SystemKeyspace.getPreferredIP(to);
+        connectTo = maybeWithSecurePort(connectTo, messagingVersion, withEncryption());
+        return connectTo;
+    }
+
+    public Framing framing(ConnectionType type)
+    {
+        if (framing != null)
+            return framing;
+
+        if (type.isStreaming())
+            return Framing.UNPROTECTED;
+
+        return shouldCompressConnection(getEndpointSnitch(), getBroadcastAddressAndPort(), to)
+               ? Framing.LZ4 : Framing.CRC;
+    }
+
     // note that connectTo is updated even if specified, in the case of pre40 messaging and using encryption (to update port)
     public OutboundConnectionSettings withDefaults(ConnectionType type, int messagingVersion)
     {
-        IInternodeAuthenticator authenticator = this.authenticator;
-        InetAddressAndPort endpoint = this.to;
-        InetAddressAndPort connectTo = this.connectTo;
-        InetAddressAndPort from = this.from;
-        EncryptionOptions encryptionOptions = this.encryption;
-        Boolean crc = this.withCrc;
-        Boolean compress = this.withCompression;
-        CoalescingStrategy coalescingStrategy = this.coalescingStrategy;
-        Integer socketSendBufferSizeInBytes = this.socketSendBufferSizeInBytes;
-        Integer applicationSendQueueCapacityInBytes = this.applicationSendQueueCapacityInBytes;
-        Integer applicationReserveSendQueueEndpointCapacityInBytes = this.applicationReserveSendQueueEndpointCapacityInBytes;
-        ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes = this.applicationReserveSendQueueGlobalCapacityInBytes;
-        Boolean tcpNoDelay = this.tcpNoDelay;
-        int flushLowWaterMark = this.flushLowWaterMark;
-        int flushHighWaterMark = this.flushHighWaterMark;
-        Integer tcpConnectTimeoutInMS = this.tcpConnectTimeoutInMS;
-        Integer tcpUserTimeoutInMS = this.tcpUserTimeoutInMS;
-        AcceptVersions acceptVersions = this.acceptVersions;
-        SocketFactory socketFactory = this.socketFactory;
-        OutboundMessageCallbacks callbacks = this.callbacks;
-        OutboundDebugCallbacks debug = this.debug;
-        EndpointMessagingVersions endpointToVersion = this.endpointToVersion;
-
-        IEndpointSnitch snitch = DatabaseDescriptor.getEndpointSnitch();
-        InetAddressAndPort self = getBroadcastAddressAndPort();
-
-        if (endpoint == null)
+        if (to == null)
             throw new IllegalArgumentException();
 
-        if (encryptionOptions == null)
-            encryptionOptions = defaultEncryptionOptions(endpoint);
-
-        // fill in defaults
-        if (connectTo == null)
-            connectTo = SystemKeyspace.getPreferredIP(endpoint);
-        connectTo = maybeWithSecurePort(connectTo, messagingVersion, withEncryption());
-
-        if (from == null)
-            from = getBroadcastAddressAndPort();
-
-        // by default we do not compress streaming at the pipeline level,
-        // as the streams will (typically) handle compression themselves
-        if (compress == null)
-            compress = type.isMessaging() && shouldCompressConnection(snitch, self, endpoint);
-
-        if (crc == null)
-            crc = type.isMessaging() && !compress;
-
-        if (crc && messagingVersion < VERSION_40)
-            crc = false; // cannot use Crc framing with pre-40
-
-        if (tcpNoDelay == null)
-            tcpNoDelay = isInLocalDC(snitch, self, endpoint)
-                         ? INTRADC_TCP_NODELAY : DatabaseDescriptor.getInterDCTcpNoDelay();
-
-        if (coalescingStrategy == null)
-            coalescingStrategy = defaultCoalescingStrategy(endpoint, type);
-
-        if (authenticator == null)
-            authenticator = DatabaseDescriptor.getInternodeAuthenticator();
-
-        if (socketSendBufferSizeInBytes == null)
-            socketSendBufferSizeInBytes = DatabaseDescriptor.getInternodeSocketSendBufferSizeInBytes();
-
-        if (applicationSendQueueCapacityInBytes == null)
-            applicationSendQueueCapacityInBytes = DatabaseDescriptor.getInternodeApplicationSendQueueCapacityInBytes();
-
-        if (applicationReserveSendQueueGlobalCapacityInBytes == null)
-            applicationReserveSendQueueGlobalCapacityInBytes = MessagingService.instance().outboundGlobalReserveLimit;
-
-        if (applicationReserveSendQueueEndpointCapacityInBytes == null)
-            applicationReserveSendQueueEndpointCapacityInBytes = DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes();
-
-        if (tcpConnectTimeoutInMS == null)
-            tcpConnectTimeoutInMS = DatabaseDescriptor.getInternodeTcpConnectTimeoutInMS();
-
-        if (tcpUserTimeoutInMS == null)
-            tcpUserTimeoutInMS = DatabaseDescriptor.getInternodeTcpUserTimeoutInMS();
-
-        if (acceptVersions == null)
-            acceptVersions = type.isStreaming() ? MessagingService.accept_streaming : MessagingService.accept_messaging;
-
-        if (socketFactory == null)
-            socketFactory = MessagingService.instance().socketFactory;
-
-        if (callbacks == null)
-            callbacks = MessagingService.instance().callbacks;
-
-        if (debug == null)
-            debug = OutboundDebugCallbacks.NONE;
-
-        if (endpointToVersion == null)
-            endpointToVersion = MessagingService.instance().versions;
-
-        Preconditions.checkArgument(socketSendBufferSizeInBytes == 0 || socketSendBufferSizeInBytes >= 1 << 10, "illegal socket send buffer size: " + socketSendBufferSizeInBytes);
-        Preconditions.checkArgument(applicationSendQueueCapacityInBytes >= 1 << 10, "illegal application send queue capacity: " + applicationSendQueueCapacityInBytes);
-        Preconditions.checkArgument(tcpUserTimeoutInMS >= 0, "tcp user timeout must be non negative: " + tcpUserTimeoutInMS);
-        Preconditions.checkArgument(tcpConnectTimeoutInMS > 0, "tcp connect timeout must be positive: " + tcpConnectTimeoutInMS);
-
-        return new OutboundConnectionSettings(authenticator, endpoint, connectTo,
-                                              encryptionOptions, compress, crc, coalescingStrategy,
-                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
-                                              applicationReserveSendQueueEndpointCapacityInBytes,
-                                              applicationReserveSendQueueGlobalCapacityInBytes,
-                                              tcpNoDelay, flushLowWaterMark, flushHighWaterMark,
-                                              tcpConnectTimeoutInMS, tcpUserTimeoutInMS, acceptVersions,
-                                              from, socketFactory, callbacks, debug, endpointToVersion);
+        return new OutboundConnectionSettings(authenticator(), to, connectTo(messagingVersion),
+                                              encryption(), framing(type), coalescingStrategy(type),
+                                              socketSendBufferSizeInBytes(), applicationSendQueueCapacityInBytes(),
+                                              applicationReserveSendQueueEndpointCapacityInBytes(),
+                                              applicationReserveSendQueueGlobalCapacityInBytes(),
+                                              tcpNoDelay(), flushLowWaterMark, flushHighWaterMark,
+                                              tcpConnectTimeoutInMS(), tcpUserTimeoutInMS(), acceptVersions(type),
+                                              from(), socketFactory(), callbacks(), debug(), endpointToVersion());
     }
 
     private static boolean isInLocalDC(IEndpointSnitch snitch, InetAddressAndPort localHost, InetAddressAndPort remoteHost)

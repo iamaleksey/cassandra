@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.net.async;
 
+import java.io.IOException;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
@@ -245,6 +246,9 @@ public final class SocketFactory
             return    errorCode == ERRNO_ECONNRESET_NEGATIVE
                       || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
         }
+        if (IOException.class == t.getClass() &&
+            (t.getMessage().equals("Broken pipe") || t.getMessage().equals("Connection reset by peer")))
+                return true;
         return false;
     }
 

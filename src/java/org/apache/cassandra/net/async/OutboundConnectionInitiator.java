@@ -84,7 +84,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
 
     private final ConnectionType type;
     private final OutboundConnectionSettings settings;
-    private final int requestMessagingVersion; // for pre40 nodes only
+    private final int requestMessagingVersion; // for pre40 nodes
     private final Promise<Result<SuccessType>> resultPromise;
 
     private OutboundConnectionInitiator(ConnectionType type, OutboundConnectionSettings settings,
@@ -100,6 +100,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      * Initiate a connection with the requested messaging version.
      * if the other node supports a newer version, or doesn't support this version, we will fail to connect
      * and try again with the version they reported
+     *
+     * The returned {@code Future} is guaranteed to be completed on the supplied eventLoop.
      */
     public static Future<Result<StreamingSuccess>> initiateStreaming(EventLoop eventLoop, OutboundConnectionSettings settings, int requestMessagingVersion)
     {
@@ -111,10 +113,12 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      * Initiate a connection with the requested messaging version.
      * if the other node supports a newer version, or doesn't support this version, we will fail to connect
      * and try again with the version they reported
+     *
+     * The returned {@code Future} is guaranteed to be completed on the supplied eventLoop.
      */
-    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, OutboundConnectionSettings settings, int requestMessagingVersion)
+    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, OutboundConnectionSettings settings, int requestMessagingVersion, Promise<Result<MessagingSuccess>> result)
     {
-        return new OutboundConnectionInitiator<MessagingSuccess>(type, settings, requestMessagingVersion, new AsyncPromise<>(eventLoop))
+        return new OutboundConnectionInitiator<>(type, settings, requestMessagingVersion, result)
                .initiate(eventLoop);
     }
 
@@ -136,15 +140,17 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         Future<Void> bootstrap = createBootstrap(eventLoop)
                                  .connect()
                                  .addListener(future -> {
-                                     if (!future.isSuccess())
-                                     {
-                                         if (future.isCancelled() && !timedout.get())
-                                             resultPromise.cancel(true);
-                                         else if (future.isCancelled())
-                                             resultPromise.tryFailure(new IOException("Timeout handshaking with " + settings.connectTo));
-                                         else
-                                             resultPromise.tryFailure(future.cause());
-                                     }
+                                     eventLoop.execute(() -> {
+                                         if (!future.isSuccess())
+                                         {
+                                             if (future.isCancelled() && !timedout.get())
+                                                 resultPromise.cancel(true);
+                                             else if (future.isCancelled())
+                                                 resultPromise.tryFailure(new IOException("Timeout handshaking with " + settings.connectTo));
+                                             else
+                                                 resultPromise.tryFailure(future.cause());
+                                         }
+                                     });
                                  });
 
         ScheduledFuture<?> timeout = eventLoop.schedule(() -> {
@@ -220,7 +226,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         public void channelActive(final ChannelHandlerContext ctx)
         {
-            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, type, settings.withCompression(), settings.withCrc(), settings.from);
+            Initiate msg = new Initiate(requestMessagingVersion, settings.acceptVersions, type, settings.framing, settings.from);
             logger.trace("starting handshake with peer {}, msg = {}", settings.connectTo, msg);
             AsyncChannelPromise.writeAndFlush(ctx, msg.encode(),
                   future -> { if (!future.isSuccess()) exceptionCaught(ctx, future.cause()); });
@@ -273,12 +279,18 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                         // This is a bit ugly
                         if (type.isMessaging())
                         {
-                            if (settings.withCompression)
-                                frameEncoder = FrameEncoderLZ4.fastInstance;
-                            else if (settings.withCrc)
-                                frameEncoder = FrameEncoderCrc.instance;
-                            else
-                                frameEncoder = FrameEncoderUnprotected.instance;
+                            switch (settings.framing)
+                            {
+                                case LZ4:
+                                    frameEncoder = FrameEncoderLZ4.fastInstance;
+                                    break;
+                                case CRC:
+                                    frameEncoder = FrameEncoderCrc.instance;
+                                    break;
+                                case UNPROTECTED:
+                                    frameEncoder = FrameEncoderUnprotected.instance;
+                                    break;
+                            }
 
                             result = (Result<SuccessType>) messagingSuccess(ctx.channel(), useMessagingVersion, frameEncoder.allocator());
                         }
@@ -296,10 +308,16 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     if (peerMessagingVersion == requestMessagingVersion
                         || peerMessagingVersion > settings.acceptVersions.max) // this clause is for impersonating 3.0 node in testing only
                     {
-                        if (settings.withCompression)
-                            frameEncoder = FrameEncoderLegacyLZ4.instance;
-                        else
-                            frameEncoder = FrameEncoderLegacy.instance;
+                        switch (settings.framing)
+                        {
+                            case CRC:
+                            case UNPROTECTED:
+                                frameEncoder = FrameEncoderLegacy.instance;
+                                break;
+                            case LZ4:
+                                frameEncoder = FrameEncoderLegacyLZ4.instance;
+                                break;
+                        }
 
                         result = (Result<SuccessType>) messagingSuccess(ctx.channel(), requestMessagingVersion, frameEncoder.allocator());
                     }
@@ -330,7 +348,8 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                     pipeline.close();
                 }
 
-                resultPromise.trySuccess(result);
+                if (!resultPromise.trySuccess(result) && result.isSuccess())
+                    result.success().channel.close();
             }
             catch (Throwable t)
             {

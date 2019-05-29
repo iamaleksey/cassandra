@@ -80,6 +80,7 @@ import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.async.ConnectionUtils.*;
 import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
 import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.async.OutboundConnectionSettings.Framing.LZ4;
 import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 public class ConnectionTest
@@ -196,7 +197,7 @@ public class ConnectionTest
                             .inbound(inbound -> inbound.withAcceptMessaging(legacy)),
         settings -> settings.outbound(outbound -> outbound.withEncryption(encryptionOptions))
                             .inbound(inbound -> inbound.withEncryption(encryptionOptions)),
-        settings -> settings.outbound(outbound -> outbound.withCompression(true))
+        settings -> settings.outbound(outbound -> outbound.withFraming(LZ4))
     );
 
     static final List<Settings> SETTINGS = applyPowerSet(
@@ -714,8 +715,8 @@ public class ConnectionTest
                 outbound.enqueue(Message.out(Verb._TEST_1, 0xffffffff));
 
             latch.await(10, SECONDS);
-            Assert.assertEquals(latch.getCount(), 0);
-            Assert.assertEquals(counter.get(), 6);
+            Assert.assertEquals(0, latch.getCount());
+            Assert.assertEquals(6, counter.get());
         });
     }
 

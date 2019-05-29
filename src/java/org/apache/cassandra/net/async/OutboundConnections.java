@@ -169,11 +169,10 @@ public class OutboundConnections
     /**
      * Close each netty channel and its socket
      */
-    public Future<Void> interrupt()
+    public void interrupt()
     {
-        return new FutureCombiner(
-            apply(OutboundConnection::interrupt)
-        );
+        // must return a non-null value for ImmutableList.of()
+        apply(OutboundConnection::interrupt);
     }
 
     /**

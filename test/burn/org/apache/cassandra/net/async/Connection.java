@@ -339,11 +339,11 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
-    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable failure)
+    public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, int bytesWrittenToNetwork, Throwable failure)
     {
-        if (!wasPartiallyWrittenToNetwork)
+        if (bytesWrittenToNetwork == 0) // TODO:
             controller.fail(message.serializedSize(messagingVersion));
-        verifier.onFailedSerialize(message.id(), wasPartiallyWrittenToNetwork, failure);
+        verifier.onFailedSerialize(message.id(), bytesWrittenToNetwork, failure);
     }
 
     public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
