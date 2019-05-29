@@ -26,7 +26,6 @@ import java.util.Deque;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -226,28 +225,30 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws IOException
     {
-        ByteBuffer buf;
+        SharedBytes bytes;
         if (msg instanceof BufferPoolAllocator.Wrapped)
         {
-            buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
+            ByteBuffer buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
             allocator.putUnusedPortion(buf, false); // netty will probably have mis-predicted the space needed
+            bytes = SharedBytes.wrap(buf);
+        }
+        else if (msg instanceof SharedBytes)
+        {
+            bytes = (SharedBytes) msg;
         }
         else
         {
-            // this is only necessary for pre40, which uses the legacy LZ4,
-            // which sometimes allocates on heap explicitly for some reason
-            ByteBuf in = (ByteBuf) msg;
-            buf = allocator.get(in.readableBytes());
-            in.readBytes(buf);
-            buf.flip();
+            throw new IllegalArgumentException();
         }
 
-        decode(frames, SharedBytes.wrap(buf));
+        decode(frames, bytes);
 
         if (isActive)
         {
-            if (deliver(processor)) onExhausted();
-            else isActive = false;
+            if (deliver(processor))
+                onExhausted();
+            else
+                isActive = false;
         }
     }
 
