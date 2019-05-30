@@ -122,7 +122,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
              * then we must trigger another channel read explicitly, or else risk stalling
              * forever without bytes to complete the current in-flight frame.
              */
-            if (decodedFrameCount == 0 && !ctx.channel().config().isAutoRead())
+            if (null != stash && decodedFrameCount == 0 && !ctx.channel().config().isAutoRead())
                 ctx.read();
 
             decodedFrameCount = 0;
