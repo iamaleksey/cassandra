@@ -46,9 +46,10 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
         super(allocator, messagingVersion);
     }
 
+    @Override
     void addLastTo(ChannelPipeline pipeline)
     {
-        pipeline.addLast("legacylz4", new LZ4Decoder(allocator));
+        pipeline.addLast("legacyLZ4Decoder", new LZ4Decoder(allocator));
         pipeline.addLast("frameDecoderNone", this);
     }
 
@@ -59,12 +60,19 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
      * two reasons:
      *   1. It has very poor performance when coupled with xxhash, which we use for legacy connections -
      *      allocating a single-byte array and making a JNI call <em>for every byte of the payload</em>
-     *   2. It was tricky to efficiently integrate with upstream {@link FrameDecoder}
+     *   2. It was tricky to efficiently integrate with upstream {@link FrameDecoder}, and impossible
+     *      to make it play nicely with flow control - Netty's implementation, based on
+     *      {@link io.netty.handler.codec.ByteToMessageDecoder}, would potentially keep triggering
+     *      reads on its own volition for as long as its last read had no completed frames to supply
+     *      - defying our goal to only ever trigger channel reads when explicitly requested
      */
     private static class LZ4Decoder extends ChannelInboundHandlerAdapter
     {
-        private static final XXHash32 xxhash = XXHashFactory.fastestInstance().hash32();
-        private static final LZ4FastDecompressor decompressor = LZ4Factory.fastestInstance().fastDecompressor();
+        private static final XXHash32 xxhash =
+            XXHashFactory.fastestInstance().hash32();
+
+        private static final LZ4FastDecompressor decompressor =
+            LZ4Factory.fastestInstance().fastDecompressor();
 
         private final BufferPoolAllocator allocator;
 
@@ -75,11 +83,15 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
 
         private final Deque<SharedBytes> frames = new ArrayDeque<>(4);
 
+        // total # of frames decoded between two subsequent invocations of channelReadComplete()
+        private int decodedFrameCount = 0;
+
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws CorruptLZ4Frame
         {
             assert msg instanceof BufferPoolAllocator.Wrapped;
             ByteBuffer buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
+            // netty will probably have mis-predicted the space needed
             BufferPool.putUnusedPortion(buf, false);
 
             CorruptLZ4Frame error = null;
@@ -93,6 +105,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             }
             finally
             {
+                decodedFrameCount += frames.size();
                 while (!frames.isEmpty())
                     ctx.fireChannelRead(frames.poll());
             }
@@ -104,13 +117,16 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
         @Override
         public void channelReadComplete(ChannelHandlerContext ctx)
         {
-            // if there is a half-arrived frame in-flight, we must keep reading, as
-            // Netty pipeline has no awareness of individual handler work buffering,
-            // and if we don't, we can get stalled forever
-            if (null != stash && !ctx.channel().config().isAutoRead())
+            /*
+             * If no frames have been decoded from the entire batch of channelRead() calls,
+             * then we must trigger another channel read explicitly, or else risk stalling
+             * forever without bytes to complete the current in-flight frame.
+             */
+            if (decodedFrameCount == 0 && !ctx.channel().config().isAutoRead())
                 ctx.read();
-            else
-                ctx.fireChannelReadComplete();
+
+            decodedFrameCount = 0;
+            ctx.fireChannelReadComplete();
         }
 
         private void decode(Collection<SharedBytes> into, SharedBytes newBytes) throws CorruptLZ4Frame
