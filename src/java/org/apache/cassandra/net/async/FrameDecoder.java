@@ -225,31 +225,34 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws IOException
     {
-        SharedBytes bytes;
         if (msg instanceof BufferPoolAllocator.Wrapped)
         {
             ByteBuffer buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
-            allocator.putUnusedPortion(buf, false); // netty will probably have mis-predicted the space needed
-            bytes = SharedBytes.wrap(buf);
+            // netty will probably have mis-predicted the space needed
+            allocator.putUnusedPortion(buf, false);
+            channelRead(SharedBytes.wrap(buf));
         }
-        else if (msg instanceof SharedBytes)
+        else if (msg instanceof SharedBytes) // legacy LZ4 decoder
         {
-            bytes = (SharedBytes) msg;
+            channelRead((SharedBytes) msg);
         }
         else
         {
             throw new IllegalArgumentException();
         }
+    }
 
+    private void channelRead(SharedBytes bytes) throws IOException
+    {
         decode(frames, bytes);
 
+        if (isActive) isActive = deliver(processor);
+    }
+
+    public void channelReadComplete(ChannelHandlerContext ctx)
+    {
         if (isActive)
-        {
-            if (deliver(processor))
-                onExhausted();
-            else
-                isActive = false;
-        }
+            onExhausted();
     }
 
     /**
@@ -260,8 +263,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     private void onExhausted()
     {
-        if (isClosed()) close();
-        else channel.read();
+        if (isClosed())
+            close();
+        else
+            channel.read();
     }
 
     /**
