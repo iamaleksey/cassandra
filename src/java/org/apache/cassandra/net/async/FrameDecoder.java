@@ -26,7 +26,6 @@ import java.util.Deque;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelPipeline;
@@ -143,8 +142,8 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
     ByteBuffer stash;
 
     private boolean isActive;
-    private Channel channel;
-    private ChannelHandlerContext closed;
+    private boolean isClosed;
+    private ChannelHandlerContext ctx;
     private FrameProcessor processor = NO_PROCESSOR;
 
     FrameDecoder(BufferPoolAllocator allocator)
@@ -166,7 +165,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         this.processor = processor;
 
         isActive = true;
-        channel.read();
+        ctx.read();
     }
 
     /**
@@ -263,10 +262,10 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
      */
     private void onExhausted()
     {
-        if (isClosed())
+        if (isClosed)
             close();
         else
-            channel.read();
+            ctx.read();
     }
 
     /**
@@ -304,29 +303,22 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 
     public void handlerAdded(ChannelHandlerContext ctx)
     {
-        channel = ctx.channel();
-        channel.config().setAutoRead(false);
+        this.ctx = ctx;
+        ctx.channel().config().setAutoRead(false);
     }
 
     public void channelInactive(ChannelHandlerContext ctx)
     {
-        closed = ctx;
+        isClosed = true;
         if (frames.isEmpty())
             close();
-        allocator.release();
-    }
-
-    private boolean isClosed()
-    {
-        return closed != null;
     }
 
     private void close()
     {
         discard();
-        channel = null;
-        closed.fireChannelInactive();
-        closed = null;
+        ctx.fireChannelInactive();
+        allocator.release();
     }
 
     /**
