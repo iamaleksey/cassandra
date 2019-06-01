@@ -51,9 +51,9 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.FastThreadLocal;
 import net.nicoulaj.compilecommand.annotations.Inline;
+import org.apache.cassandra.io.util.DataInputPlus;
 
 /**
  * Borrows idea from
@@ -81,6 +81,13 @@ public class VIntCoding
         }
 
         return retval;
+    }
+
+    public static void skipUnsignedVInt(DataInputPlus input) throws IOException
+    {
+        int firstByte = input.readByte();
+        if (firstByte < 0)
+            input.skipBytesFully(numberOfExtraBytesToRead(firstByte));
     }
 
     /**
