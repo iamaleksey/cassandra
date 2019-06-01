@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.BiConsumer;
 
 import com.google.common.base.Preconditions;
 import com.google.common.primitives.Ints;
@@ -62,6 +63,12 @@ public class ForwardToContainer implements Serializable
                 return false;
 
         return true;
+    }
+
+    public void forEach(BiConsumer<Long, InetAddressAndPort> biConsumer)
+    {
+        for (int i = 0; i < messageIds.length; i++)
+            biConsumer.accept(messageIds[i], targets.get(i));
     }
 
     static class Serializer implements IVersionedSerializer<ForwardToContainer>
