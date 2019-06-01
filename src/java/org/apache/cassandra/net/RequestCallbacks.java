@@ -327,24 +327,34 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     @Override
     public void onOverloaded(Message<?> message, InetAddressAndPort peer)
     {
-        removeAndExpire(message.id(), peer);
+        removeAndExpire(message, peer);
     }
 
     @Override
     public void onExpired(Message<?> message, InetAddressAndPort peer)
     {
-        removeAndExpire(message.id(), peer);
+        removeAndExpire(message, peer);
     }
 
     @Override
     public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, boolean wasPartiallyWrittenToNetwork, Throwable failure)
     {
-        removeAndExpire(message.id(), peer);
+        removeAndExpire(message, peer);
     }
 
     @Override
     public void onDiscardOnClose(Message<?> message, InetAddressAndPort peer)
     {
+        removeAndExpire(message, peer);
+    }
+
+    private void removeAndExpire(Message message, InetAddressAndPort peer)
+    {
         removeAndExpire(message.id(), peer);
+
+        /* in case of a write sent to a different DC, also expire all forwarding targets */
+        ForwardToContainer forwardTo = message.forwardTo();
+        if (null != forwardTo)
+            forwardTo.forEach(this::removeAndExpire);
     }
 }
