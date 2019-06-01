@@ -54,7 +54,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.instance;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
 import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
-import static org.apache.cassandra.utils.vint.VIntCoding.readUnsignedVInt;
+import static org.apache.cassandra.utils.vint.VIntCoding.skipUnsignedVInt;
 
 /*
  * * @param <T> The type of the message payload.
@@ -672,14 +672,14 @@ public class Message<T>
             return new Header(id, verb, peer, creationTimeNanos, expiresAtNanos, flags, params);
         }
 
-        private void skipHeaderPost40(DataInputPlus in, int version) throws IOException
+        private void skipHeaderPost40(DataInputPlus in) throws IOException
         {
-            in.readUnsignedVInt();   // id
-            in.readInt();            // createdAt
-            in.readUnsignedVInt();   // expiresIn
-            in.readUnsignedVInt();   // verb
-            in.readUnsignedVInt();   // flags
-            skipParams(in, version); // params
+            skipUnsignedVInt(in); // id
+            in.skipBytesFully(4); // createdAt
+            skipUnsignedVInt(in); // expiresIn
+            skipUnsignedVInt(in); // verb
+            skipUnsignedVInt(in); // flags
+            skipParamsPost40(in); // params
         }
 
         private int serializedHeaderSizePost40(Header header, int version)
@@ -733,15 +733,15 @@ public class Message<T>
         private <T> Message<T> deserializePost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
             Header header = deserializeHeaderPost40(in, peer, version);
-            readUnsignedVInt(in); // payload size, not needed by payload deserializer
+            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
             T payload = (T) header.verb.serializer().deserialize(in, version);
             return new Message<>(header, payload);
         }
 
         private <T> Message<T> deserializePost40(DataInputPlus in, Header header, int version) throws IOException
         {
-            skipHeaderPost40(in, version);
-            readUnsignedVInt(in); // payload size, not needed by payload deserializer
+            skipHeaderPost40(in);
+            skipUnsignedVInt(in); // payload size, not needed by payload deserializer
             T payload = (T) header.verb.serializer().deserialize(in, version);
             return new Message<>(header, payload);
         }
@@ -826,14 +826,12 @@ public class Message<T>
             return new Header(id, verb, from, creationTimeNanos, verb.expiresAtNanos(creationTimeNanos), flags, params);
         }
 
-        private void skipHeaderPre40(DataInputPlus in, int version) throws IOException
+        private void skipHeaderPre40(DataInputPlus in) throws IOException
         {
-            in.readInt();                     // magic
-            in.readInt();                     // id
-            in.readInt();                     // createdAt
-            in.skipBytesFully(in.readByte()); // from
-            in.readInt();                     // verb
-            skipParams(in, version);          // params
+            in.skipBytesFully(PRE_40_MESSAGE_PREFIX_SIZE); // magic, id, createdAt
+            in.skipBytesFully(in.readByte());              // from
+            in.skipBytesFully(4);                          // verb
+            skipParamsPre40(in);                           // params
         }
 
         private int serializedHeaderSizePre40(Header header, int version)
@@ -908,7 +906,7 @@ public class Message<T>
         private <T> Message<T> deserializePre40(DataInputPlus in, Header header, boolean skipHeader, int version) throws IOException
         {
             if (skipHeader)
-                skipHeaderPre40(in, version);
+                skipHeaderPre40(in);
 
             IVersionedAsymmetricSerializer<?, T> payloadSerializer = header.verb.serializer();
             if (null == payloadSerializer)
@@ -1107,9 +1105,7 @@ public class Message<T>
          */
         private Map<ParamType, Object> extractParams(ByteBuffer buf, int readerIndex, int version) throws IOException
         {
-            long count = version >= VERSION_40
-                       ? getUnsignedVInt(buf, readerIndex)
-                       : buf.getInt(readerIndex);
+            long count = version >= VERSION_40 ? getUnsignedVInt(buf, readerIndex) : buf.getInt(readerIndex);
 
             if (count == 0)
                 return NO_PARAMS;
@@ -1127,22 +1123,25 @@ public class Message<T>
             }
         }
 
-        private void skipParams(DataInputPlus in, int version) throws IOException
+        private void skipParamsPost40(DataInputPlus in) throws IOException
         {
-            int count = version >= VERSION_40 ? Ints.checkedCast(in.readUnsignedVInt()) : in.readInt();
+            int count = Ints.checkedCast(in.readUnsignedVInt());
 
             for (int i = 0; i < count; i++)
             {
-                if (version >= VERSION_40)
-                {
-                    in.readUnsignedVInt();
-                    in.skipBytesFully(Ints.checkedCast(in.readUnsignedVInt()));
-                }
-                else
-                {
-                    in.skipBytesFully(in.readShort());
-                    in.skipBytesFully(in.readInt());
-                }
+                skipUnsignedVInt(in);
+                in.skipBytesFully(Ints.checkedCast(in.readUnsignedVInt()));
+            }
+        }
+
+        private void skipParamsPre40(DataInputPlus in) throws IOException
+        {
+            int count = in.readInt();
+
+            for (int i = 0; i < count; i++)
+            {
+                in.skipBytesFully(in.readShort());
+                in.skipBytesFully(in.readInt());
             }
         }
 
