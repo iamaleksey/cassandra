@@ -31,7 +31,6 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -47,6 +46,8 @@ import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.db.TypeSizes.sizeof;
+import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
 import static org.apache.cassandra.net.MessagingService.ONE_BYTE;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
@@ -685,11 +686,11 @@ public class Message<T>
         private int serializedHeaderSizePost40(Header header, int version)
         {
             long size = 0;
-            size += TypeSizes.sizeofUnsignedVInt(header.id);
+            size += sizeofUnsignedVInt(header.id);
             size += CREATION_TIME_SIZE;
-            size += TypeSizes.sizeofUnsignedVInt(1 + NANOSECONDS.toMillis(header.expiresAtNanos - header.createdAtNanos));
-            size += TypeSizes.sizeofUnsignedVInt(header.verb.id);
-            size += TypeSizes.sizeofUnsignedVInt(header.flags);
+            size += sizeofUnsignedVInt(1 + NANOSECONDS.toMillis(header.expiresAtNanos - header.createdAtNanos));
+            size += sizeofUnsignedVInt(header.verb.id);
+            size += sizeofUnsignedVInt(header.flags);
             size += serializedParamsSize(header.params, version);
             return Ints.checkedCast(size);
         }
@@ -751,7 +752,7 @@ public class Message<T>
             long size = 0;
             size += serializedHeaderSizePost40(message.header, version);
             int payloadSize = message.payloadSize(version);
-            size += TypeSizes.sizeofUnsignedVInt(payloadSize) + payloadSize;
+            size += sizeofUnsignedVInt(payloadSize) + payloadSize;
             return Ints.checkedCast(size);
         }
 
@@ -839,7 +840,7 @@ public class Message<T>
             long size = 0;
             size += PRE_40_MESSAGE_PREFIX_SIZE;
             size += CompactEndpointSerializationHelper.instance.serializedSize(header.from, version);
-            size += TypeSizes.sizeof(header.verb.id);
+            size += sizeof(header.verb.id);
             size += serializedParamsSize(addFlagsToLegacyParams(header.params, header.flags), version);
             return Ints.checkedCast(size);
         }
@@ -942,7 +943,7 @@ public class Message<T>
             long size = 0;
             size += serializedHeaderSizePre40(message.header, version);
             int payloadSize = message.payloadSize(version);
-            size += TypeSizes.sizeof(payloadSize);
+            size += sizeof(payloadSize);
             size += payloadSize;
             return Ints.checkedCast(size);
         }
@@ -1149,7 +1150,7 @@ public class Message<T>
         {
             long size = version >= VERSION_40
                       ? computeUnsignedVIntSize(params.size())
-                      : TypeSizes.sizeof(params.size());
+                      : sizeof(params.size());
 
             for (Map.Entry<ParamType, Object> kv : params.entrySet())
             {
@@ -1159,9 +1160,9 @@ public class Message<T>
                 long valueLength = type.serializer.serializedSize(value, version);
 
                 if (version >= VERSION_40)
-                    size += TypeSizes.sizeofUnsignedVInt(type.id) + TypeSizes.sizeofUnsignedVInt(valueLength);
+                    size += sizeofUnsignedVInt(type.id) + sizeofUnsignedVInt(valueLength);
                 else
-                    size += TypeSizes.sizeof(type.legacyAlias) + 4;
+                    size += sizeof(type.legacyAlias) + 4;
 
                 size += valueLength;
             }
