@@ -79,6 +79,11 @@ public class BytesInFlightController
         else maybeProcessDeferred();
     }
 
+    public long inFlight()
+    {
+        return sentBytes - receivedBytes;
+    }
+
     public void fail(int bytes)
     {
         receivedBytesUpdater.addAndGet(this, bytes);

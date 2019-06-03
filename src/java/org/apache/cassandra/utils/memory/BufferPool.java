@@ -29,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
@@ -214,26 +215,23 @@ public class BufferPool
     @VisibleForTesting
     static void reset()
     {
-        localPool.get().reset();
-        globalPool.reset();
+        localPool.get().unsafeRecycle();
+        globalPool.unsafeFree();
     }
 
     @VisibleForTesting
     static Chunk currentChunk()
     {
-        return localPool.get().chunks[0];
+        return localPool.get().chunks.chunk0;
     }
 
     @VisibleForTesting
     static int numChunks()
     {
-        int ret = 0;
-        for (Chunk chunk : localPool.get().chunks)
-        {
-            if (chunk != null)
-                ret++;
-        }
-        return ret;
+        LocalPool pool = localPool.get();
+        return   (pool.chunks.chunk0 != null ? 1 : 0)
+               + (pool.chunks.chunk1 != null ? 1 : 0)
+               + (pool.chunks.chunk2 != null ? 1 : 0);
     }
 
     public static long sizeInBytes()
@@ -366,25 +364,20 @@ public class BufferPool
 
         /** This is not thread safe and should only be used for unit testing. */
         @VisibleForTesting
-        void reset()
+        void unsafeFree()
         {
             while (!chunks.isEmpty())
-                chunks.poll().reset();
+                chunks.poll().unsafeFree();
 
             while (!macroChunks.isEmpty())
-                macroChunks.poll().reset();
+                macroChunks.poll().unsafeFree();
 
             memoryUsage.set(0);
         }
     }
 
-    /**
-     * A thread local class that grabs chunks from the global pool for this thread allocations.
-     * Only one thread can do the allocations but multiple threads can release the allocations.
-     */
-    public static final class LocalPool
+    private static class MicroQueueOfChunks
     {
-        private static final Consumer<Chunk> TINY_RECYCLER = chunk -> BufferPool.put(chunk.slab);
 
         // a microqueue of Chunks:
         //  * if any are null, they are at the end;
@@ -393,13 +386,212 @@ public class BufferPool
         //  * this results in a queue that will typically be visited in ascending order of available space, so that
         //    small allocations preferentially slice from the Chunks with the smallest space available to furnish them
         // WARNING: if we ever change the size of this, we must update removeFromLocalQueue, and addChunk
-        private final Chunk[] chunks = new Chunk[3];
-        private int chunkCount = 0;
+        private Chunk chunk0, chunk1, chunk2;
+        private int count;
 
+        // add a new chunk, if necessary evicting the chunk with the least available memory (returning the evicted chunk)
+        private Chunk add(Chunk chunk)
+        {
+            switch (count)
+            {
+                case 0:
+                    chunk0 = chunk;
+                    count = 1;
+                    break;
+                case 1:
+                    chunk1 = chunk;
+                    count = 2;
+                    break;
+                case 2:
+                    chunk2 = chunk;
+                    count = 3;
+                    break;
+                case 3:
+                {
+                    Chunk release;
+                    if (chunk0.free() < chunk1.free())
+                    {
+                        if (chunk0.free() < chunk2.free())
+                        {
+                            release = chunk0;
+                            chunk0 = chunk;
+                        }
+                        else
+                        {
+                            release = chunk2;
+                            chunk2 = chunk;
+                        }
+                    }
+                    else
+                    {
+                        if (chunk1.free() < chunk2.free())
+                        {
+                            release = chunk1;
+                            chunk1 = chunk;
+                        }
+                        else
+                        {
+                            release = chunk2;
+                            chunk2 = chunk;
+                        }
+                    }
+                    return release;
+                }
+                default:
+                    throw new IllegalStateException();
+            }
+            return null;
+        }
+
+        private void remove(Chunk chunk)
+        {
+            // since we only have three elements in the queue, it is clearer, easier and faster to just hard code the options
+            if (chunk0 == chunk)
+            {   // remove first by shifting back second two
+                chunk0 = chunk1;
+                chunk1 = chunk2;
+            }
+            else if (chunk1 == chunk)
+            {   // remove second by shifting back last
+                chunk1 = chunk2;
+            }
+            else if (chunk2 != chunk)
+            {
+                return;
+            }
+            // whatever we do, the last element myst be null
+            chunk2 = null;
+            --count;
+        }
+
+        ByteBuffer get(int size, boolean sizeIsLowerBound, ByteBuffer reuse)
+        {
+            ByteBuffer buffer;
+            if (null != chunk0)
+            {
+                if (null != (buffer = chunk0.get(size, sizeIsLowerBound, reuse)))
+                    return buffer;
+                if (null != chunk1)
+                {
+                    if (null != (buffer = chunk1.get(size, sizeIsLowerBound, reuse)))
+                        return buffer;
+                    if (null != chunk2 && null != (buffer = chunk2.get(size, sizeIsLowerBound, reuse)))
+                        return buffer;
+                }
+            }
+            return null;
+        }
+
+        private void forEach(Consumer<Chunk> consumer)
+        {
+            forEach(consumer, count, chunk0, chunk1, chunk2);
+        }
+
+        private void clearForEach(Consumer<Chunk> consumer)
+        {
+            Chunk chunk0 = this.chunk0, chunk1 = this.chunk1, chunk2 = this.chunk2;
+            this.chunk0 = this.chunk1 = this.chunk2 = null;
+            forEach(consumer, count, chunk0, chunk1, chunk2);
+            count = 0;
+        }
+
+        private static void forEach(Consumer<Chunk> consumer, int count, Chunk chunk0, Chunk chunk1, Chunk chunk2)
+        {
+            switch (count)
+            {
+                case 3:
+                    consumer.accept(chunk2);
+                case 2:
+                    consumer.accept(chunk1);
+                case 1:
+                    consumer.accept(chunk0);
+            }
+        }
+
+        private <T> void removeIf(BiPredicate<Chunk, T> predicate, T value)
+        {
+            switch (count)
+            {
+                case 3:
+                    if (predicate.test(chunk2, value))
+                    {
+                        --count;
+                        Chunk chunk = chunk2;
+                        chunk2 = null;
+                        chunk.release();
+                    }
+                case 2:
+                    if (predicate.test(chunk1, value))
+                    {
+                        --count;
+                        Chunk chunk = chunk1;
+                        chunk1 = null;
+                        chunk.release();
+                    }
+                case 1:
+                    if (predicate.test(chunk0, value))
+                    {
+                        --count;
+                        Chunk chunk = chunk0;
+                        chunk0 = null;
+                        chunk.release();
+                    }
+                    break;
+                case 0:
+                    return;
+            }
+            switch (count)
+            {
+                case 2:
+                    if (chunk0 == null)
+                    {
+                        chunk0 = chunk1;
+                        chunk1 = chunk2;
+                        chunk2 = null;
+                    }
+                    else if (chunk1 == null)
+                    {
+                        chunk1 = chunk2;
+                        chunk2 = null;
+                    }
+                    break;
+                case 1:
+                    if (chunk1 != null)
+                    {
+                        chunk0 = chunk1;
+                        chunk1 = null;
+                    }
+                    else if (chunk2 != null)
+                    {
+                        chunk0 = chunk2;
+                        chunk2 = null;
+                    }
+                    break;
+            }
+        }
+
+        private void release()
+        {
+            clearForEach(Chunk::release);
+        }
+
+        private void unsafeRecycle()
+        {
+            clearForEach(Chunk::unsafeRecycle);
+        }
+    }
+
+    /**
+     * A thread local class that grabs chunks from the global pool for this thread allocations.
+     * Only one thread can do the allocations but multiple threads can release the allocations.
+     */
+    public static final class LocalPool implements Consumer<Chunk>
+    {
         private final Queue<ByteBuffer> reuseObjects;
         private final Supplier<Chunk> parent;
         private final LocalPoolRef leakRef;
 
+        private final MicroQueueOfChunks chunks = new MicroQueueOfChunks();
         /**
          * If we are on outer LocalPool, whose chunks are == NORMAL_CHUNK_SIZE, we may service allocation requests
          * for buffers much smaller than
@@ -424,43 +616,11 @@ public class BufferPool
                 ByteBuffer buffer = parent.get(TINY_CHUNK_SIZE, false);
                 if (buffer == null)
                     return null;
-                return new Chunk(TINY_RECYCLER, buffer);
+                return new Chunk(this, buffer);
             };
             this.tinyLimit = 0; // we only currently permit one layer of nesting (which brings us down to 32 byte allocations, so is plenty)
             this.reuseObjects = parent.reuseObjects; // we share the same ByteBuffer object reuse pool, as we both have the same exclusive access to it
             localPoolReferences.add(leakRef = new LocalPoolRef(this, localPoolRefQueue));
-        }
-
-        private Chunk addChunkFromParent()
-        {
-            Chunk chunk = parent.get();
-            if (chunk == null)
-                return null;
-
-            addChunk(chunk);
-            return chunk;
-        }
-
-        private void addChunk(Chunk chunk)
-        {
-            chunk.acquire(this);
-
-            if (chunkCount < 3)
-            {
-                chunks[chunkCount++] = chunk;
-                return;
-            }
-
-            int smallestChunkIdx = 0;
-            if (chunks[1].free() < chunks[0].free())
-                smallestChunkIdx = 1;
-            if (chunks[2].free() < chunks[smallestChunkIdx].free())
-                smallestChunkIdx = 2;
-
-            chunks[smallestChunkIdx].release();
-            if (smallestChunkIdx != 2)
-                chunks[smallestChunkIdx] = chunks[2];
-            chunks[2] = chunk;
         }
 
         private LocalPool tinyPool()
@@ -476,15 +636,10 @@ public class BufferPool
                 return tinyPool().get(size, sizeIsLowerBound);
 
             ByteBuffer reuse = this.reuseObjects.poll();
-            for (Chunk chunk : chunks)
-            { // first see if our own chunks can serve this buffer
-                if (chunk == null)
-                    break;
 
-                ByteBuffer buffer = chunk.get(size, sizeIsLowerBound, reuse);
-                if (buffer != null)
-                    return buffer;
-            }
+            ByteBuffer buffer = chunks.get(size, sizeIsLowerBound, reuse);
+            if (buffer != null)
+                return buffer;
 
             // else ask the global pool
             Chunk chunk = addChunkFromParent();
@@ -527,7 +682,7 @@ public class BufferPool
                 chunk.recycle();
                 // if we are also the owner, we must remove the Chunk from our local queue
                 if (owner == this)
-                    removeFromLocalQueue(chunk);
+                    remove(chunk);
             }
             else if (((free == -1L) && owner != this) && chunk.owner == null)
             {
@@ -551,24 +706,6 @@ public class BufferPool
                 return;
 
             chunk.freeUnusedPortion(buffer);
-        }
-
-        private void removeFromLocalQueue(Chunk chunk)
-        {
-            // since we only have three elements in the queue, it is clearer, easier and faster to just hard code the options
-            if (chunks[0] == chunk)
-            {   // remove first by shifting back second two
-                chunks[0] = chunks[1];
-                chunks[1] = chunks[2];
-            }
-            else if (chunks[1] == chunk)
-            {   // remove second by shifting back last
-                chunks[1] = chunks[2];
-            }
-            else assert chunks[2] == chunk;
-            // whatever we do, the last element myst be null
-            chunks[2] = null;
-            chunkCount--;
         }
 
         public ByteBuffer take(int size, boolean exactSize)
@@ -601,37 +738,63 @@ public class BufferPool
             return allocate(size, false);
         }
 
-        @VisibleForTesting
-        void reset()
+        // recycle
+        public void accept(Chunk chunk)
         {
-            chunkCount = 0;
-            for (int i = 0; i < chunks.length; i++)
+            ByteBuffer buffer = chunk.slab;
+            Chunk parentChunk = Chunk.getParentChunk(buffer);
+            put(buffer, parentChunk, false);
+        }
+
+        private void remove(Chunk chunk)
+        {
+            chunks.remove(chunk);
+            if (tinyPool != null)
+                tinyPool.chunks.removeIf((child, parent) -> Chunk.getParentChunk(child.slab) == parent, chunk);
+        }
+
+        private Chunk addChunkFromParent()
+        {
+            Chunk chunk = parent.get();
+            if (chunk == null)
+                return null;
+
+            addChunk(chunk);
+            return chunk;
+        }
+
+        private void addChunk(Chunk chunk)
+        {
+            chunk.acquire(this);
+            Chunk evict = chunks.add(chunk);
+            if (evict != null)
             {
-                if (chunks[i] != null)
-                {
-                    chunks[i].owner = null;
-                    chunks[i].freeSlots = 0L;
-                    chunks[i].recycle();
-                    chunks[i] = null;
-                }
+                if (tinyPool != null)
+                    tinyPool.chunks.removeIf((child, parent) -> Chunk.getParentChunk(child.slab) == parent, evict);
+                evict.release();
             }
         }
 
         public void release()
         {
-            chunkCount = 0;
-            Chunk.release(chunks);
+            chunks.release();
             reuseObjects.clear();
             localPoolReferences.remove(leakRef);
             leakRef.clear();
             if (tinyPool != null)
                 tinyPool.release();
         }
+
+        @VisibleForTesting
+        void unsafeRecycle()
+        {
+            chunks.unsafeRecycle();
+        }
     }
 
     private static final class LocalPoolRef extends PhantomReference<LocalPool>
     {
-        private final Chunk[] chunks;
+        private final MicroQueueOfChunks chunks;
         public LocalPoolRef(LocalPool localPool, ReferenceQueue<? super LocalPool> q)
         {
             super(localPool, q);
@@ -640,7 +803,7 @@ public class BufferPool
 
         public void release()
         {
-            Chunk.release(chunks);
+            chunks.release();
         }
     }
 
@@ -811,16 +974,6 @@ public class BufferPool
                 ((Ref<Chunk>) attachment).release();
 
             return true;
-        }
-
-        @VisibleForTesting
-        void reset()
-        {
-            Chunk parent = getParentChunk(slab);
-            if (parent != null)
-                parent.free(slab, false);
-            else
-                FileUtils.clean(slab);
         }
 
         @VisibleForTesting
@@ -1016,22 +1169,30 @@ public class BufferPool
             MemoryUtil.setByteBufferCapacity(buffer, size);
         }
 
-        static void release(Chunk[] chunks)
-        {
-            for (int i = 0 ; i < chunks.length ; i++)
-            {
-                if (chunks[i] != null)
-                {
-                    chunks[i].release();
-                    chunks[i] = null;
-                }
-            }
-        }
-
         @Override
         public String toString()
         {
             return String.format("[slab %s, slots bitmap %s, capacity %d, free %d]", slab, Long.toBinaryString(freeSlots), capacity(), free());
+        }
+
+        @VisibleForTesting
+        void unsafeFree()
+        {
+            Chunk parent = getParentChunk(slab);
+            if (parent != null)
+                parent.free(slab, false);
+            else
+                FileUtils.clean(slab);
+        }
+
+        static void unsafeRecycle(Chunk chunk)
+        {
+            if (chunk != null)
+            {
+                chunk.owner = null;
+                chunk.freeSlots = 0L;
+                chunk.recycle();
+            }
         }
     }
 
@@ -1060,9 +1221,16 @@ public class BufferPool
     public static long unsafeGetBytesInUse()
     {
         long totalMemory = globalPool.memoryUsage.get();
-        long availableMemory = 0;
+        class L { long v; }
+        final L availableMemory = new L();
         for (Chunk chunk : globalPool.chunks)
-            availableMemory += chunk.capacity();
-        return totalMemory - availableMemory;
+        {
+            availableMemory.v += chunk.capacity();
+        }
+        for (LocalPoolRef ref : localPoolReferences)
+        {
+            ref.chunks.forEach(chunk -> availableMemory.v += chunk.free());
+        }
+        return totalMemory - availableMemory.v;
     }
 }

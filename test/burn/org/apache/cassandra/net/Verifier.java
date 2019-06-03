@@ -95,22 +95,22 @@ public class Verifier
 
     enum EventType
     {
+        FAILED_OVERLOADED(SEND),
         ENQUEUE(SEND),
+        FAILED_EXPIRED_ON_SEND(SEND),
         SERIALIZE(SEND),
+        FAILED_SERIALIZE(SEND),
         FINISH_SERIALIZE_LARGE(SEND),
         SEND_FRAME(SEND),
+        FAILED_FRAME(SEND),
         SENT_FRAME(SEND),
         ARRIVE(RECEIVE),
+        FAILED_EXPIRED_ON_RECEIVE(RECEIVE),
         DESERIALIZE(RECEIVE),
+        FAILED_DESERIALIZE(RECEIVE),
         PROCESS(RECEIVE),
 
-        FAILED_EXPIRED_ON_SEND(SEND),
-        FAILED_EXPIRED_ON_RECEIVE(RECEIVE),
-        FAILED_OVERLOADED(SEND),
-        FAILED_SERIALIZE(SEND),
-        FAILED_DESERIALIZE(RECEIVE),
         FAILED_CLOSING(SEND),
-        FAILED_FRAME(SEND),
 
         CONNECT_OUTBOUND(OTHER),
         SYNC(OTHER),               // the connection will stop sending messages, and promptly process any waiting inbound messages
@@ -225,7 +225,7 @@ public class Verifier
             this.bytesWrittenToNetwork = bytesWrittenToNetwork;
             this.failure = failure;
         }
-        public String toString() { return String.format("FAILED_SERIALIZE{written=%b, failure=%s}", bytesWrittenToNetwork, failure); }
+        public String toString() { return String.format("FAILED_SERIALIZE{written=%d, failure=%s}", bytesWrittenToNetwork, failure); }
     }
 
     static class ExpiredMessageEvent extends SimpleMessageEvent
@@ -578,6 +578,7 @@ public class Verifier
 
         InboundMessageHandler inbound;
 
+        // TODO
         long sentCount, sentBytes;
         long receivedCount, receivedBytes;
 
@@ -608,7 +609,6 @@ public class Verifier
     private long outboundExpiredCount, outboundExpiredBytes;
     private long outboundErrorCount, outboundErrorBytes;
 
-
     public void run(Runnable onFailure, long deadlineNanos)
     {
         try
@@ -626,7 +626,8 @@ public class Verifier
                         if (now - m.lastUpdateNanos > SECONDS.toNanos(10L))
                         {
                             fail("Unreasonably long period spent waiting for out-of-order deser/delivery of received message %d", m.message.id());
-                            maybeRemove(m.message.id(), PROCESS);
+                            MessageState v = maybeRemove(m.message.id(), PROCESS);
+                            controller.fail(v.message.serializedSize(v.messagingVersion == 0 ? current_version : v.messagingVersion));
                             processingOutOfOrder.remove(0);
                         }
                         else break;
@@ -645,7 +646,8 @@ public class Verifier
                         &&  currentConnection.framesInFlight.isEmpty()
                         &&  enqueueing.isEmpty()
                         &&  processingOutOfOrder.isEmpty()
-                        &&  messages.isEmpty();
+                        &&  messages.isEmpty()
+                        &&  controller.inFlight() == 0;
 
                         //outbound.pendingCount() > 0 ? 5L : 2L
                         if (!done && now - lastEventAt > SECONDS.toNanos(5L))
@@ -653,14 +655,10 @@ public class Verifier
                             // TODO: even 2s or 5s are unreasonable periods of time without _any_ movement on a message waiting to arrive
                             //       this seems to happen regularly on MacOS, but we should confirm this does not happen on Linux
                             fail("Unreasonably long period spent waiting for sync (%dms)", NANOSECONDS.toMillis(now - lastEventAt));
-                            final AtomicBoolean test = new AtomicBoolean(false);
                             messages.forEach((k, v) -> {
                                 failinfo("%s", v);
-                                if (v.sendState != null && v.sendState.type != FAILED_SERIALIZE)
-                                    test.set(true);
+                                controller.fail(v.message.serializedSize(v.messagingVersion == 0 ? current_version : v.messagingVersion));
                             });
-                            if (test.get())
-                                System.out.println();
                             currentConnection.serializing.clear();
                             currentConnection.arriving.clear();
                             currentConnection.deserializingOnEventLoop.clear();
@@ -754,7 +752,7 @@ public class Verifier
                         assert m.is(ENQUEUE);
                         m.serialize = e.at;
                         m.messagingVersion = e.messagingVersion;
-                        if (e.messagingVersion != current_version)
+                        if (current_version != e.messagingVersion)
                             controller.adjust(m.message.serializedSize(current_version), m.message.serializedSize(e.messagingVersion));
 
                         m.processOnEventLoop = willProcessOnEventLoop(outbound.type(), m.message, e.messagingVersion);

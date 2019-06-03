@@ -19,6 +19,7 @@
 package org.apache.cassandra.net;
 
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -46,6 +47,7 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import io.netty.channel.Channel;
 import net.openhft.chronicle.core.util.ThrowingBiConsumer;
 import net.openhft.chronicle.core.util.ThrowingRunnable;
@@ -381,6 +383,7 @@ public class ConnectionBurnTest
                     };
                     ThrowingBiConsumer<List<Connection>, ThrowingRunnable<InterruptedException>, InterruptedException> sync =
                     (connections, exec) -> {
+                        logger.info("Syncing connections: {}", connections);
                         final CountDownLatch ready = new CountDownLatch(connections.size());
                         final CountDownLatch done = new CountDownLatch(1);
                         for (Connection connection : connections)
@@ -429,7 +432,17 @@ public class ConnectionBurnTest
                                     }
                                     long inUse = BufferPool.unsafeGetBytesInUse();
                                     if (inUse > 0)
+                                    {
+//                                        try
+//                                        {
+//                                            ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class).dumpHeap("/Users/belliottsmith/code/cassandra/cassandra/leak.hprof", true);
+//                                        }
+//                                        catch (IOException e)
+//                                        {
+//                                            throw new RuntimeException(e);
+//                                        }
                                         connections[0].verifier.logFailure("Using %d bytes of BufferPool, but all connections are idle", inUse);
+                                    }
                                 });
                             }
                             else
