@@ -33,6 +33,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Verifier.Destiny;
 import org.apache.cassandra.utils.ApproximateTime;
 
+import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
 
@@ -141,6 +142,9 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
             long previousMax = controller.maximumInFlightBytes();
             controller.setInFlightByteBounds(0, Long.MAX_VALUE);
             onSync = () -> {
+                long inFlight = controller.inFlight();
+                if (inFlight != 0)
+                    verifier.logFailure("%s has %d bytes in flight, but connection is idle", linkId, inFlight);
                 controller.setInFlightByteBounds(previousMin, previousMax);
                 onCompletion.run();
             };
@@ -191,26 +195,34 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     void serialize(long id, byte[] payload, DataOutputPlus out, int messagingVersion) throws IOException
     {
         verifier.onSerialize(id, messagingVersion);
-        boolean willFail = outbound.type() != ConnectionType.LARGE_MESSAGES;
         int firstWrite = payload.length, remainder = 0;
-        byte info = MessageGenerator.getInfo(payload);
-        switch (info)
+        boolean willFail = false;
+        if (outbound.type() != ConnectionType.LARGE_MESSAGES || messagingVersion >= VERSION_40)
         {
-            case 1:
-                switch ((int) (id & 1))
-                {
-                    case 0: throw new IntentionalIOException();
-                    case 1: throw new IntentionalRuntimeException();
-                }
-                break;
-            case 2:
-                willFail = true;
-                firstWrite -= (int)id % payload.length;
-                break;
-            case 3:
-                willFail = true;
-                remainder = (int)id & 65535;
-                break;
+            // We cannot (with Netty) know how many bytes make it to the network as any partially written block
+            // will be failed despite having partially succeeded.  So to support this behaviour here, we would
+            // need to accept either outcome, in which case what is the point?
+            // TODO: it would be nice to fix this, still
+            willFail = outbound.type() != ConnectionType.LARGE_MESSAGES;
+            byte info = MessageGenerator.getInfo(payload);
+            switch (info)
+            {
+                case 1:
+                    switch ((int) (id & 1))
+                    {
+                        case 0: throw new IntentionalIOException();
+                        case 1: throw new IntentionalRuntimeException();
+                    }
+                    break;
+                case 2:
+                    willFail = true;
+                    firstWrite -= (int)id % payload.length;
+                    break;
+                case 3:
+                    willFail = true;
+                    remainder = (int)id & 65535;
+                    break;
+            }
         }
 
         MessageGenerator.writeLength(payload, out, messagingVersion);
@@ -339,7 +351,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
 
     public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, int bytesWrittenToNetwork, Throwable failure)
     {
-        if (bytesWrittenToNetwork == 0) // TODO:
+        if (bytesWrittenToNetwork == 0)
             controller.fail(message.serializedSize(messagingVersion));
         verifier.onFailedSerialize(message.id(), bytesWrittenToNetwork, failure);
     }
@@ -350,5 +362,9 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onFailedClosing(message.id());
     }
 
+    public String toString()
+    {
+        return linkId;
+    }
 }
 
