@@ -22,7 +22,7 @@ import java.io.IOException;
 
 import io.netty.channel.Channel;
 import org.apache.cassandra.config.EncryptionOptions;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
+import org.apache.cassandra.net.OutboundConnectionSettings;
 import org.apache.cassandra.streaming.DefaultConnectionFactory;
 import org.apache.cassandra.streaming.StreamConnectionFactory;
 

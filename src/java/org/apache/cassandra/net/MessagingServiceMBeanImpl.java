@@ -29,8 +29,6 @@ import org.apache.cassandra.config.EncryptionOptions;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.metrics.MessagingMetrics;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.OutboundConnections;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.utils.MBeanWrapper;
 

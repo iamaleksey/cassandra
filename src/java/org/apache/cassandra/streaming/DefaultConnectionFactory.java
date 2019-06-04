@@ -26,12 +26,12 @@ import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result;
-import org.apache.cassandra.net.async.OutboundConnectionInitiator.Result.StreamingSuccess;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
+import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
+import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
+import org.apache.cassandra.net.OutboundConnectionSettings;
 
-import static org.apache.cassandra.net.async.ConnectionType.*;
-import static org.apache.cassandra.net.async.OutboundConnectionInitiator.initiateStreaming;
+import static org.apache.cassandra.net.ConnectionType.*;
+import static org.apache.cassandra.net.OutboundConnectionInitiator.initiateStreaming;
 
 public class DefaultConnectionFactory implements StreamConnectionFactory
 {

@@ -42,7 +42,7 @@ import org.apache.cassandra.gms.*;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.StreamingMetrics;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
+import org.apache.cassandra.net.OutboundConnectionSettings;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.streaming.async.NettyStreamingMessageSender;
 import org.apache.cassandra.streaming.messages.*;

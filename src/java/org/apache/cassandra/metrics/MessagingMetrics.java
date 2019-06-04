@@ -36,8 +36,8 @@ import com.codahale.metrics.Timer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.LatencyConsumer;
+import org.apache.cassandra.net.InboundMessageHandlers;
+import org.apache.cassandra.net.LatencyConsumer;
 import org.apache.cassandra.utils.StatusLogger;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
