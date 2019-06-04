@@ -24,12 +24,12 @@ import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.gms.*;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
+import org.apache.cassandra.net.OutboundConnectionSettings;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
 
 /**
  * Sidekick helper for snitches that want to reconnect from one IP addr for a node to another.

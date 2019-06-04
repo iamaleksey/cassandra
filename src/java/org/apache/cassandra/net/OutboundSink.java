@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.BiPredicate;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.ConnectionType;
 
 /**
  * A message sink that all outbound messages go through.

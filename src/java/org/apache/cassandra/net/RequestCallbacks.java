@@ -40,7 +40,6 @@ import org.apache.cassandra.io.IVersionedAsymmetricSerializer;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.metrics.InternodeOutboundMetrics;
-import org.apache.cassandra.net.async.OutboundMessageCallbacks;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;

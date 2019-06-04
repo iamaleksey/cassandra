@@ -42,12 +42,11 @@ import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.gms.IEndpointStateChangeSubscriber;
 import org.apache.cassandra.gms.VersionedValue;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.ConnectionType;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.Verb.PING_REQ;
-import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
-import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
 
 public class StartupClusterConnectivityChecker
 {

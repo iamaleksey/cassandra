@@ -30,7 +30,7 @@ import static org.junit.Assert.assertEquals;
 
 import static org.apache.cassandra.distributed.impl.InstanceConfig.NETWORK;
 import static org.apache.cassandra.net.Verb.READ_REPAIR_REQ;
-import static org.apache.cassandra.net.async.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
+import static org.apache.cassandra.net.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
 
 public class DistributedReadWritePathTest extends DistributedTestBase
 {

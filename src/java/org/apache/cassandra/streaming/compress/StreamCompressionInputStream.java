@@ -28,7 +28,7 @@ import net.jpountz.lz4.LZ4Factory;
 import net.jpountz.lz4.LZ4FastDecompressor;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.RebufferingInputStream;
-import org.apache.cassandra.net.async.AsyncStreamingInputPlus;
+import org.apache.cassandra.net.AsyncStreamingInputPlus;
 import org.apache.cassandra.streaming.async.StreamCompressionSerializer;
 
 public class StreamCompressionInputStream extends RebufferingInputStream implements AutoCloseable

@@ -19,7 +19,7 @@ package org.apache.cassandra.metrics;
 
 import com.codahale.metrics.Gauge;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
+import org.apache.cassandra.net.InboundMessageHandlers;
 import org.apache.cassandra.metrics.CassandraMetricsRegistry.MetricName;
 
 /**

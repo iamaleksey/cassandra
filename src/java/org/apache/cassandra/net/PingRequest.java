@@ -22,11 +22,10 @@ import java.io.IOException;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.net.async.ConnectionType;
 
-import static org.apache.cassandra.net.async.ConnectionType.URGENT_MESSAGES;
-import static org.apache.cassandra.net.async.ConnectionType.SMALL_MESSAGES;
-import static org.apache.cassandra.net.async.ConnectionType.LARGE_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.URGENT_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
+import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
 
 /**
  * Indicates to the recipient which {@link ConnectionType} should be used for the response.

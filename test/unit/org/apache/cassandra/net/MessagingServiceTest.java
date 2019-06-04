@@ -44,8 +44,6 @@ import org.apache.cassandra.auth.IInternodeAuthenticator;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.metrics.MessagingMetrics;
-import org.apache.cassandra.net.async.InboundConnectionSettings;
-import org.apache.cassandra.net.async.InboundSockets;
 import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.ConfigurationException;
 import org.apache.cassandra.locator.InetAddressAndPort;

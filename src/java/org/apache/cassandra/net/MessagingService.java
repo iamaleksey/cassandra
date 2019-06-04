@@ -37,15 +37,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
-import org.apache.cassandra.net.async.ConnectionType;
-import org.apache.cassandra.net.async.FutureCombiner;
-import org.apache.cassandra.net.async.InboundConnectionSettings;
-import org.apache.cassandra.net.async.InboundSockets;
-import org.apache.cassandra.net.async.InboundMessageHandlers;
-import org.apache.cassandra.net.async.OutboundConnectionSettings;
-import org.apache.cassandra.net.async.OutboundConnections;
-import org.apache.cassandra.net.async.SocketFactory;
-import org.apache.cassandra.net.async.ResourceLimits;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.utils.FBUtilities;
 
