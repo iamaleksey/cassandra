@@ -20,11 +20,11 @@ package org.apache.cassandra.net;
 /**
  * Encapsulates minimum and maximum messaging versions that a node accepts.
  */
-public class AcceptVersions
+class AcceptVersions
 {
-    public final int min, max;
+    final int min, max;
 
-    public AcceptVersions(int min, int max)
+    AcceptVersions(int min, int max)
     {
         this.min = min;
         this.max = max;

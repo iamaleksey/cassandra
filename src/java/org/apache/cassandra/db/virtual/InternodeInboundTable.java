@@ -33,7 +33,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.InboundMessageHandlers;
 import org.apache.cassandra.schema.TableMetadata;
 
-public final class InternodeInboundTable extends AbstractVirtualTable
+final class InternodeInboundTable extends AbstractVirtualTable
 {
     private static final String ADDRESS = "address";
     private static final String PORT = "port";

@@ -56,7 +56,7 @@ import static org.apache.cassandra.utils.ByteBufferUtil.copyBytes;
  * 5. {@link FrameDecoderLegacyLZ4}
  *        LZ4 compression using standard LZ4 frame format; groups legacy messages (< 4.0) into frames
  */
-public abstract class FrameDecoder extends ChannelInboundHandlerAdapter
+abstract class FrameDecoder extends ChannelInboundHandlerAdapter
 {
     private static final FrameProcessor NO_PROCESSOR =
         frame -> { throw new IllegalStateException("Frame processor invoked on an unregistered FrameDecoder"); };

@@ -319,9 +319,9 @@ public class Message<T>
     }
 
     /** we preface every message with this number so the recipient can validate the sender is sane */
-    public static final int PROTOCOL_MAGIC = 0xCA552DFA;
+    static final int PROTOCOL_MAGIC = 0xCA552DFA;
 
-    public static void validateLegacyProtocolMagic(int magic) throws InvalidLegacyProtocolMagic
+    static void validateLegacyProtocolMagic(int magic) throws InvalidLegacyProtocolMagic
     {
         if (magic != PROTOCOL_MAGIC)
             throw new InvalidLegacyProtocolMagic(magic);
@@ -412,6 +412,7 @@ public class Message<T>
         }
     }
 
+    @SuppressWarnings("WeakerAccess")
     public static class Builder<T>
     {
         private Verb verb;
@@ -624,7 +625,7 @@ public class Message<T>
         /**
          * Size of the next message in the stream. Returns -1 if there aren't sufficient bytes read yet to determine size.
          */
-        public int inferMessageSize(ByteBuffer buf, int index, int limit, int version) throws InvalidLegacyProtocolMagic
+        int inferMessageSize(ByteBuffer buf, int index, int limit, int version) throws InvalidLegacyProtocolMagic
         {
             int size = version >= VERSION_40 ? inferMessageSizePost40(buf, index, limit) : inferMessageSizePre40(buf, index, limit);
             if (size > DatabaseDescriptor.getInternodeMaxMessageSizeInBytes())
@@ -640,7 +641,7 @@ public class Message<T>
          *
          * It's assumed that the provided buffer contains all the bytes necessary to deserialize the header fully.
          */
-        public Header extractHeader(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
+        Header extractHeader(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
         {
             return version >= VERSION_40
                  ? extractHeaderPost40(buf, from, currentTimeNanos, version)
@@ -1326,9 +1327,9 @@ public class Message<T>
         }
     }
 
-    public static class OversizedMessageException extends RuntimeException
+    static class OversizedMessageException extends RuntimeException
     {
-        public OversizedMessageException(int size)
+        OversizedMessageException(int size)
         {
             super("Message of size " + size + " bytes exceeds allowed maximum of " + DatabaseDescriptor.getInternodeMaxMessageSizeInBytes() + " bytes");
         }

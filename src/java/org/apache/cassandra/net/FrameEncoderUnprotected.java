@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
@@ -33,10 +32,10 @@ import static org.apache.cassandra.net.FrameEncoderCrc.writeHeader;
  * to avoid incurring the (very low) cost of computing a CRC.
  */
 @ChannelHandler.Sharable
-public class FrameEncoderUnprotected extends FrameEncoder
+class FrameEncoderUnprotected extends FrameEncoder
 {
-    public static final FrameEncoderUnprotected instance = new FrameEncoderUnprotected();
-    public static final PayloadAllocator allocator = (isSelfContained, capacity) ->
+    static final FrameEncoderUnprotected instance = new FrameEncoderUnprotected();
+    static final PayloadAllocator allocator = (isSelfContained, capacity) ->
         new Payload(isSelfContained, capacity, HEADER_LENGTH, 0);
 
     PayloadAllocator allocator()

@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
@@ -35,11 +34,11 @@ import static org.apache.cassandra.net.Crc.*;
 @ChannelHandler.Sharable
 class FrameEncoderLZ4 extends FrameEncoder
 {
-    public static final FrameEncoderLZ4 fastInstance = new FrameEncoderLZ4(LZ4Factory.fastestInstance().fastCompressor());
+    static final FrameEncoderLZ4 fastInstance = new FrameEncoderLZ4(LZ4Factory.fastestInstance().fastCompressor());
 
     private final LZ4Compressor compressor;
 
-    public FrameEncoderLZ4(LZ4Compressor compressor)
+    FrameEncoderLZ4(LZ4Compressor compressor)
     {
         this.compressor = compressor;
     }

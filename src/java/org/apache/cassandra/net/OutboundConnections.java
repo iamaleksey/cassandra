@@ -79,7 +79,7 @@ public class OutboundConnections
         connectionFor(msg, type).enqueue(msg);
     }
 
-    public static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
+    static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
     {
         OutboundConnections connections = in.get(key);
         if (connections == null)
@@ -102,7 +102,7 @@ public class OutboundConnections
         return connections;
     }
 
-    public BackPressureState getBackPressureState()
+    BackPressureState getBackPressureState()
     {
         return backPressureState;
     }
@@ -114,7 +114,7 @@ public class OutboundConnections
      *
      * @param addr IP Address to use (and prefer) going forward for connecting to the peer
      */
-    public synchronized Future<Void> reconnectWithNewIp(InetAddressAndPort addr)
+    synchronized Future<Void> reconnectWithNewIp(InetAddressAndPort addr)
     {
         template = template.withConnectTo(addr);
         return new FutureCombiner(
@@ -127,7 +127,7 @@ public class OutboundConnections
      *
      * @param flushQueues {@code true} if existing messages in the queue should be sent before closing.
      */
-    public synchronized Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueues)
+    synchronized Future<Void> scheduleClose(long time, TimeUnit unit, boolean flushQueues)
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
         releaseMetrics();
@@ -141,7 +141,7 @@ public class OutboundConnections
      *
      * @param flushQueues {@code true} if existing messages in the queue should be sent before closing.
      */
-    public synchronized Future<Void> close(boolean flushQueues)
+    synchronized Future<Void> close(boolean flushQueues)
     {
         // immediately release our metrics, so that if we need to re-open immediately we can safely register a new one
         releaseMetrics();
@@ -168,7 +168,7 @@ public class OutboundConnections
     /**
      * Close each netty channel and its socket
      */
-    public void interrupt()
+    void interrupt()
     {
         // must return a non-null value for ImmutableList.of()
         apply(OutboundConnection::interrupt);
@@ -185,7 +185,7 @@ public class OutboundConnections
     }
 
     @VisibleForTesting
-    public OutboundConnection connectionFor(Message<?> message)
+    OutboundConnection connectionFor(Message<?> message)
     {
         return connectionFor(message, null);
     }
@@ -229,17 +229,17 @@ public class OutboundConnections
         return reserveCapacity.using();
     }
 
-    public long expiredCallbacks()
+    long expiredCallbacks()
     {
         return metrics.expiredCallbacks.getCount();
     }
 
-    public void incrementExpiredCallbackCount()
+    void incrementExpiredCallbackCount()
     {
         metrics.expiredCallbacks.mark();
     }
 
-    public OutboundConnectionSettings template()
+    OutboundConnectionSettings template()
     {
         return template;
     }
@@ -306,7 +306,7 @@ public class OutboundConnections
         }
     }
 
-    public static void scheduleUnusedConnectionMonitoring(MessagingService messagingService, ScheduledExecutorService executor, long delay, TimeUnit units)
+    static void scheduleUnusedConnectionMonitoring(MessagingService messagingService, ScheduledExecutorService executor, long delay, TimeUnit units)
     {
         executor.scheduleWithFixedDelay(new UnusedConnectionMonitor(messagingService)::closeUnusedSinceLastRun, 0L, delay, units);
     }

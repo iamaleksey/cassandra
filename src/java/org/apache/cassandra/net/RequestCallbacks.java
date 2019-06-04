@@ -97,7 +97,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
     /**
      * Register the provided {@link RequestCallback}, inferring expiry and id from the provided {@link Message}.
      */
-    public void addWithExpiration(RequestCallback cb, Message message, InetAddressAndPort to)
+    void addWithExpiration(RequestCallback cb, Message message, InetAddressAndPort to)
     {
         // mutations need to call the overload with a ConsistencyLevel
         assert message.verb() != Verb.MUTATION_REQ && message.verb() != Verb.COUNTER_MUTATION_REQ && message.verb() != Verb.PAXOS_COMMIT_REQ;

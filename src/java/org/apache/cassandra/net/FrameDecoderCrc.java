@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
@@ -28,7 +27,7 @@ import io.netty.channel.ChannelPipeline;
 import static org.apache.cassandra.net.Crc.*;
 import static org.apache.cassandra.net.Crc.updateCrc32;
 
-public final class FrameDecoderCrc extends FrameDecoderWith8bHeader
+final class FrameDecoderCrc extends FrameDecoderWith8bHeader
 {
     private FrameDecoderCrc(BufferPoolAllocator allocator)
     {

@@ -34,7 +34,7 @@ import org.apache.cassandra.net.Message.Header;
  * {@link #onFailedDeserialize(int, Header, Throwable)} to be invoked after {@link #onExecuting(int, Header, long, TimeUnit)},
  * whereas for small messages it isn't.
  */
-public interface InboundMessageCallbacks
+interface InboundMessageCallbacks
 {
     /**
      * Invoked once resource permits for the message have been acquired. In case of small messages, the entire message

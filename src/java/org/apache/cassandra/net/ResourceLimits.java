@@ -19,7 +19,7 @@ package org.apache.cassandra.net;
 
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
-public abstract class ResourceLimits
+abstract class ResourceLimits
 {
     /**
      * Represents permits to utilise a resource and ways to allocate and release them.
@@ -28,7 +28,7 @@ public abstract class ResourceLimits
      * 1. {@link Concurrent}, for shared limits, which is thread-safe;
      * 2. {@link Basic}, for limits that are not shared between threads, is not thread-safe.
      */
-    public interface Limit
+    interface Limit
     {
         /**
          * @return total amount of permits represented by this {@link Limit} - the capacity
@@ -70,7 +70,7 @@ public abstract class ResourceLimits
         private static final AtomicLongFieldUpdater<Concurrent> usingUpdater =
             AtomicLongFieldUpdater.newUpdater(Concurrent.class, "using");
 
-        public Concurrent(long limit)
+        Concurrent(long limit)
         {
             this.limit = limit;
         }
@@ -117,12 +117,12 @@ public abstract class ResourceLimits
     /**
      * A cheaper, thread-unsafe permit container to be used for unshared limits.
      */
-    public static class Basic implements Limit
+    static class Basic implements Limit
     {
         private final long limit;
         private long using;
 
-        public Basic(long limit)
+        Basic(long limit)
         {
             this.limit = limit;
         }
@@ -162,10 +162,10 @@ public abstract class ResourceLimits
      * A convenience class that groups a per-endpoint limit with the global one
      * to allow allocating/releasing permits from/to both limits as one logical operation.
      */
-    public static class EndpointAndGlobal
+    static class EndpointAndGlobal
     {
-        public final Limit endpoint;
-        public final Limit global;
+        final Limit endpoint;
+        final Limit global;
 
         EndpointAndGlobal(Limit endpoint, Limit global)
         {
@@ -197,5 +197,5 @@ public abstract class ResourceLimits
         }
     }
 
-    public enum Outcome { SUCCESS, INSUFFICIENT_ENDPOINT, INSUFFICIENT_GLOBAL }
+    enum Outcome { SUCCESS, INSUFFICIENT_ENDPOINT, INSUFFICIENT_GLOBAL }
 }

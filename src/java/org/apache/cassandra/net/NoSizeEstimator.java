@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import io.netty.channel.MessageSizeEstimator;
@@ -23,7 +22,7 @@ import io.netty.channel.MessageSizeEstimator;
 /**
  * We want to manage the bytes we have in-flight, so this class asks Netty not to by returning zero for every object.
  */
-public class NoSizeEstimator implements MessageSizeEstimator, MessageSizeEstimator.Handle
+class NoSizeEstimator implements MessageSizeEstimator, MessageSizeEstimator.Handle
 {
     public static final NoSizeEstimator instance = new NoSizeEstimator();
     private NoSizeEstimator() {}

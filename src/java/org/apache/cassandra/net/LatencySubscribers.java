@@ -67,7 +67,7 @@ public class LatencySubscribers
      * @param cb      the callback associated with this message -- this lets us know if it's a message type we're interested in
      * @param address the host that replied to the message
      */
-    void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
+    public void maybeAdd(RequestCallback cb, InetAddressAndPort address, long latency, TimeUnit unit)
     {
         if (cb.trackLatencyForSnitch())
             add(address, latency, unit);

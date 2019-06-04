@@ -22,7 +22,6 @@ import java.nio.channels.FileChannel;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import io.netty.channel.DefaultFileRegion;
-import org.apache.cassandra.net.AsyncChannelOutputPlus;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 

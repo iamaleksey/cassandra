@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.Collection;
@@ -40,9 +39,9 @@ import io.netty.util.concurrent.Promise;
  * We extend FutureDelegate, and simply provide it an uncancellable Promise that will be completed by the listeners
  * registered to the input futures.
  */
-public class FutureCombiner extends FutureDelegate<Void>
+class FutureCombiner extends FutureDelegate<Void>
 {
-    public FutureCombiner(Collection<? extends Future<?>> combine)
+    FutureCombiner(Collection<? extends Future<?>> combine)
     {
         this(AsyncPromise.uncancellable(GlobalEventExecutor.INSTANCE), combine);
     }
@@ -78,5 +77,4 @@ public class FutureCombiner extends FutureDelegate<Void>
         else
             result.trySuccess(null);
     }
-
 }

@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.concurrent.ExecutionException;
@@ -30,11 +29,11 @@ import io.netty.util.concurrent.GenericFutureListener;
  *
  * See {@link FutureCombiner} and {@link FutureResult}
  */
-public class FutureDelegate<V> implements Future<V>
+class FutureDelegate<V> implements Future<V>
 {
     final Future<V> delegate;
 
-    public FutureDelegate(Future<V> delegate)
+    FutureDelegate(Future<V> delegate)
     {
         this.delegate = delegate;
     }

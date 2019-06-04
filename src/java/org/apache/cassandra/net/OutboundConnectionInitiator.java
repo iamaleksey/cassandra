@@ -115,7 +115,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
      *
      * The returned {@code Future} is guaranteed to be completed on the supplied eventLoop.
      */
-    public static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, OutboundConnectionSettings settings, int requestMessagingVersion, Promise<Result<MessagingSuccess>> result)
+    static Future<Result<MessagingSuccess>> initiateMessaging(EventLoop eventLoop, ConnectionType type, OutboundConnectionSettings settings, int requestMessagingVersion, Promise<Result<MessagingSuccess>> result)
     {
         return new OutboundConnectionInitiator<>(type, settings, requestMessagingVersion, result)
                .initiate(eventLoop);

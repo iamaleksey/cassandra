@@ -184,7 +184,7 @@ public enum Verb
     private final Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer;
     private final Supplier<? extends IVerbHandler<?>> handler;
 
-    public final Verb responseVerb;
+    final Verb responseVerb;
 
     private final ToLongFunction<TimeUnit> expiration;
 
@@ -239,7 +239,7 @@ public enum Verb
         return handler.get() == ResponseVerbHandler.instance;
     }
 
-    public Verb toPre40Verb()
+    Verb toPre40Verb()
     {
         if (!isResponse())
             return this;
@@ -249,7 +249,7 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public Supplier<? extends IVerbHandler<?>> unsafeSetHandler(Supplier<? extends IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
+    Supplier<? extends IVerbHandler<?>> unsafeSetHandler(Supplier<? extends IVerbHandler<?>> handler) throws NoSuchFieldException, IllegalAccessException
     {
         Supplier<? extends IVerbHandler<?>> original = this.handler;
         Field field = Verb.class.getDeclaredField("handler");
@@ -262,7 +262,7 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> unsafeSetSerializer(Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer) throws NoSuchFieldException, IllegalAccessException
+    Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> unsafeSetSerializer(Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> serializer) throws NoSuchFieldException, IllegalAccessException
     {
         Supplier<? extends IVersionedAsymmetricSerializer<?, ?>> original = this.serializer;
         Field field = Verb.class.getDeclaredField("serializer");
@@ -275,7 +275,7 @@ public enum Verb
     }
 
     @VisibleForTesting
-    public ToLongFunction<TimeUnit> unsafeSetExpiration(ToLongFunction<TimeUnit> expiration) throws NoSuchFieldException, IllegalAccessException
+    ToLongFunction<TimeUnit> unsafeSetExpiration(ToLongFunction<TimeUnit> expiration) throws NoSuchFieldException, IllegalAccessException
     {
         ToLongFunction<TimeUnit> original = this.expiration;
         Field field = Verb.class.getDeclaredField("expiration");
@@ -307,7 +307,7 @@ public enum Verb
         idToVerbMap = idMap;
     }
 
-    public static Verb fromId(int id)
+    static Verb fromId(int id)
     {
         Verb verb = id >= 0 && id < idToVerbMap.length ? idToVerbMap[id] : null;
         if (verb == null)
