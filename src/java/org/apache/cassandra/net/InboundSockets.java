@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.util.ArrayList;
@@ -37,19 +36,15 @@ import io.netty.util.concurrent.PromiseNotifier;
 import io.netty.util.concurrent.SucceededFuture;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
-import org.apache.cassandra.net.AsyncPromise;
-import org.apache.cassandra.net.FutureCombiner;
-import org.apache.cassandra.net.InboundConnectionInitiator;
-import org.apache.cassandra.net.InboundConnectionSettings;
 import org.apache.cassandra.utils.FBUtilities;
 
-public class InboundSockets
+class InboundSockets
 {
     /**
      * A simple struct to wrap up the components needed for each listening socket.
      */
     @VisibleForTesting
-    public static class InboundSocket
+    static class InboundSocket
     {
         public final InboundConnectionSettings settings;
 
@@ -158,7 +153,7 @@ public class InboundSockets
 
     private final List<InboundSocket> sockets;
 
-    public InboundSockets(InboundConnectionSettings template)
+    InboundSockets(InboundConnectionSettings template)
     {
         this(withDefaultBindAddresses(template));
     }
@@ -237,5 +232,4 @@ public class InboundSockets
     {
         return sockets;
     }
-
 }

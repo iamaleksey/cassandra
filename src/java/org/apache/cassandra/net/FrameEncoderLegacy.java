@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
@@ -26,7 +25,7 @@ import io.netty.channel.ChannelHandler;
 @ChannelHandler.Sharable
 class FrameEncoderLegacy extends FrameEncoder
 {
-    public static final FrameEncoderLegacy instance = new FrameEncoderLegacy();
+    static final FrameEncoderLegacy instance = new FrameEncoderLegacy();
 
     ByteBuf encode(boolean isSelfContained, ByteBuffer buffer)
     {

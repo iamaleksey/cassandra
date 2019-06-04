@@ -19,15 +19,13 @@ package org.apache.cassandra.net;
 
 import java.io.IOException;
 
-import org.apache.cassandra.net.Verb;
-
 import static java.lang.String.format;
 
-public class InvalidSerializedSizeException extends IOException
+class InvalidSerializedSizeException extends IOException
 {
-    public final Verb verb;
-    public final long expectedSize;
-    public final long actualSizeAtLeast;
+    final Verb verb;
+    final long expectedSize;
+    final long actualSizeAtLeast;
 
     InvalidSerializedSizeException(Verb verb, long expectedSize, long actualSizeAtLeast)
     {

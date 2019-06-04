@@ -99,7 +99,7 @@ public enum ParamType
     }
 
     @Nullable
-    public static ParamType lookUpById(int id)
+    static ParamType lookUpById(int id)
     {
         if (id < 0)
             throw new IllegalArgumentException("ParamType id must be non-negative (got " + id + ')');
@@ -108,7 +108,7 @@ public enum ParamType
     }
 
     @Nullable
-    public static ParamType lookUpByAlias(String alias)
+    static ParamType lookUpByAlias(String alias)
     {
         return aliasToTypeMap.get(alias);
     }

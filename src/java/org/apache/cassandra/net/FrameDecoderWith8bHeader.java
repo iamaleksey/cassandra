@@ -142,5 +142,4 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
             newBytes.release();
         }
     }
-
 }

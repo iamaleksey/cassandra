@@ -30,13 +30,11 @@ import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
 /**
  * Indicates to the recipient which {@link ConnectionType} should be used for the response.
  */
-public class PingRequest
+class PingRequest
 {
-    public static Serializer serializer = new Serializer();
-
-    public static final PingRequest forUrgent = new PingRequest(URGENT_MESSAGES);
-    public static final PingRequest forSmall  = new PingRequest(SMALL_MESSAGES);
-    public static final PingRequest forLarge  = new PingRequest(LARGE_MESSAGES);
+    static final PingRequest forUrgent = new PingRequest(URGENT_MESSAGES);
+    static final PingRequest forSmall  = new PingRequest(SMALL_MESSAGES);
+    static final PingRequest forLarge  = new PingRequest(LARGE_MESSAGES);
 
     final ConnectionType connectionType;
 
@@ -45,7 +43,7 @@ public class PingRequest
         this.connectionType = connectionType;
     }
 
-    public static class Serializer implements IVersionedSerializer<PingRequest>
+    static IVersionedSerializer<PingRequest> serializer = new IVersionedSerializer<PingRequest>()
     {
         public void serialize(PingRequest t, DataOutputPlus out, int version) throws IOException
         {
@@ -70,5 +68,5 @@ public class PingRequest
         {
             return 1;
         }
-    }
+    };
 }

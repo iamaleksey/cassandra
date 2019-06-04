@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.io.IOException;
@@ -79,7 +78,7 @@ public final class SocketFactory
     private static final int EVENT_THREADS = Integer.getInteger(Config.PROPERTY_PREFIX + "internode-event-threads", FBUtilities.getAvailableProcessors());
 
     public enum Provider { EPOLL, NIO }
-    public static final Provider DEFAULT_PROVIDER = NativeTransportService.useEpoll() ? Provider.EPOLL : Provider.NIO;
+    private static final Provider DEFAULT_PROVIDER = NativeTransportService.useEpoll() ? Provider.EPOLL : Provider.NIO;
 
     /** a useful addition for debugging; simply set to true to get more data in your logs */
     static final boolean WIRETRACE = false;
@@ -93,10 +92,10 @@ public final class SocketFactory
     private final EventLoopGroup defaultGroup;
     // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
     private final EventLoopGroup outboundStreamingGroup;
-    public final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("Messaging-SynchronousWork"));
+    final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("Messaging-SynchronousWork"));
 
-    public SocketFactory() { this(DEFAULT_PROVIDER); }
-    public SocketFactory(Provider provider)
+    SocketFactory() { this(DEFAULT_PROVIDER); }
+    SocketFactory(Provider provider)
     {
         this.acceptGroup = getEventLoopGroup(provider, 1, "Messaging-AcceptLoop");
         this.defaultGroup = getEventLoopGroup(provider, EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
@@ -121,7 +120,7 @@ public final class SocketFactory
         }
     }
 
-    static Provider providerOf(EventLoopGroup eventLoopGroup)
+    private static Provider providerOf(EventLoopGroup eventLoopGroup)
     {
         while (eventLoopGroup instanceof SingleThreadEventLoop)
             eventLoopGroup = ((SingleThreadEventLoop) eventLoopGroup).parent();
@@ -160,7 +159,7 @@ public final class SocketFactory
         return newServerBootstrap(acceptGroup, defaultGroup);
     }
 
-    static ServerBootstrap newServerBootstrap(EventLoopGroup acceptGroup, EventLoopGroup defaultGroup)
+    private static ServerBootstrap newServerBootstrap(EventLoopGroup acceptGroup, EventLoopGroup defaultGroup)
     {
         ServerBootstrap bootstrap = new ServerBootstrap()
                .group(acceptGroup, defaultGroup)
@@ -206,7 +205,7 @@ public final class SocketFactory
         return "enabled (" + encryptionType + ')';
     }
 
-    public EventLoopGroup defaultGroup()
+    EventLoopGroup defaultGroup()
     {
         return defaultGroup;
     }
@@ -224,13 +223,13 @@ public final class SocketFactory
         synchronousWorkExecutor.shutdownNow();
     }
 
-    public void awaitTerminationUntil(long deadlineNanos) throws InterruptedException, TimeoutException
+    void awaitTerminationUntil(long deadlineNanos) throws InterruptedException, TimeoutException
     {
         List<ExecutorService> groups = ImmutableList.of(acceptGroup, defaultGroup, outboundStreamingGroup, synchronousWorkExecutor);
         ExecutorUtils.awaitTerminationUntil(deadlineNanos, groups);
     }
 
-    public static boolean isConnectionReset(Throwable t)
+    static boolean isConnectionReset(Throwable t)
     {
         if (t instanceof ClosedChannelException)
             return true;
@@ -248,12 +247,12 @@ public final class SocketFactory
         return false;
     }
 
-    public static boolean isCausedByConnectionReset(Throwable t)
+    static boolean isCausedByConnectionReset(Throwable t)
     {
         return isCausedBy(t, SocketFactory::isConnectionReset);
     }
 
-    public static String channelId(InetAddressAndPort from, InetSocketAddress realFrom, InetAddressAndPort to, InetSocketAddress realTo, ConnectionType type, String id)
+    static String channelId(InetAddressAndPort from, InetSocketAddress realFrom, InetAddressAndPort to, InetSocketAddress realTo, ConnectionType type, String id)
     {
         return addressId(from, realFrom) + "->" + addressId(to, realTo) + '-' + type + '-' + id;
     }
@@ -266,7 +265,7 @@ public final class SocketFactory
         return str;
     }
 
-    public static String channelId(InetAddressAndPort from, InetAddressAndPort to, ConnectionType type, String id)
+    static String channelId(InetAddressAndPort from, InetAddressAndPort to, ConnectionType type, String id)
     {
         return from + "->" + to + '-' + type + '-' + id;
     }

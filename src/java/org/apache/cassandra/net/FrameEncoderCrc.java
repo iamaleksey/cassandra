@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
@@ -29,14 +28,14 @@ import org.apache.cassandra.utils.memory.BufferPool;
 import static org.apache.cassandra.net.Crc.*;
 
 @ChannelHandler.Sharable
-public class FrameEncoderCrc extends FrameEncoder
+class FrameEncoderCrc extends FrameEncoder
 {
     static final int HEADER_LENGTH = 6;
     private static final int TRAILER_LENGTH = 4;
     private static final int HEADER_AND_TRAILER_LENGTH = 10;
 
-    public static final FrameEncoderCrc instance = new FrameEncoderCrc();
-    public static final PayloadAllocator allocator = (isSelfContained, capacity) ->
+    static final FrameEncoderCrc instance = new FrameEncoderCrc();
+    static final PayloadAllocator allocator = (isSelfContained, capacity) ->
         new Payload(isSelfContained, capacity, HEADER_LENGTH, TRAILER_LENGTH);
 
     PayloadAllocator allocator()

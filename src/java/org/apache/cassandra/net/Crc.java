@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.net;
 
 import java.io.IOException;
@@ -25,7 +24,7 @@ import java.util.zip.CRC32;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.FastThreadLocal;
 
-public class Crc
+class Crc
 {
     private static final FastThreadLocal<CRC32> crc32 = new FastThreadLocal<CRC32>()
     {
@@ -38,9 +37,9 @@ public class Crc
 
     private static final byte[] initialBytes = new byte[] { (byte) 0xFA, (byte) 0x2D, (byte) 0x55, (byte) 0xCA };
 
-    public static final class InvalidCrc extends IOException
+    static final class InvalidCrc extends IOException
     {
-        public InvalidCrc(int read, int computed)
+        InvalidCrc(int read, int computed)
         {
             super(String.format("Read %d, Computed %d", read, computed));
         }
@@ -79,11 +78,11 @@ public class Crc
         buffer.position(savePosition);
     }
 
-    static final int CRC24_INIT = 0x875060;
+    private static final int CRC24_INIT = 0x875060;
     // Polynomial chosen from https://users.ece.cmu.edu/~koopman/crc/index.html
     // Provides hamming distance of 8 for messages up to length 105 bits;
     // we only support 8-64 bits at present, with an expected range of 40-48.
-    static final int CRC24_POLY = 0x1974F0B;
+    private static final int CRC24_POLY = 0x1974F0B;
 
     /**
      * NOTE: the order of bytes must reach the wire in the same order the CRC is computed, with the CRC
@@ -107,7 +106,7 @@ public class Crc
      * @param len   the number of bytes, greater than 0 and fewer than 9, to be read from bytes
      * @return      the least-significant bit AND byte order crc24 using the CRC24_POLY polynomial
      */
-    public static int crc24(long bytes, int len)
+    static int crc24(long bytes, int len)
     {
         int crc = CRC24_INIT;
         while (len-- > 0)

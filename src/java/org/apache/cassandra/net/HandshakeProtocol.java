@@ -52,7 +52,7 @@ import static org.apache.cassandra.net.OutboundConnectionSettings.*;
  * it will simply disconnect and reconnect with a more appropriate version. But if the version is acceptable, the connection
  * initiator sends the third message of the protocol, after which it considers the connection ready.
  */
-public class HandshakeProtocol
+class HandshakeProtocol
 {
     static final long TIMEOUT_MILLIS = 3 * DatabaseDescriptor.getRpcTimeout(MILLISECONDS);
 
@@ -87,7 +87,7 @@ public class HandshakeProtocol
      * CRC - crc enabled bit
      * VERSION - {@link org.apache.cassandra.net.MessagingService#current_version}
      */
-    public static class Initiate
+    static class Initiate
     {
         /** Contains the PROTOCOL_MAGIC (int) and the flags (int). */
         private static final int MIN_LENGTH = 8;
@@ -132,7 +132,7 @@ public class HandshakeProtocol
             return flags;
         }
 
-        public ByteBuf encode()
+        ByteBuf encode()
         {
             ByteBuffer buffer = BufferPool.get(MAX_LENGTH, BufferType.OFF_HEAP);
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))
@@ -255,7 +255,7 @@ public class HandshakeProtocol
             this.maxMessagingVersion = maxMessagingVersion;
         }
 
-        public ByteBuf encode(ByteBufAllocator allocator)
+        ByteBuf encode(ByteBufAllocator allocator)
         {
             ByteBuf buffer = allocator.directBuffer(MAX_LENGTH);
             buffer.clear();
@@ -268,7 +268,7 @@ public class HandshakeProtocol
         /**
          * Respond to pre40 nodes only with our current messagingVersion
          */
-        public static ByteBuf respondPre40(int messagingVersion, ByteBufAllocator allocator)
+        static ByteBuf respondPre40(int messagingVersion, ByteBufAllocator allocator)
         {
             ByteBuf buffer = allocator.directBuffer(4);
             buffer.clear();
@@ -344,7 +344,7 @@ public class HandshakeProtocol
             this.from = from;
         }
 
-        public ByteBuf encode()
+        ByteBuf encode()
         {
             ByteBuffer buffer = BufferPool.get(MAX_LENGTH, BufferType.OFF_HEAP);
             try (DataOutputBufferFixed out = new DataOutputBufferFixed(buffer))

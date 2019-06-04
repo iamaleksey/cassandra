@@ -17,9 +17,9 @@
  */
 package org.apache.cassandra.net;
 
-public class PingVerbHandler implements IVerbHandler<PingRequest>
+class PingVerbHandler implements IVerbHandler<PingRequest>
 {
-    public static final PingVerbHandler instance = new PingVerbHandler();
+    static final PingVerbHandler instance = new PingVerbHandler();
 
     @Override
     public void doVerb(Message<PingRequest> message)

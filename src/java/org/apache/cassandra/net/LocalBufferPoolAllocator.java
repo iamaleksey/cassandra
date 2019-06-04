@@ -33,7 +33,7 @@ import org.apache.cassandra.utils.memory.BufferPool;
  *
  * TODO: enforce that get() and getAtLeast() are invoked from within the expected thread
  */
-public class LocalBufferPoolAllocator extends BufferPoolAllocator
+class LocalBufferPoolAllocator extends BufferPoolAllocator
 {
     private final BufferPool.LocalPool pool;
 

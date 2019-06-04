@@ -103,7 +103,7 @@ public class AsyncPromise<V> implements Promise<V>
         this.result = initialState;
     }
 
-    AsyncPromise(EventExecutor executor, GenericFutureListener<? extends Future<? super V>> listener)
+    public AsyncPromise(EventExecutor executor, GenericFutureListener<? extends Future<? super V>> listener)
     {
         this(executor);
         this.listeners = listener;

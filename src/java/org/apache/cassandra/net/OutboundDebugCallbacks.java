@@ -17,7 +17,7 @@
  */
 package org.apache.cassandra.net;
 
-public interface OutboundDebugCallbacks
+interface OutboundDebugCallbacks
 {
     static final OutboundDebugCallbacks NONE = new OutboundDebugCallbacks()
     {

@@ -58,8 +58,8 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public static final int VERSION_40 = 12;
     public static final int minimum_version = VERSION_30;
     public static final int current_version = VERSION_40;
-    public static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
-    public static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
+    static AcceptVersions accept_messaging = new AcceptVersions(minimum_version, current_version);
+    static AcceptVersions accept_streaming = new AcceptVersions(current_version, current_version);
 
     private static class MSHandle
     {
@@ -90,7 +90,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     // a public hook for filtering messages intended for delivery to another node
     public final OutboundSink outboundSink = new OutboundSink(this::doSend);
 
-    public final ResourceLimits.Limit outboundGlobalReserveLimit =
+    final ResourceLimits.Limit outboundGlobalReserveLimit =
         new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
 
     // back-pressure implementation
@@ -285,7 +285,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     /**
      * Only to be invoked once we believe the connections will never be used again.
      */
-    public void closeOutboundNow(OutboundConnections connections)
+    void closeOutboundNow(OutboundConnections connections)
     {
         connections.close(true).addListener(
             future -> channelManagers.remove(connections.template().to, connections)
@@ -401,7 +401,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
         return connections;
     }
 
-    public InboundMessageHandlers getInbound(InetAddressAndPort from)
+    InboundMessageHandlers getInbound(InetAddressAndPort from)
     {
         InboundMessageHandlers handlers = messageHandlers.get(from);
         if (null != handlers)

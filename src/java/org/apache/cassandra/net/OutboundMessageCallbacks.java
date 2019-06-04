@@ -18,9 +18,8 @@
 package org.apache.cassandra.net;
 
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.Message;
 
-public interface OutboundMessageCallbacks
+interface OutboundMessageCallbacks
 {
     /** A message was not enqueued to the link because too many messages are already waiting to send */
     void onOverloaded(Message<?> message, InetAddressAndPort peer);

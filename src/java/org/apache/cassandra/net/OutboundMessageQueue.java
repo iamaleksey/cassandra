@@ -51,12 +51,11 @@ import static java.lang.Math.min;
  *  3. As an optimisation, in an attempt to free up endpoint capacity on {@link OutboundConnection#enqueue(Message)}
  *     if current endpoint reserve was insufficient
  */
-@SuppressWarnings("WeakerAccess")
-public class OutboundMessageQueue
+class OutboundMessageQueue
 {
     private static final Logger logger = LoggerFactory.getLogger(OutboundMessageQueue.class);
 
-    public interface MessageConsumer<Produces extends Throwable>
+    interface MessageConsumer<Produces extends Throwable>
     {
         boolean accept(Message<?> message) throws Produces;
     }
@@ -78,7 +77,7 @@ public class OutboundMessageQueue
     /**
      * Add the provided message to the queue. Always succeeds.
      */
-    public void add(Message<?> m)
+    void add(Message<?> m)
     {
         maybePruneExpired();
         externalQueue.offer(m);
@@ -93,7 +92,7 @@ public class OutboundMessageQueue
      *
      * @return null if failed to obtain the lock
      */
-    public WithLock lockOrCallback(long nowNanos, Runnable callbackIfDeferred)
+    WithLock lockOrCallback(long nowNanos, Runnable callbackIfDeferred)
     {
         if (!lockOrCallback(callbackIfDeferred))
             return null;
@@ -105,7 +104,7 @@ public class OutboundMessageQueue
      * Try to obtain the lock. If successful, invoke the provided consumer immediately, otherwise
      * register it to be invoked when the lock is relinquished.
      */
-    public void runEventually(Consumer<WithLock> runEventually)
+    void runEventually(Consumer<WithLock> runEventually)
     {
         // TODO: should we be offloading the callback to another thread to guarantee unlock thread is not unduly burdened?
         try (WithLock withLock = lockOrCallback(ApproximateTime.nanoTime(), () -> runEventually(runEventually)))
@@ -121,7 +120,7 @@ public class OutboundMessageQueue
      *
      * May return null when the queue is non-empty - if the lock could not be acquired.
      */
-    public Message<?> tryPoll(long nowNanos, Runnable elseIfDeferred)
+    Message<?> tryPoll(long nowNanos, Runnable elseIfDeferred)
     {
         try (WithLock withLock = lockOrCallback(nowNanos, elseIfDeferred))
         {
@@ -132,7 +131,7 @@ public class OutboundMessageQueue
         }
     }
 
-    public class WithLock implements AutoCloseable
+    class WithLock implements AutoCloseable
     {
         private final long nowNanos;
 
@@ -143,7 +142,7 @@ public class OutboundMessageQueue
             externalQueue.drain(internalQueue::offer);
         }
 
-        public Message<?> poll()
+        Message<?> poll()
         {
             Message<?> m;
             while (null != (m = internalQueue.poll()))
@@ -157,13 +156,13 @@ public class OutboundMessageQueue
             return m;
         }
 
-        public void removeHead(Message<?> expectHead)
+        void removeHead(Message<?> expectHead)
         {
             assert expectHead == internalQueue.peek();
             internalQueue.poll();
         }
 
-        public Message<?> peek()
+        Message<?> peek()
         {
             Message<?> m;
             while (null != (m = internalQueue.peek()))
@@ -178,13 +177,14 @@ public class OutboundMessageQueue
             return m;
         }
 
-        public void consume(Consumer<Message<?>> consumer)
+        void consume(Consumer<Message<?>> consumer)
         {
             Message<?> m;
             while (null != (m = poll()))
                 consumer.accept(m);
         }
 
+        @Override
         public void close()
         {
             pruneInternalQueueWithLock(nowNanos);
@@ -290,7 +290,8 @@ public class OutboundMessageQueue
     private static final Locked LOCKED = new Locked(() -> {}, null);
 
     private volatile Locked locked = null;
-    private static final AtomicReferenceFieldUpdater<OutboundMessageQueue, Locked> lockedUpdater = AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, Locked.class, "locked");
+    private static final AtomicReferenceFieldUpdater<OutboundMessageQueue, Locked> lockedUpdater =
+        AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, Locked.class, "locked");
 
     /**
      * Run runOnceLocked either immediately in the calling thread if we can obtain the lock, or ask the lock's current
@@ -379,7 +380,7 @@ public class OutboundMessageQueue
      */
     private volatile RemoveRunner removeRunner = null;
     private static final AtomicReferenceFieldUpdater<OutboundMessageQueue, RemoveRunner> removeRunnerUpdater =
-    AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, RemoveRunner.class, "removeRunner");
+        AtomicReferenceFieldUpdater.newUpdater(OutboundMessageQueue.class, RemoveRunner.class, "removeRunner");
 
     static class Remove
     {
@@ -453,7 +454,7 @@ public class OutboundMessageQueue
      *
      * WARNING: This is a blocking call.
      */
-    public boolean remove(Message<?> remove)
+    boolean remove(Message<?> remove)
     {
         if (remove == null)
             throw new NullPointerException();
