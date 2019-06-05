@@ -35,7 +35,7 @@ import org.apache.cassandra.net.OutboundConnection;
 import org.apache.cassandra.net.OutboundConnections;
 import org.apache.cassandra.schema.TableMetadata;
 
-final class InternodeOutboundTable extends AbstractVirtualTable
+public final class InternodeOutboundTable extends AbstractVirtualTable
 {
     private static final String ADDRESS = "address";
     private static final String PORT = "port";

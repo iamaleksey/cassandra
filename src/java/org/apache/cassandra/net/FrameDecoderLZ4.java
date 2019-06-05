@@ -28,6 +28,35 @@ import net.jpountz.lz4.LZ4FastDecompressor;
 
 import static org.apache.cassandra.net.Crc.*;
 
+/**
+ * Framing format that compresses payloads with LZ4, and protects integrity of data in movement with CRCs
+ * (of both header and payload).
+ *
+ * Every on-wire frame contains:
+ * 1. Compressed length            (17 bits)
+ * 2. Uncompressed length          (17 bits)
+ * 3. {@code isSelfContained} flag (1 bit)
+ * 4. Header padding               (5 bits)
+ * 5. CRC24 of the header          (24 bits)
+ * 6. Compressed Payload           (up to 2 * 17 - 1 bits)
+ * 7. (Compressed) Payload CRC32   (32 bits)
+ *
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |        Compressed Length        |     Uncompressed Length     |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |   |C|         |                  Header CRC24                 |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |                                                               |
+ * +                                                               +
+ * |                      Compressed Messages                      |
+ * +                                                               +
+ * |                                                               |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |                   (Compressed) Payload CRC32                  |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ */
 final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
 {
     public static FrameDecoderLZ4 fast(BufferPoolAllocator allocator)

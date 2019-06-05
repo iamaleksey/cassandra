@@ -272,7 +272,7 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         }
     }
 
-    private void channelRead(ShareableBytes bytes) throws IOException
+    void channelRead(ShareableBytes bytes) throws IOException
     {
         decode(frames, bytes);
 

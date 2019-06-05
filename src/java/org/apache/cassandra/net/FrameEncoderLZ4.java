@@ -38,7 +38,7 @@ class FrameEncoderLZ4 extends FrameEncoder
 
     private final LZ4Compressor compressor;
 
-    FrameEncoderLZ4(LZ4Compressor compressor)
+    private FrameEncoderLZ4(LZ4Compressor compressor)
     {
         this.compressor = compressor;
     }

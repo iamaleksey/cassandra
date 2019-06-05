@@ -68,7 +68,7 @@ class FrameEncoderCrc extends FrameEncoder
             int frameLength = frame.remaining();
             int dataLength = frameLength - HEADER_AND_TRAILER_LENGTH;
             if (dataLength >= 1 << 17)
-                throw new IllegalArgumentException("Maximum uncompressed payload size is 128KiB");
+                throw new IllegalArgumentException("Maximum payload size is 128KiB");
 
             writeHeader(frame, isSelfContained, dataLength);
 
