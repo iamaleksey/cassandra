@@ -79,9 +79,19 @@ class Crc
     }
 
     private static final int CRC24_INIT = 0x875060;
-    // Polynomial chosen from https://users.ece.cmu.edu/~koopman/crc/index.html
-    // Provides hamming distance of 8 for messages up to length 105 bits;
-    // we only support 8-64 bits at present, with an expected range of 40-48.
+    /**
+     * Polynomial chosen from https://users.ece.cmu.edu/~koopman/crc/index.html, by Philip Koopman
+     *
+     * This webpage claims a copyright to Philip Koopman, which he licenses under the
+     * Creative Commons Attribution 4.0 International License (https://creativecommons.org/licenses/by/4.0)
+     *
+     * It is unclear if this copyright can extend to a 'fact' such as this specific number, particularly
+     * as we do not use Koopman's notation to represent the polynomial, but we anyway attribute his work and
+     * link the terms of his license since they are not incompatible with our usage and we greatly appreciate his work.
+     *
+     * This polynomial provides hamming distance of 8 for messages up to length 105 bits;
+     * we only support 8-64 bits at present, with an expected range of 40-48.
+     */
     private static final int CRC24_POLY = 0x1974F0B;
 
     /**
