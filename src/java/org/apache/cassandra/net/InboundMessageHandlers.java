@@ -64,12 +64,12 @@ public final class InboundMessageHandlers
     private final HandlerProvider handlerProvider;
     private final Collection<InboundMessageHandler> handlers = new CopyOnWriteArrayList<>();
 
-    public static class GlobalResourceLimits
+    static class GlobalResourceLimits
     {
         final ResourceLimits.Limit reserveCapacity;
         final InboundMessageHandler.WaitQueue waitQueue;
 
-        public GlobalResourceLimits(ResourceLimits.Limit reserveCapacity)
+        GlobalResourceLimits(ResourceLimits.Limit reserveCapacity)
         {
             this.reserveCapacity = reserveCapacity;
             this.waitQueue = InboundMessageHandler.WaitQueue.global(reserveCapacity);
@@ -153,7 +153,7 @@ public final class InboundMessageHandlers
         return handler;
     }
 
-    public void releaseMetrics()
+    void releaseMetrics()
     {
         metrics.release();
     }
@@ -188,7 +188,7 @@ public final class InboundMessageHandlers
         return new InboundMessageCallbacks()
         {
             @Override
-            public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            public void onHeaderArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 // do not log latency if we are within error bars of zero
                 if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
@@ -196,11 +196,32 @@ public final class InboundMessageHandlers
             }
 
             @Override
-            public void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+            }
+
+            @Override
+            public void onArrivedExpired(int messageSize, Header header, boolean wasCorrupt, long timeElapsed, TimeUnit unit)
             {
                 counters.addExpired(messageSize);
 
                 globalMetrics.recordInternodeDroppedMessage(header.verb, timeElapsed, unit);
+            }
+
+            @Override
+            public void onArrivedCorrupt(int messageSize, Header header, long timeElapsed, TimeUnit unit)
+            {
+                counters.addError(messageSize);
+
+                messageConsumer.fail(header, new Crc.InvalidCrc(0, 0)); // could use one of the original exceptions?
+            }
+
+            @Override
+            public void onClosedBeforeArrival(int messageSize, Header header, int bytesReceived, boolean wasCorrupt, boolean wasExpired)
+            {
+                counters.addError(messageSize);
+
+                messageConsumer.fail(header, new InvalidSerializedSizeException(header.verb, messageSize, bytesReceived));
             }
 
             @Override

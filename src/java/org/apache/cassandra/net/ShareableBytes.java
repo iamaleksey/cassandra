@@ -74,6 +74,11 @@ class ShareableBytes
         bytes.position(bytes.position() + skipBytes);
     }
 
+    void consume()
+    {
+        bytes.position(bytes.limit());
+    }
+
     /**
      * Ensure this ShareableBytes will use atomic operations for updating its count from now on.
      * The first invocation must occur while the calling thread has exclusive access (though there may be more

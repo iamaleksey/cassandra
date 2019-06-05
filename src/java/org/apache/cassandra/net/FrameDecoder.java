@@ -118,6 +118,11 @@ abstract class FrameDecoder extends ChannelInboundHandlerAdapter
         {
             return !contents.hasRemaining();
         }
+
+        void consume()
+        {
+            contents.consume();
+        }
     }
 
     /**

@@ -279,11 +279,13 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
         long currentTimeNanos = nanoTime();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
+        long timeElapsedNanos = currentTimeNanos - header.createdAtNanos;
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
         if (isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
         {
-            callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+            callbacks.onHeaderArrived(size, header, timeElapsedNanos, NANOSECONDS);
+            callbacks.onArrivedExpired(size, header, false, timeElapsedNanos, NANOSECONDS);
             receivedCount++;
             receivedBytes += size;
             bytes.skipBytes(size);
@@ -293,7 +295,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         if (!acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
 
-        callbacks.onArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+        callbacks.onHeaderArrived(size, header, timeElapsedNanos, NANOSECONDS);
+        callbacks.onArrived(size, header, timeElapsedNanos, NANOSECONDS);
         receivedCount++;
         receivedBytes += size;
 
@@ -366,15 +369,10 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
         boolean expired = isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
-
         if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
 
-        if (expired)
-            callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-        else
-            callbacks.onArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
-
+        callbacks.onHeaderArrived(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
         receivedBytes += buf.remaining();
         largeMessage = new LargeMessage(size, header, expired);
         largeMessage.supply(frame);
@@ -695,7 +693,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         return SocketFactory.channelId(peer, self, type, channel.id().asShortText());
     }
 
-    /**
+    /*
      * A large-message frame-accumulating state machine.
      *
      * Collects intact frames until it's has all the bytes necessary to deserialize the large message,
@@ -705,7 +703,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
      * Also handles corrupt frames and potential expiry of the large message during accumulation:
      * if it's taking the frames too long to arrive, there is no point in holding on to the
      * accumulated frames, or in gathering more - so we release the ones we already have, and
-     * switch to skipping mode.
+     * skip any remaining ones, alongside with returning memory permits early.
      */
     private class LargeMessage
     {
@@ -714,13 +712,15 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
         private final List<ShareableBytes> buffers = new ArrayList<>();
         private int received;
-        private boolean isSkipping;
 
-        private LargeMessage(int size, Header header, boolean isSkipping)
+        private boolean isExpired;
+        private boolean isCorrupt;
+
+        private LargeMessage(int size, Header header, boolean isExpired)
         {
             this.size = size;
             this.header = header;
-            this.isSkipping = isSkipping;
+            this.isExpired = isExpired;
         }
 
         private LargeMessage(int size, Header header, ShareableBytes bytes)
@@ -739,60 +739,69 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
          */
         private boolean supply(Frame frame)
         {
-            received += frame.frameSize;
-
             if (frame instanceof IntactFrame)
                 onIntactFrame((IntactFrame) frame);
             else
-                onCorruptFrame((CorruptFrame) frame);
+                onCorruptFrame();
 
+            received += frame.frameSize;
+            if (size == received)
+                onComplete();
             return size == received;
         }
 
         private void onIntactFrame(IntactFrame frame)
         {
-            /*
-             * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
-             * release capacity, and switch to skipping.
-             */
-            long currentTimeNanos = nanoTime();
-            if (!isSkipping && isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+            boolean expires = isAfterNanoTime(nanoTime(), header.expiresAtNanos);
+            if (!isExpired && !isCorrupt)
             {
-                try
+                if (!expires)
                 {
-                    callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
+                    buffers.add(frame.contents.sliceAndConsume(frame.frameSize).share());
+                    return;
                 }
-                finally
-                {
-                    doAbort();
-                }
-            }
 
-            if (isSkipping)
-            {
-                frame.contents.skipBytes(frame.frameSize);
+                releaseBuffers();
+                releaseCapacity(size);
             }
-            else
-            {
-                buffers.add(frame.contents.sliceAndConsume(frame.frameSize).share());
-                if (received == size)
-                    schedule();
-            }
+            frame.consume();
+            isExpired |= expires;
         }
 
-        private void onCorruptFrame(CorruptFrame frame)
+        private void onCorruptFrame()
         {
-            if (isSkipping)
-                return;
+            if (!isExpired && !isCorrupt)
+            {
+                releaseBuffers();
+                releaseCapacity(size);
+            }
+            isCorrupt = true;
+            isExpired |= isAfterNanoTime(nanoTime(), header.expiresAtNanos);
+        }
 
-            try
+        private void onComplete()
+        {
+            if (!isExpired && !isCorrupt)
+                schedule();
+            else if (isExpired)
+                callbacks.onArrivedExpired(size, header, isCorrupt, nanoTime() - header.createdAtNanos, NANOSECONDS);
+            else
+                callbacks.onArrivedCorrupt(size, header, nanoTime() - header.createdAtNanos, NANOSECONDS);
+        }
+
+        private void abort()
+        {
+            if (!isExpired && !isCorrupt)
             {
-                callbacks.onFailedDeserialize(size, header, new InvalidCrc(frame.readCRC, frame.computedCRC));
+                releaseBuffers();
+                releaseCapacity(size);
             }
-            finally
-            {
-                doAbort();
-            }
+            callbacks.onClosedBeforeArrival(size, header, received, isCorrupt, isExpired);
+        }
+
+        private void releaseBuffers()
+        {
+            buffers.forEach(ShareableBytes::release); buffers.clear();
         }
 
         private Message deserialize()
@@ -822,28 +831,6 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
             }
 
             return null;
-        }
-
-        private void abort()
-        {
-            if (!isSkipping)
-            {
-                callbacks.onFailedDeserialize(size, header, new InvalidSerializedSizeException(header.verb, size, received));
-                doAbort();
-            }
-        }
-
-        private void doAbort()
-        {
-            releaseCapacity(size);
-            releaseBuffers();
-            isSkipping = true;
-        }
-
-        private void releaseBuffers()
-        {
-            buffers.forEach(ShareableBytes::release);
-            buffers.clear();
         }
     }
 
