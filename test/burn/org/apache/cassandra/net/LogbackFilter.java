@@ -40,8 +40,8 @@ public class LogbackFilter extends Filter
             return FilterReply.NEUTRAL;
 
         LoggingEvent e = (LoggingEvent) o;
-        if (ignore.matcher(e.getMessage()).find())
-            return FilterReply.DENY;
+//        if (ignore.matcher(e.getMessage()).find())
+//            return FilterReply.DENY;
 
         IThrowableProxy t = e.getThrowableProxy();
         if (t == null)

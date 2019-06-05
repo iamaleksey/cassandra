@@ -403,6 +403,7 @@ public class ConnectionBurnTest
                         {
                             done.countDown();
                         }
+                        logger.info("Sync'd connections: {}", connections);
                     };
 
                     int count = 0;

@@ -359,13 +359,20 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
         @Override
         public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
         {
-            JVMStabilityInspector.inspectThrowable(cause, false);
-            resultPromise.tryFailure(cause);
-            if (isCausedByConnectionReset(cause))
-                logger.info("Failed to connect to peer {}", settings.to, cause);
-            else
-                logger.error("Failed to handshake with peer {}", settings.to, cause);
-            ctx.close();
+            try
+            {
+                JVMStabilityInspector.inspectThrowable(cause, false);
+                resultPromise.tryFailure(cause);
+                if (isCausedByConnectionReset(cause))
+                    logger.info("Failed to connect to peer {}", settings.to, cause);
+                else
+                    logger.error("Failed to handshake with peer {}", settings.to, cause);
+                ctx.close();
+            }
+            catch (Throwable t)
+            {
+                logger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
+            }
         }
     }
 

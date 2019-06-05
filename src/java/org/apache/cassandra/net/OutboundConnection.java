@@ -1128,7 +1128,14 @@ public class OutboundConnection
                             @Override
                             public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
                             {
-                                invalidateChannel(established, cause);
+                                try
+                                {
+                                    invalidateChannel(established, cause);
+                                }
+                                catch (Throwable t)
+                                {
+                                    logger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
+                                }
                             }
                         });
                         ++successfulConnections;
