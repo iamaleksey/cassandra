@@ -238,13 +238,9 @@ public final class SocketFactory
         if (t instanceof Errors.NativeIoException)
         {
             int errorCode = ((Errors.NativeIoException) t).expectedErr();
-            return    errorCode == ERRNO_ECONNRESET_NEGATIVE
-                      || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
+            return errorCode == ERRNO_ECONNRESET_NEGATIVE || errorCode != ERROR_ECONNREFUSED_NEGATIVE;
         }
-        if (IOException.class == t.getClass() &&
-            (t.getMessage().equals("Broken pipe") || t.getMessage().equals("Connection reset by peer")))
-                return true;
-        return false;
+        return IOException.class == t.getClass() && ("Broken pipe".equals(t.getMessage()) || "Connection reset by peer".equals(t.getMessage()));
     }
 
     static boolean isCausedByConnectionReset(Throwable t)
