@@ -273,19 +273,54 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         return result;
     }
 
+    public void process(Message message)
+    {
+        verifier.process(message);
+    }
+
+    public void onHeaderArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+    }
+
     public void onArrived(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
     {
         verifier.onArrived(header.id, messageSize);
     }
 
-    public void onDispatched(int messageSize, Message.Header header) {}
-    public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit) {}
-    public void onProcessed(int messageSize, Message.Header header) {}
-    public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit) {}
-
-    public void process(Message message)
+    public void onArrivedExpired(int messageSize, Message.Header header, boolean wasCorrupt, long timeElapsed, TimeUnit timeUnit)
     {
-        verifier.process(message);
+        controller.fail(messageSize);
+        verifier.onArrivedExpired(header.id, messageSize, wasCorrupt, timeElapsed, timeUnit);
+    }
+
+    public void onArrivedCorrupt(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+        controller.fail(messageSize);
+        verifier.onFailedDeserialize(header.id, messageSize);
+    }
+
+    public void onClosedBeforeArrival(int messageSize, Message.Header header, int bytesReceived, boolean wasCorrupt, boolean wasExpired)
+    {
+        controller.fail(messageSize);
+        verifier.onClosedBeforeArrival(header.id, messageSize);
+    }
+
+    public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
+    {
+        controller.fail(messageSize);
+        verifier.onFailedDeserialize(header.id, messageSize);
+    }
+
+    public void onDispatched(int messageSize, Message.Header header)
+    {
+    }
+
+    public void onExecuting(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
+    {
+    }
+
+    public void onProcessed(int messageSize, Message.Header header)
+    {
     }
 
     public void onExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
@@ -294,16 +329,8 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         verifier.onProcessExpired(header.id, messageSize, timeElapsed, timeUnit);
     }
 
-    public void onArrivedExpired(int messageSize, Message.Header header, long timeElapsed, TimeUnit timeUnit)
+    public void onExecuted(int messageSize, Message.Header header, long timeElapsed, TimeUnit unit)
     {
-        controller.fail(messageSize);
-        verifier.onArrivedExpired(header.id, messageSize, timeElapsed, timeUnit);
-    }
-
-    public void onFailedDeserialize(int messageSize, Message.Header header, Throwable t)
-    {
-        controller.fail(messageSize);
-        verifier.onFailedDeserialize(header.id, messageSize);
     }
 
     InboundCounters inboundCounters()

@@ -37,25 +37,35 @@ import org.apache.cassandra.net.Message.Header;
 interface InboundMessageCallbacks
 {
     /**
-     * Invoked once resource permits for the message have been acquired. In case of small messages, the entire message
-     * will have arrived. In case of large messages, it's possible that only the first frame of the large message has.
+     * Invoked once the header of a message has arrived, small or large.
+     */
+    void onHeaderArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+
+    /**
+     * Invoked once an entire message worth of bytes has arrived, small or large.
      */
     void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit);
 
     /**
-     * Invoked if a small message arrived too late to be processed, or if the first frame of a large message has an
-     * expired header, or, alternatively, if a large message was still 'fresh' when its first frame arrived, but the
-     * remaining frames have not arrived before expiry time.
+     * Invoked if a message arrived too late to be processed, after its expiration. {@code wasCorrupt} might
+     * be set to {@code true} if 1+ corrupt frames were encountered while assembling an expired large message.
      */
-    void onArrivedExpired(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+    void onArrivedExpired(int messageSize, Header header, boolean wasCorrupt, long timeElapsed, TimeUnit unit);
 
     /**
-     * Invoked in several scenarios:
-     *  1. A deserializer threw an exception while attempting to deserialize a small message
-     *  2. A deserializer threw an exception while attempting to deserialize a large message
-     *  3. A corrupt frame was encountered while assembling all the frames of a large message
-     *  4. An {@link InboundMessageHandler} was closed, for whatever reason, when a large
-     *     message frames were still being accumulated
+     * Invoked if a large message arrived in time, but had one or more of its frames corrupted in flight.
+     */
+    void onArrivedCorrupt(int messageSize, Header header, long timeElapsed, TimeUnit unit);
+
+    /**
+     * Invoked if {@link InboundMessageHandler} was closed before receiving all frames of a large message.
+     * {@code wasCorrupt} will be set to {@code true} if some corrupt frames had been already encountered,
+     * {@code wasExpired} will be set to {@code true} if the message had expired in flight.
+     */
+    void onClosedBeforeArrival(int messageSize, Header header, int bytesReceived, boolean wasCorrupt, boolean wasExpired);
+
+    /**
+     * Invoked if a deserializer threw an exception while attempting to deserialize a message.
      */
     void onFailedDeserialize(int messageSize, Header header, Throwable t);
 

@@ -47,6 +47,7 @@ import static org.apache.cassandra.net.Verifier.EventCategory.OTHER;
 import static org.apache.cassandra.net.Verifier.EventCategory.RECEIVE;
 import static org.apache.cassandra.net.Verifier.EventCategory.SEND;
 import static org.apache.cassandra.net.Verifier.EventType.ARRIVE;
+import static org.apache.cassandra.net.Verifier.EventType.CLOSED_BEFORE_ARRIVAL;
 import static org.apache.cassandra.net.Verifier.EventType.DESERIALIZE;
 import static org.apache.cassandra.net.Verifier.EventType.ENQUEUE;
 import static org.apache.cassandra.net.Verifier.EventType.FAILED_CLOSING;
@@ -106,6 +107,7 @@ public class Verifier
         ARRIVE(RECEIVE),
         FAILED_EXPIRED_ON_RECEIVE(RECEIVE),
         DESERIALIZE(RECEIVE),
+        CLOSED_BEFORE_ARRIVAL(RECEIVE),
         FAILED_DESERIALIZE(RECEIVE),
         PROCESS(RECEIVE),
 
@@ -322,7 +324,7 @@ public class Verifier
         long at = nextId();
         events.put(at, new SimpleMessageEventWithSize(ARRIVE, at, messageId, messageSize));
     }
-    void onArrivedExpired(long messageId, int messageSize, long timeElapsed, TimeUnit timeUnit)
+    void onArrivedExpired(long messageId, int messageSize, boolean wasCorrupt, long timeElapsed, TimeUnit timeUnit)
     {
         onExpired(messageId, messageSize, timeElapsed, timeUnit, ExpirationType.ON_ARRIVED);
     }
@@ -330,6 +332,11 @@ public class Verifier
     {
         long at = nextId();
         events.put(at, new SerializeMessageEvent(DESERIALIZE, at, messageId, messagingVersion));
+    }
+    void onClosedBeforeArrival(long messageId, int messageSize)
+    {
+        long at = nextId();
+        events.put(at, new SimpleMessageEventWithSize(CLOSED_BEFORE_ARRIVAL, at, messageId, messageSize));
     }
     void onFailedDeserialize(long messageId, int messageSize)
     {
@@ -979,6 +986,21 @@ public class Verifier
                         }
                         m.sentOn.arriving.remove(mi);
                         m.update(e, now);
+                        break;
+                    }
+                    case CLOSED_BEFORE_ARRIVAL:
+                    {
+                        SimpleMessageEventWithSize e = (SimpleMessageEventWithSize) next;
+                        assert nextMessageId == e.at;
+                        MessageState m = maybeRemove(e);
+
+                        if (e.messageSize != m.messageSize())
+                            fail("onClosedBeforeArrival has invalid size for %s: %d vs %d", m, e.messageSize, m.messageSize());
+
+                        m.sentOn.deserializingOffEventLoop.remove(m);
+                        if (m.destiny == Destiny.FAIL_TO_SERIALIZE && outbound.type() == LARGE_MESSAGES)
+                            break;
+                        fail("%s closed before arrival, but its destiny was to %s", m, m.destiny);
                         break;
                     }
                     case FAILED_DESERIALIZE:
