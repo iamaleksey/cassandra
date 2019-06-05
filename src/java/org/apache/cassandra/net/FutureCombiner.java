@@ -18,9 +18,8 @@
 package org.apache.cassandra.net;
 
 import java.util.Collection;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicIntegerFieldUpdater;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import io.netty.util.concurrent.Future;
 import io.netty.util.concurrent.GenericFutureListener;
@@ -41,6 +40,16 @@ import io.netty.util.concurrent.Promise;
  */
 class FutureCombiner extends FutureDelegate<Void>
 {
+    private volatile boolean failed;
+
+    private volatile Throwable firstCause;
+    private static final AtomicReferenceFieldUpdater<FutureCombiner, Throwable> firstCauseUpdater =
+        AtomicReferenceFieldUpdater.newUpdater(FutureCombiner.class, Throwable.class, "firstCause");
+
+    private volatile int waitingOn;
+    private static final AtomicIntegerFieldUpdater<FutureCombiner> waitingOnUpdater =
+        AtomicIntegerFieldUpdater.newUpdater(FutureCombiner.class, "waitingOn");
+
     FutureCombiner(Collection<? extends Future<?>> combine)
     {
         this(AsyncPromise.uncancellable(GlobalEventExecutor.INSTANCE), combine);
@@ -50,31 +59,27 @@ class FutureCombiner extends FutureDelegate<Void>
     {
         super(combined);
 
-        AtomicBoolean failed = new AtomicBoolean();
-        AtomicReference<Throwable> firstCause = new AtomicReference<>();
-        AtomicInteger waitingOn = new AtomicInteger(combine.size());
-        if (0 == waitingOn.get())
+        if (0 == (waitingOn = combine.size()))
             combined.trySuccess(null);
 
-        GenericFutureListener<? extends Future<Object>> listener = result -> {
+        GenericFutureListener<? extends Future<Object>> listener = result ->
+        {
             if (!result.isSuccess())
             {
-                firstCause.compareAndSet(null, result.cause());
-                failed.set(true);
+                firstCauseUpdater.compareAndSet(this, null, result.cause());
+                failed = true;
             }
-            if (0 == waitingOn.decrementAndGet())
-                complete(combined, failed.get(), firstCause.get());
+
+            if (0 == waitingOnUpdater.decrementAndGet(this))
+            {
+                if (failed)
+                    combined.tryFailure(firstCause);
+                else
+                    combined.trySuccess(null);
+            }
         };
 
         for (Future<?> future : combine)
             future.addListener(listener);
-    }
-
-    private static void complete(Promise<Void> result, boolean failed, Throwable cause)
-    {
-        if (failed)
-            result.tryFailure(cause);
-        else
-            result.trySuccess(null);
     }
 }
