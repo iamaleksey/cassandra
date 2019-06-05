@@ -209,7 +209,7 @@ public class InboundConnectionInitiator
         public void handlerAdded(ChannelHandlerContext ctx) throws Exception
         {
             handshakeTimeout = ctx.executor().schedule(() -> {
-                logger.error("Timeout handshaking with " + ctx.channel().remoteAddress());
+                logger.error("Timeout handshaking with {} (on {})", SocketFactory.addressId(initiate.from, (InetSocketAddress) ctx.channel().remoteAddress()), settings.bindAddress);
                 failHandshake(ctx);
             }, HandshakeProtocol.TIMEOUT_MILLIS, MILLISECONDS);
 
@@ -352,7 +352,14 @@ public class InboundConnectionInitiator
         private void exceptionCaught(Channel channel, Throwable cause)
         {
             logger.error("Failed to properly handshake with peer {}. Closing the channel.", channel.remoteAddress(), cause);
-            failHandshake(channel);
+            try
+            {
+                failHandshake(channel);
+            }
+            catch (Throwable t)
+            {
+                logger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
+            }
         }
 
         private void failHandshake(ChannelHandlerContext ctx)

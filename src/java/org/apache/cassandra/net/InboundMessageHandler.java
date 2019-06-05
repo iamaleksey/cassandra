@@ -637,7 +637,14 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause)
     {
-        exceptionCaught(cause);
+        try
+        {
+            exceptionCaught(cause);
+        }
+        catch (Throwable t)
+        {
+            logger.error("Unexpected exception in {}.exceptionCaught", this.getClass().getSimpleName(), t);
+        }
     }
 
     private void exceptionCaught(Throwable cause)

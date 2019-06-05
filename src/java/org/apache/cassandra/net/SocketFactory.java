@@ -253,7 +253,7 @@ public final class SocketFactory
         return addressId(from, realFrom) + "->" + addressId(to, realTo) + '-' + type + '-' + id;
     }
 
-    private static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
+    public static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
     {
         String str = address.toString();
         if (!address.address.equals(realAddress.getAddress()) || address.port != realAddress.getPort())
