@@ -48,7 +48,8 @@ import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
 public class OutboundConnections
 {
     @VisibleForTesting
-    public static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64);
+    public static final int LARGE_MESSAGE_THRESHOLD = Integer.getInteger(Config.PROPERTY_PREFIX + "otcp_large_message_threshold", 1024 * 64)
+    - Math.max(Math.max(LegacyLZ4Constants.HEADER_LENGTH, FrameEncoderCrc.HEADER_AND_TRAILER_LENGTH), FrameEncoderLZ4.HEADER_AND_TRAILER_LENGTH);
 
     private final SimpleCondition metricsReady = new SimpleCondition();
     private volatile InternodeOutboundMetrics metrics;
