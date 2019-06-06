@@ -33,17 +33,17 @@ import static org.apache.cassandra.net.Crc.updateCrc32;
  * Every on-wire frame contains:
  * 1. Payload length               (17 bits)
  * 2. {@code isSelfContained} flag (1 bit)
- * 3. Header padding               (7 bits)
+ * 3. Header padding               (6 bits)
  * 4. CRC24 of the header          (24 bits)
- * 5. Payload                      (up to 2 * 17 - 1 bits)
+ * 5. Payload                      (up to 2 ^ 17 - 1 bits)
  * 6. Payload CRC32                (32 bits)
  *
  *  0                   1                   2                   3
  *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |          Payload Length         |C|           |               |
+ * |          Payload Length         |C|           |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |          Header CRC24         |                               |
+ *            Header CRC24         |                               |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
  * |                                                               |
  * +                                                               +

@@ -37,24 +37,24 @@ import static org.apache.cassandra.net.Crc.*;
  * 2. Uncompressed length          (17 bits)
  * 3. {@code isSelfContained} flag (1 bit)
  * 4. Header padding               (5 bits)
- * 5. CRC24 of the header          (24 bits)
- * 6. Compressed Payload           (up to 2 * 17 - 1 bits)
- * 7. (Compressed) Payload CRC32   (32 bits)
+ * 5. CRC24 of Header contents     (24 bits)
+ * 6. Compressed Payload           (up to 2 ^ 17 - 1 bits)
+ * 7. CRC32 of Compressed Payload  (32 bits)
  *
  *  0                   1                   2                   3
  *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |        Compressed Length        |     Uncompressed Length     |
+ * |        Compressed Length        |     Uncompressed Length
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |   |C|         |                  Header CRC24                 |
+ *     |C|         |                  Header CRC24                 |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |                                                               |
  * +                                                               +
- * |                      Compressed Messages                      |
+ * |                      Compressed Payload                       |
  * +                                                               +
  * |                                                               |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |                   (Compressed) Payload CRC32                  |
+ * |                  CRC32 of Compressed Payload                  |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
