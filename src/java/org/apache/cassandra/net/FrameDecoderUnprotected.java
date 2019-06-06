@@ -33,6 +33,27 @@ import static org.apache.cassandra.net.FrameDecoderCrc.verifyHeader6b;
  * This is non-standard, and useful for systems that have a trusted transport layer that want
  * to avoid incurring the (very low) cost of computing a CRC.  All we do is accumulate the bytes
  * of the frame, verify the frame header, and pass through the bytes stripped of the header.
+ *
+ * Every on-wire frame contains:
+ * 1. Payload length               (17 bits)
+ * 2. {@code isSelfContained} flag (1 bit)
+ * 3. Header padding               (6 bits)
+ * 4. CRC24 of the header          (24 bits)
+ * 5. Payload                      (up to 2 ^ 17 - 1 bits)
+ *
+ *  0                   1                   2                   3
+ *  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ * |          Payload Length         |C|           |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ *           CRC24 of Header       |                               |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
+ * |                                                               |
+ * +                                                               +
+ * |                            Payload                            |
+ * +                                                               +
+ * |                                                               |
+ * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 final class FrameDecoderUnprotected extends FrameDecoderWith8bHeader
 {
