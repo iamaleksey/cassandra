@@ -20,9 +20,6 @@ package org.apache.cassandra.net;
 import java.nio.ByteBuffer;
 
 import io.netty.channel.EventLoop;
-import org.apache.cassandra.net.BufferPoolAllocator;
-import org.apache.cassandra.net.ConnectionType;
-import org.apache.cassandra.net.GlobalBufferPoolAllocator;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 /**
@@ -31,8 +28,6 @@ import org.apache.cassandra.utils.memory.BufferPool;
  *
  * Exists to facilitate more efficient handling large messages on the inbound path,
  * used by {@link ConnectionType#LARGE_MESSAGES} connections.
- *
- * TODO: enforce that get() and getAtLeast() are invoked from within the expected thread
  */
 class LocalBufferPoolAllocator extends BufferPoolAllocator
 {
@@ -48,17 +43,17 @@ class LocalBufferPoolAllocator extends BufferPoolAllocator
     @Override
     ByteBuffer get(int size)
     {
-        if (eventLoop.inEventLoop())
-            return pool.get(size, false);
-        return GlobalBufferPoolAllocator.instance.get(size);
+        if (!eventLoop.inEventLoop())
+            throw new IllegalStateException("get() called from outside of owning event loop");
+        return pool.get(size, false);
     }
 
     @Override
     ByteBuffer getAtLeast(int size)
     {
-        if (eventLoop.inEventLoop())
-            return pool.get(size, true);
-        return GlobalBufferPoolAllocator.instance.getAtLeast(size);
+        if (!eventLoop.inEventLoop())
+            throw new IllegalStateException("getAtLeast() called from outside of owning event loop");
+        return pool.get(size, true);
     }
 
     @Override
