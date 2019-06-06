@@ -43,7 +43,7 @@ import static org.apache.cassandra.net.Crc.updateCrc32;
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  * |          Payload Length         |C|           |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- *            Header CRC24         |                               |
+ *           CRC24 of Header       |                               |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+                               +
  * |                                                               |
  * +                                                               +
@@ -51,7 +51,7 @@ import static org.apache.cassandra.net.Crc.updateCrc32;
  * +                                                               +
  * |                                                               |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- * |                         Payload CRC32                         |
+ * |                        CRC32 of Payload                       |
  * +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
  */
 final class FrameDecoderCrc extends FrameDecoderWith8bHeader
