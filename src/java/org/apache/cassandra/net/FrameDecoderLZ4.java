@@ -146,7 +146,7 @@ final class FrameDecoderLZ4 extends FrameDecoderWith8bHeader
             }
             catch (Throwable t)
             {
-                allocator.put(out, false);
+                allocator.put(out);
                 throw t;
             }
         }

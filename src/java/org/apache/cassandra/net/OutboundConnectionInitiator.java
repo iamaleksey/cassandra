@@ -54,6 +54,7 @@ import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSucc
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.security.SSLFactory;
 import org.apache.cassandra.utils.JVMStabilityInspector;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.util.concurrent.TimeUnit.*;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -335,6 +336,7 @@ public class OutboundConnectionInitiator<SuccessType extends OutboundConnectionI
                 ChannelPipeline pipeline = ctx.pipeline();
                 if (result.isSuccess())
                 {
+                    BufferPool.setRecycleWhenFreeForCurrentThread(false);
                     if (type.isMessaging())
                     {
                         assert frameEncoder != null;

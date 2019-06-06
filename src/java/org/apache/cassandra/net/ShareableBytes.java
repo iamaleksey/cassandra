@@ -131,7 +131,7 @@ class ShareableBytes
             throw new IllegalStateException("Already released");
 
         if (count == RELEASED)
-            BufferPool.put(bytes, false);
+            BufferPool.put(bytes);
     }
 
     boolean isReleased()

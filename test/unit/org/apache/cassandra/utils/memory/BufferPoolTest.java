@@ -192,7 +192,6 @@ public class BufferPoolTest
 
         for (ByteBuffer buffer : buffers)
             BufferPool.put(buffer);
-
     }
 
     @Test
@@ -363,13 +362,14 @@ public class BufferPoolTest
 
         Random rnd = new Random();
         rnd.setSeed(298347529L);
-        while (!buffers.isEmpty())
+        while (buffers.size() > 1)
         {
             int index = rnd.nextInt(buffers.size());
             ByteBuffer buffer = buffers.remove(index);
 
             BufferPool.put(buffer);
         }
+        BufferPool.put(buffers.remove(0));
 
         assertEquals(null, BufferPool.unsafeCurrentChunk());
         assertEquals(0, chunk.free());

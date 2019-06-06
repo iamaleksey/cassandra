@@ -73,19 +73,9 @@ abstract class BufferPoolAllocator extends AbstractByteBufAllocator
         BufferPool.put(buffer);
     }
 
-    void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
-    {
-        BufferPool.put(buffer, returnChunkToGlobalPoolIfFree);
-    }
-
     void putUnusedPortion(ByteBuffer buffer)
     {
         BufferPool.putUnusedPortion(buffer);
-    }
-
-    void putUnusedPortion(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
-    {
-        BufferPool.putUnusedPortion(buffer, returnChunkToGlobalPoolIfFree);
     }
 
     void release()
@@ -110,7 +100,7 @@ abstract class BufferPoolAllocator extends AbstractByteBufAllocator
         public void deallocate()
         {
             if (wrapped != null)
-                BufferPool.put(wrapped, false);
+                BufferPool.put(wrapped);
         }
 
         public ByteBuffer adopt()

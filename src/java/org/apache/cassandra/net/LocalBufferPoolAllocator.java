@@ -36,7 +36,7 @@ class LocalBufferPoolAllocator extends BufferPoolAllocator
 
     LocalBufferPoolAllocator(EventLoop eventLoop)
     {
-        this.pool = new BufferPool.LocalPool();
+        this.pool = new BufferPool.LocalPool().recycleWhenFree(false);
         this.eventLoop = eventLoop;
     }
 

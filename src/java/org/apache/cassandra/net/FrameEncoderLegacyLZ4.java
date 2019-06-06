@@ -79,19 +79,19 @@ class FrameEncoderLegacyLZ4 extends FrameEncoder
             }
 
             frame.limit(frameOffset);
-            BufferPool.putUnusedPortion(frame, false);
+            BufferPool.putUnusedPortion(frame);
 
             return GlobalBufferPoolAllocator.wrap(frame);
         }
         catch (Throwable t)
         {
             if (null != frame)
-                BufferPool.put(frame, false);
+                BufferPool.put(frame);
             throw t;
         }
         finally
         {
-            BufferPool.put(payload, false);
+            BufferPool.put(payload);
         }
     }
 

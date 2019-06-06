@@ -98,18 +98,18 @@ class FrameEncoderLZ4 extends FrameEncoder
             frame.putInt(frameCrc);
             frame.position(0);
 
-            BufferPool.putUnusedPortion(frame, false);
+            BufferPool.putUnusedPortion(frame);
             return GlobalBufferPoolAllocator.wrap(frame);
         }
         catch (Throwable t)
         {
             if (frame != null)
-                BufferPool.put(frame, false);
+                BufferPool.put(frame);
             throw t;
         }
         finally
         {
-            BufferPool.put(in, false);
+            BufferPool.put(in);
         }
     }
 }

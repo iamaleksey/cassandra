@@ -145,14 +145,14 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
         {
             // we don't currently support cancelling the flush, but at this point we are recoverable if we want
             if (holder.buffer != null)
-                BufferPool.put(holder.buffer, false);
+                BufferPool.put(holder.buffer);
             if (holder.promise != null)
                 holder.promise.tryFailure(t);
             throw t;
         }
 
         ByteBuffer buffer = holder.buffer;
-        BufferPool.putUnusedPortion(buffer, false);
+        BufferPool.putUnusedPortion(buffer);
 
         int length = buffer.limit();
         channel.writeAndFlush(GlobalBufferPoolAllocator.wrap(buffer), holder.promise);
@@ -213,7 +213,7 @@ public class AsyncStreamingOutputPlus extends AsyncChannelOutputPlus
     {
         if (buffer != null)
         {
-            BufferPool.put(buffer, false);
+            BufferPool.put(buffer);
             buffer = null;
         }
     }

@@ -61,6 +61,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.memory.BufferPool;
 
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;

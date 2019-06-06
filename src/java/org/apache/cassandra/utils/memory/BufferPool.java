@@ -149,22 +149,11 @@ public class BufferPool
 
     public static void put(ByteBuffer buffer)
     {
-        put(buffer, true);
-    }
-
-    public static void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
-    {
         if (!(DISABLED || buffer.hasArray()))
-            localPool.get().put(buffer, returnChunkToGlobalPoolIfFree);
+            localPool.get().put(buffer);
     }
 
-    // TODO: equivalent expand method, to increase buffer size if spare slots
     public static void putUnusedPortion(ByteBuffer buffer)
-    {
-        putUnusedPortion(buffer, true);
-    }
-
-    public static void putUnusedPortion(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
     {
 
         if (!(DISABLED || buffer.hasArray()))
@@ -173,8 +162,13 @@ public class BufferPool
             if (buffer.limit() > 0)
                 pool.putUnusedPortion(buffer);
             else
-                pool.put(buffer, returnChunkToGlobalPoolIfFree);
+                pool.put(buffer);
         }
+    }
+
+    public static void setRecycleWhenFreeForCurrentThread(boolean recycleWhenFree)
+    {
+        localPool.get().recycleWhenFree(recycleWhenFree);
     }
 
     public static long sizeInBytes()
@@ -193,6 +187,11 @@ public class BufferPool
         debug = setDebug;
     }
 
+    interface Recycler
+    {
+        void recycle(Chunk chunk);
+    }
+
     /**
      * A queue of page aligned buffers, the chunks, which have been sliced from bigger chunks,
      * the macro-chunks, also page aligned. Macro-chunks are allocated as long as we have not exceeded the
@@ -200,7 +199,7 @@ public class BufferPool
      *
      * This class is shared by multiple thread local pools and must be thread-safe.
      */
-    static final class GlobalPool implements Supplier<Chunk>, Consumer<Chunk>
+    static final class GlobalPool implements Supplier<Chunk>, Recycler
     {
         /** The size of a bigger chunk, 1 MiB, must be a multiple of NORMAL_CHUNK_SIZE */
         static final int MACRO_CHUNK_SIZE = 64 * NORMAL_CHUNK_SIZE;
@@ -292,7 +291,7 @@ public class BufferPool
             return callerChunk;
         }
 
-        public void accept(Chunk chunk)
+        public void recycle(Chunk chunk)
         {
             Chunk recycleAs = new Chunk(chunk);
             if (debug != null)
@@ -528,7 +527,7 @@ public class BufferPool
      * A thread local class that grabs chunks from the global pool for this thread allocations.
      * Only one thread can do the allocations but multiple threads can release the allocations.
      */
-    public static final class LocalPool implements Consumer<Chunk>
+    public static final class LocalPool implements Recycler
     {
         private final Queue<ByteBuffer> reuseObjects;
         private final Supplier<Chunk> parent;
@@ -541,6 +540,7 @@ public class BufferPool
          */
         private LocalPool tinyPool;
         private final int tinyLimit;
+        private boolean recycleWhenFree = true;
 
         public LocalPool()
         {
@@ -556,10 +556,10 @@ public class BufferPool
         private LocalPool(LocalPool parent)
         {
             this.parent = () -> {
-                ByteBuffer buffer = parent.tryGet(TINY_CHUNK_SIZE, false);
+                ByteBuffer buffer = parent.tryGetInternal(TINY_CHUNK_SIZE, false);
                 if (buffer == null)
                     return null;
-                return new Chunk(this, buffer);
+                return new Chunk(parent, buffer);
             };
             this.tinyLimit = 0; // we only currently permit one layer of nesting (which brings us down to 32 byte allocations, so is plenty)
             this.reuseObjects = parent.reuseObjects; // we share the same ByteBuffer object reuse pool, as we both have the same exclusive access to it
@@ -569,38 +569,38 @@ public class BufferPool
         private LocalPool tinyPool()
         {
             if (tinyPool == null)
-                tinyPool = new LocalPool(this);
+                tinyPool = new LocalPool(this).recycleWhenFree(recycleWhenFree);
             return tinyPool;
         }
 
-        public void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
+        public void put(ByteBuffer buffer)
         {
             Chunk chunk = Chunk.getParentChunk(buffer);
             if (chunk == null)
                 FileUtils.clean(buffer);
             else
-                put(buffer, chunk, returnChunkToGlobalPoolIfFree);
+                put(buffer, chunk);
         }
 
-        public void put(ByteBuffer buffer, Chunk chunk, boolean returnChunkToGlobalPoolIfFree)
+        public void put(ByteBuffer buffer, Chunk chunk)
         {
             LocalPool owner = chunk.owner;
             if (owner != null && owner == tinyPool)
             {
-                tinyPool.put(buffer, chunk, returnChunkToGlobalPoolIfFree);
+                tinyPool.put(buffer, chunk);
                 return;
             }
 
             // ask the free method to take exclusive ownership of the act of recycling
             // if we are either: already not owned by anyone, or owned by ourselves
-            long free = chunk.free(buffer, owner == null || (returnChunkToGlobalPoolIfFree & owner == this));
+            long free = chunk.free(buffer, owner == null || (owner == this && recycleWhenFree));
             if (free == 0L)
             {
                 // 0L => we own recycling responsibility, so must recycle;
-                chunk.recycle();
-                // if we are also the owner, we must remove the Chunk from our local queue
+                // if we are the owner, we must remove the Chunk from our local queue
                 if (owner == this)
                     remove(chunk);
+                chunk.recycle();
             }
             else if (((free == -1L) && owner != this) && chunk.owner == null)
             {
@@ -724,11 +724,11 @@ public class BufferPool
         }
 
         // recycle
-        public void accept(Chunk chunk)
+        public void recycle(Chunk chunk)
         {
             ByteBuffer buffer = chunk.slab;
             Chunk parentChunk = Chunk.getParentChunk(buffer);
-            put(buffer, parentChunk, false);
+            put(buffer, parentChunk);
         }
 
         private void remove(Chunk chunk)
@@ -774,6 +774,14 @@ public class BufferPool
         void unsafeRecycle()
         {
             chunks.unsafeRecycle();
+        }
+
+        public LocalPool recycleWhenFree(boolean recycleWhenFree)
+        {
+            this.recycleWhenFree = recycleWhenFree;
+            if (tinyPool != null)
+                tinyPool.recycleWhenFree = recycleWhenFree;
+            return this;
         }
     }
 
@@ -860,7 +868,7 @@ public class BufferPool
         // if this is set, it means the chunk may not be recycled because we may still allocate from it;
         // if it has been unset the local pool has finished with it, and it may be recycled
         private volatile LocalPool owner;
-        private final Consumer<Chunk> recycler;
+        private final Recycler recycler;
 
         @VisibleForTesting
         Object debugAttachment;
@@ -875,7 +883,7 @@ public class BufferPool
             this.recycler = recycle.recycler;
         }
 
-        Chunk(Consumer<Chunk> recycler, ByteBuffer slab)
+        Chunk(Recycler recycler, ByteBuffer slab)
         {
             assert !slab.hasArray();
             this.recycler = recycler;
@@ -920,7 +928,7 @@ public class BufferPool
         void recycle()
         {
             assert freeSlots == 0L;
-            recycler.accept(this);
+            recycler.recycle(this);
         }
 
         /**

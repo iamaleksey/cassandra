@@ -91,7 +91,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             assert msg instanceof BufferPoolAllocator.Wrapped;
             ByteBuffer buf = ((BufferPoolAllocator.Wrapped) msg).adopt();
             // netty will probably have mis-predicted the space needed
-            BufferPool.putUnusedPortion(buf, false);
+            BufferPool.putUnusedPortion(buf);
 
             CorruptLZ4Frame error = null;
             try
@@ -220,7 +220,7 @@ class FrameDecoderLegacyLZ4 extends FrameDecoderLegacy
             }
             catch (Throwable t)
             {
-                BufferPool.put(out, false);
+                BufferPool.put(out);
                 throw t;
             }
         }

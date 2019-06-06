@@ -103,12 +103,12 @@ abstract class FrameEncoder extends ChannelOutboundHandlerAdapter
             isFinished = true;
             buffer.limit(buffer.position() + trailerLength);
             buffer.position(0);
-            BufferPool.putUnusedPortion(buffer, false);
+            BufferPool.putUnusedPortion(buffer);
         }
 
         void release()
         {
-            BufferPool.put(buffer, false);
+            BufferPool.put(buffer);
         }
     }
 
