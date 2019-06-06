@@ -946,6 +946,7 @@ public class OutboundConnection
             }
         }
 
+        @SuppressWarnings({ "resource", "RedundantSuppression" }) // make eclipse warnings go away
         boolean doRun(Established established)
         {
             Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
