@@ -83,7 +83,7 @@ public final class Throwables
     @SafeVarargs
     public static <E extends Exception> void maybeFail(DiscreteAction<? extends E> ... actions)
     {
-        maybeFail(Throwables.<E>perform(null, Stream.of(actions)));
+        maybeFail(Throwables.perform(null, Stream.of(actions)));
     }
 
     @SafeVarargs
@@ -100,7 +100,7 @@ public final class Throwables
     @SuppressWarnings("unchecked")
     public static <E extends Exception> void perform(Stream<DiscreteAction<? extends E>> actions) throws E
     {
-        Throwable fail = perform((Throwable) null, actions);
+        Throwable fail = perform(null, actions);
         if (failIfCanCast(fail, null))
             throw (E) fail;
     }
