@@ -23,6 +23,7 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
 import java.util.Objects;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import javax.annotation.Nullable;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1490,7 +1492,16 @@ public class OutboundConnection
          *  is between messages, that checks if the queue is empty; if it is, it schedules cleanup on the eventLoop.
          */
 
-        Runnable clearQueue = () -> queue.runEventually(withLock -> withLock.consume(this::onClosed));
+        Runnable clearQueue = () ->
+        {
+            CountDownLatch done = new CountDownLatch(1);
+            queue.runEventually(withLock -> {
+                withLock.consume(this::onClosed);
+                done.countDown();
+            });
+            //noinspection UnstableApiUsage
+            Uninterruptibles.awaitUninterruptibly(done);
+        };
 
         if (flushQueue)
         {

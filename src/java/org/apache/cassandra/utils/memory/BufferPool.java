@@ -35,6 +35,7 @@ import java.util.function.Supplier;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import net.nicoulaj.compilecommand.annotations.Inline;
 import org.apache.cassandra.concurrent.InfiniteLoopExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,36 +108,36 @@ public class BufferPool
         if (DISABLED)
             return allocate(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
         else
-            return takeFromPool(size, false, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+            return localPool.get().get(size, false, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
     }
 
     public static ByteBuffer get(int size, BufferType bufferType)
     {
-        boolean direct = bufferType == BufferType.OFF_HEAP;
-        if (DISABLED || !direct)
-            return allocate(size, !direct);
+        boolean onHeap = bufferType == BufferType.ON_HEAP;
+        if (DISABLED || onHeap)
+            return allocate(size, onHeap);
         else
-            return takeFromPool(size, false, !direct);
+            return localPool.get().get(size, false, onHeap);
     }
 
     public static ByteBuffer getAtLeast(int size, BufferType bufferType)
     {
-        boolean direct = bufferType == BufferType.OFF_HEAP;
-        if (DISABLED || !direct)
-            return allocate(size, !direct);
+        boolean onHeap = bufferType == BufferType.ON_HEAP;
+        if (DISABLED || onHeap)
+            return allocate(size, onHeap);
         else
-            return takeFromPool(size, true, !direct);
+            return localPool.get().get(size, true, onHeap);
     }
 
     /** Unlike the get methods, this will return null if the pool is exhausted */
     public static ByteBuffer tryGet(int size)
     {
-        return tryGet(size, false);
+        return localPool.get().tryGet(size, true);
     }
 
-    public static ByteBuffer tryGet(int size, boolean sizeIsLowerBound)
+    public static ByteBuffer tryGetAtLeast(int size)
     {
-        return maybeTakeFromPool(size, sizeIsLowerBound, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+        return localPool.get().tryGet(size, true);
     }
 
     private static ByteBuffer allocate(int size, boolean onHeap)
@@ -144,41 +145,6 @@ public class BufferPool
         return onHeap
                ? ByteBuffer.allocate(size)
                : ByteBuffer.allocateDirect(size);
-    }
-
-    private static ByteBuffer takeFromPool(int size, boolean sizeIsLowerBound, boolean allocateOnHeapWhenExhausted)
-    {
-        ByteBuffer ret = maybeTakeFromPool(size, sizeIsLowerBound, allocateOnHeapWhenExhausted);
-        if (ret != null)
-            return ret;
-
-        if (logger.isTraceEnabled())
-            logger.trace("Requested buffer size {} has been allocated directly due to lack of capacity", prettyPrintMemory(size));
-
-        metrics.misses.mark();
-        return allocate(size, allocateOnHeapWhenExhausted);
-    }
-
-    private static ByteBuffer maybeTakeFromPool(int size, boolean sizeIsLowerBound, boolean allocateOnHeapWhenExhausted)
-    {
-        if (size < 0)
-            throw new IllegalArgumentException("Size must be positive (" + size + ")");
-
-        if (size == 0)
-            return EMPTY_BUFFER;
-
-        if (size > NORMAL_CHUNK_SIZE)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Requested buffer size {} is bigger than {}; allocating directly",
-                             prettyPrintMemory(size),
-                             prettyPrintMemory(NORMAL_CHUNK_SIZE));
-
-            metrics.misses.mark();
-            return allocate(size, allocateOnHeapWhenExhausted);
-        }
-
-        return localPool.get().get(size, sizeIsLowerBound);
     }
 
     public static void put(ByteBuffer buffer)
@@ -209,29 +175,6 @@ public class BufferPool
             else
                 pool.put(buffer, returnChunkToGlobalPoolIfFree);
         }
-    }
-
-    /** This is not thread safe and should only be used for unit testing. */
-    @VisibleForTesting
-    static void reset()
-    {
-        localPool.get().unsafeRecycle();
-        globalPool.unsafeFree();
-    }
-
-    @VisibleForTesting
-    static Chunk currentChunk()
-    {
-        return localPool.get().chunks.chunk0;
-    }
-
-    @VisibleForTesting
-    static int numChunks()
-    {
-        LocalPool pool = localPool.get();
-        return   (pool.chunks.chunk0 != null ? 1 : 0)
-               + (pool.chunks.chunk1 != null ? 1 : 0)
-               + (pool.chunks.chunk2 != null ? 1 : 0);
     }
 
     public static long sizeInBytes()
@@ -613,7 +556,7 @@ public class BufferPool
         private LocalPool(LocalPool parent)
         {
             this.parent = () -> {
-                ByteBuffer buffer = parent.get(TINY_CHUNK_SIZE, false);
+                ByteBuffer buffer = parent.tryGet(TINY_CHUNK_SIZE, false);
                 if (buffer == null)
                     return null;
                 return new Chunk(this, buffer);
@@ -628,31 +571,6 @@ public class BufferPool
             if (tinyPool == null)
                 tinyPool = new LocalPool(this);
             return tinyPool;
-        }
-
-        public ByteBuffer get(int size, boolean sizeIsLowerBound)
-        {
-            if (size <= tinyLimit)
-                return tinyPool().get(size, sizeIsLowerBound);
-
-            ByteBuffer reuse = this.reuseObjects.poll();
-
-            ByteBuffer buffer = chunks.get(size, sizeIsLowerBound, reuse);
-            if (buffer != null)
-                return buffer;
-
-            // else ask the global pool
-            Chunk chunk = addChunkFromParent();
-            if (chunk != null)
-            {
-                ByteBuffer result = chunk.get(size, sizeIsLowerBound, reuse);
-                if (result != null)
-                    return result;
-            }
-
-            if (reuse != null)
-                this.reuseObjects.add(reuse);
-            return null;
         }
 
         public void put(ByteBuffer buffer, boolean returnChunkToGlobalPoolIfFree)
@@ -708,13 +626,31 @@ public class BufferPool
             chunk.freeUnusedPortion(buffer);
         }
 
-        public ByteBuffer take(int size, boolean exactSize)
+        public ByteBuffer get(int size)
         {
-            if (size < 0)
-                throw new IllegalArgumentException("Size must be positive (" + size + ')');
+            return get(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+        }
 
-            if (size == 0)
-                return EMPTY_BUFFER;
+        public ByteBuffer get(int size, boolean allocateOnHeapWhenExhausted)
+        {
+            return get(size, false, allocateOnHeapWhenExhausted);
+        }
+
+        public ByteBuffer getAtLeast(int size)
+        {
+            return getAtLeast(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+        }
+
+        public ByteBuffer getAtLeast(int size, boolean allocateOnHeapWhenExhausted)
+        {
+            return get(size, true, allocateOnHeapWhenExhausted);
+        }
+
+        private ByteBuffer get(int size, boolean sizeIsLowerBound, boolean allocateOnHeapWhenExhausted)
+        {
+            ByteBuffer ret = tryGet(size, sizeIsLowerBound);
+            if (ret != null)
+                return ret;
 
             if (size > NORMAL_CHUNK_SIZE)
             {
@@ -722,20 +658,69 @@ public class BufferPool
                     logger.trace("Requested buffer size {} is bigger than {}; allocating directly",
                                  prettyPrintMemory(size),
                                  prettyPrintMemory(NORMAL_CHUNK_SIZE));
-
-                metrics.misses.mark();
-                return allocate(size, false);
+            }
+            else
+            {
+                if (logger.isTraceEnabled())
+                    logger.trace("Requested buffer size {} has been allocated directly due to lack of capacity", prettyPrintMemory(size));
             }
 
-            ByteBuffer ret = get(size, exactSize);
-            if (ret != null)
-                return ret;
-
-            if (logger.isTraceEnabled())
-                logger.trace("Requested buffer size {} has been allocated directly due to lack of capacity", prettyPrintMemory(size));
-
             metrics.misses.mark();
-            return allocate(size, false);
+            return allocate(size, allocateOnHeapWhenExhausted);
+        }
+
+        public ByteBuffer tryGet(int size)
+        {
+            return tryGet(size, ALLOCATE_ON_HEAP_WHEN_EXAHUSTED);
+        }
+
+        public ByteBuffer tryGetAtLeast(int size)
+        {
+            return tryGet(size, true);
+        }
+
+        private ByteBuffer tryGet(int size, boolean sizeIsLowerBound)
+        {
+            LocalPool pool = this;
+            if (size <= tinyLimit)
+            {
+                if (size <= 0)
+                {
+                    if (size == 0)
+                        return EMPTY_BUFFER;
+                    throw new IllegalArgumentException("Size must be non-negative (" + size + ')');
+                }
+
+                pool = tinyPool();
+            }
+            else if (size > NORMAL_CHUNK_SIZE)
+            {
+                return null;
+            }
+
+            return pool.tryGetInternal(size, sizeIsLowerBound);
+        }
+
+        @Inline
+        private ByteBuffer tryGetInternal(int size, boolean sizeIsLowerBound)
+        {
+            ByteBuffer reuse = this.reuseObjects.poll();
+            ByteBuffer buffer = chunks.get(size, sizeIsLowerBound, reuse);
+            if (buffer != null)
+                return buffer;
+
+            // else ask the global pool
+            Chunk chunk = addChunkFromParent();
+            if (chunk != null)
+            {
+                ByteBuffer result = chunk.get(size, sizeIsLowerBound, reuse);
+                if (result != null)
+                    return result;
+            }
+
+            if (reuse != null)
+                this.reuseObjects.add(reuse);
+            return null;
         }
 
         // recycle
@@ -1233,4 +1218,28 @@ public class BufferPool
         }
         return totalMemory - availableMemory.v;
     }
+
+    /** This is not thread safe and should only be used for unit testing. */
+    @VisibleForTesting
+    static void unsafeReset()
+    {
+        localPool.get().unsafeRecycle();
+        globalPool.unsafeFree();
+    }
+
+    @VisibleForTesting
+    static Chunk unsafeCurrentChunk()
+    {
+        return localPool.get().chunks.chunk0;
+    }
+
+    @VisibleForTesting
+    static int unsafeNumChunks()
+    {
+        LocalPool pool = localPool.get();
+        return   (pool.chunks.chunk0 != null ? 1 : 0)
+                 + (pool.chunks.chunk1 != null ? 1 : 0)
+                 + (pool.chunks.chunk2 != null ? 1 : 0);
+    }
+
 }

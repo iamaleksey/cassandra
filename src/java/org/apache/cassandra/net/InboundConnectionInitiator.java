@@ -402,7 +402,7 @@ public class InboundConnectionInitiator
             if (initiate.type == ConnectionType.LARGE_MESSAGES)
             {
                 // for large messages, swap the global pool allocator for a local one, to optimise utilisation of chunks
-                allocator = new LocalBufferPoolAllocator();
+                allocator = new LocalBufferPoolAllocator(pipeline.channel().eventLoop());
                 pipeline.channel().config().setAllocator(allocator);
             }
 

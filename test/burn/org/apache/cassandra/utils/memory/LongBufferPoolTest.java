@@ -37,7 +37,6 @@ import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.utils.DynamicList;
 
-import static org.apache.cassandra.utils.memory.BufferPool.NORMAL_ALLOCATION_UNIT;
 import static org.junit.Assert.*;
 
 /**
@@ -562,7 +561,7 @@ public class LongBufferPoolTest
             {
                 logger.error("Got exception {}, current chunk {}",
                              ex.getMessage(),
-                             BufferPool.currentChunk());
+                             BufferPool.unsafeCurrentChunk());
                 ex.printStackTrace();
                 return false;
             }
@@ -570,7 +569,7 @@ public class LongBufferPoolTest
             {
                 logger.error("Got throwable {}, current chunk {}",
                              tr.getMessage(),
-                             BufferPool.currentChunk());
+                             BufferPool.unsafeCurrentChunk());
                 tr.printStackTrace();
                 return false;
             }

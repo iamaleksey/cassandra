@@ -64,7 +64,6 @@ abstract class FrameDecoderWith8bHeader extends FrameDecoder
      * Decode a number of frames using the above abstract method implementations.
      * It is expected for this method to be invoked by the implementing class' {@link #decode(Collection, ShareableBytes)}
      * so that this implementation will be inlined, and all of the abstract method implementations will also be inlined.
-     * TODO verify this in assembly
      */
     @Inline
     protected void decode(Collection<Frame> into, ShareableBytes newBytes, int headerLength)

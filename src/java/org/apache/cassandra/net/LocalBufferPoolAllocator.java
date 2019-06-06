@@ -19,6 +19,7 @@ package org.apache.cassandra.net;
 
 import java.nio.ByteBuffer;
 
+import io.netty.channel.EventLoop;
 import org.apache.cassandra.net.BufferPoolAllocator;
 import org.apache.cassandra.net.ConnectionType;
 import org.apache.cassandra.net.GlobalBufferPoolAllocator;
@@ -36,23 +37,28 @@ import org.apache.cassandra.utils.memory.BufferPool;
 class LocalBufferPoolAllocator extends BufferPoolAllocator
 {
     private final BufferPool.LocalPool pool;
+    private final EventLoop eventLoop;
 
-    LocalBufferPoolAllocator()
+    LocalBufferPoolAllocator(EventLoop eventLoop)
     {
-        super();
         this.pool = new BufferPool.LocalPool();
+        this.eventLoop = eventLoop;
     }
 
     @Override
     ByteBuffer get(int size)
     {
-        return pool.take(size, false);
+        if (eventLoop.inEventLoop())
+            return pool.get(size, false);
+        return GlobalBufferPoolAllocator.instance.get(size);
     }
 
     @Override
     ByteBuffer getAtLeast(int size)
     {
-        return pool.take(size, true);
+        if (eventLoop.inEventLoop())
+            return pool.get(size, true);
+        return GlobalBufferPoolAllocator.instance.getAtLeast(size);
     }
 
     @Override

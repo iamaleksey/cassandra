@@ -106,7 +106,6 @@ class OutboundMessageQueue
      */
     void runEventually(Consumer<WithLock> runEventually)
     {
-        // TODO: should we be offloading the callback to another thread to guarantee unlock thread is not unduly burdened?
         try (WithLock withLock = lockOrCallback(ApproximateTime.nanoTime(), () -> runEventually(runEventually)))
         {
             if (withLock != null)
