@@ -65,12 +65,7 @@ interface InboundMessageCallbacks
     void onClosedBeforeArrival(int messageSize, Header header, int bytesReceived, boolean wasCorrupt, boolean wasExpired);
 
     /**
-     * Invoked in several scenarios:
-     *  1. A deserializer threw an exception while attempting to deserialize a small message
-     *  2. A deserializer threw an exception while attempting to deserialize a large message
-     *  3. A corrupt frame was encountered while assembling all the frames of a large message
-     *  4. An {@link InboundMessageHandler} was closed, for whatever reason, when a large
-     *     message frames were still being accumulated
+     * Invoked if a deserializer threw an exception while attempting to deserialize a message.
      */
     void onFailedDeserialize(int messageSize, Header header, Throwable t);
 
