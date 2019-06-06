@@ -187,9 +187,9 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
         }
     }
 
-    void reconnect(OutboundConnectionSettings template)
+    void reconnectWith(OutboundConnectionSettings template)
     {
-        outbound.reconnectWithNewTemplate(template);
+        outbound.reconnectWith(template);
     }
 
     void serialize(long id, byte[] payload, DataOutputPlus out, int messagingVersion) throws IOException

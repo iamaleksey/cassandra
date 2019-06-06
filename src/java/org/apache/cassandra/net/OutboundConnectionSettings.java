@@ -87,7 +87,6 @@ public class OutboundConnectionSettings
     public final InetAddressAndPort connectTo; // may be represented by a different IP address on this node's local network
     public final EncryptionOptions encryption;
     public final Framing framing;
-    public final CoalescingStrategy coalescingStrategy;
     public final Integer socketSendBufferSizeInBytes;
     // TODO: document these, and perhaps derive defaults from system memory settings?
     public final Integer applicationSendQueueCapacityInBytes;
@@ -111,7 +110,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings(InetAddressAndPort to, InetAddressAndPort preferred)
     {
-        this(null, to, preferred, null, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null, null, null, null, null);
+        this(null, to, preferred, null, null, null, null, null, null, null, 1 << 15, 1 << 16, null, null, null, null, null, null, null, null);
     }
 
     private OutboundConnectionSettings(IInternodeAuthenticator authenticator,
@@ -119,7 +118,6 @@ public class OutboundConnectionSettings
                                        InetAddressAndPort connectTo,
                                        EncryptionOptions encryption,
                                        Framing framing,
-                                       CoalescingStrategy coalescingStrategy,
                                        Integer socketSendBufferSizeInBytes,
                                        Integer applicationSendQueueCapacityInBytes,
                                        Integer applicationReserveSendQueueEndpointCapacityInBytes,
@@ -146,7 +144,6 @@ public class OutboundConnectionSettings
         this.connectTo = connectTo;
         this.encryption = encryption;
         this.framing = framing;
-        this.coalescingStrategy = coalescingStrategy;
         this.socketSendBufferSizeInBytes = socketSendBufferSizeInBytes;
         this.applicationSendQueueCapacityInBytes = applicationSendQueueCapacityInBytes;
         this.applicationReserveSendQueueEndpointCapacityInBytes = applicationReserveSendQueueEndpointCapacityInBytes;
@@ -176,14 +173,13 @@ public class OutboundConnectionSettings
 
     public String toString()
     {
-        return String.format("peer: (%s, %s), framing: %s, encryption: %s, coalesce: %s",
-                             to, connectTo, framing, encryptionLogStatement(encryption),
-                             coalescingStrategy != null ? coalescingStrategy : CoalescingStrategies.Strategy.DISABLED);
+        return String.format("peer: (%s, %s), framing: %s, encryption: %s",
+                             to, connectTo, framing, encryptionLogStatement(encryption));
     }
 
     public OutboundConnectionSettings withAuthenticator(IInternodeAuthenticator authenticator)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -193,7 +189,7 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings toEndpoint(InetAddressAndPort endpoint)
     {
-        return new OutboundConnectionSettings(authenticator, endpoint, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, endpoint, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -202,7 +198,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withConnectTo(InetAddressAndPort connectTo)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -211,7 +207,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withEncryption(ServerEncryptionOptions encryption)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -221,7 +217,7 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withFraming(Framing framing)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -229,7 +225,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withCoalescingStrategy(CoalescingStrategy coalescingStrategy)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -238,7 +234,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withSocketSendBufferSizeInBytes(int socketSendBufferSizeInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -248,7 +244,7 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withApplicationSendQueueCapacityInBytes(int applicationSendQueueCapacityInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -257,7 +253,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withApplicationReserveSendQueueCapacityInBytes(Integer applicationReserveSendQueueEndpointCapacityInBytes, ResourceLimits.Limit applicationReserveSendQueueGlobalCapacityInBytes)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -267,7 +263,7 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withTcpNoDelay(boolean tcpNoDelay)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -277,7 +273,7 @@ public class OutboundConnectionSettings
     @SuppressWarnings("unused")
     public OutboundConnectionSettings withNettyBufferBounds(WriteBufferWaterMark nettyBufferBounds)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -286,7 +282,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withTcpConnectTimeoutInMS(int tcpConnectTimeoutInMS)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -295,7 +291,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withTcpUserTimeoutInMS(int tcpUserTimeoutInMS)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -304,7 +300,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withAcceptVersions(AcceptVersions acceptVersions)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -313,7 +309,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withFrom(InetAddressAndPort from)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -322,7 +318,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withSocketFactory(SocketFactory socketFactory)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -331,7 +327,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withCallbacks(OutboundMessageCallbacks callbacks)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -340,7 +336,7 @@ public class OutboundConnectionSettings
 
     public OutboundConnectionSettings withDebugCallbacks(OutboundDebugCallbacks debug)
     {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, coalescingStrategy,
+        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
                                               socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
@@ -397,11 +393,6 @@ public class OutboundConnectionSettings
         return callbacks != null ? callbacks : instance().callbacks;
     }
 
-    public CoalescingStrategy coalescingStrategy(ConnectionType type)
-    {
-        return coalescingStrategy != null ? coalescingStrategy : defaultCoalescingStrategy(to, type);
-    }
-
     public int socketSendBufferSizeInBytes()
     {
         return socketSendBufferSizeInBytes != null ? socketSendBufferSizeInBytes
@@ -449,29 +440,33 @@ public class OutboundConnectionSettings
         return DatabaseDescriptor.getInterDCTcpNoDelay();
     }
 
-    public AcceptVersions acceptVersions(ConnectionType type)
+    public AcceptVersions acceptVersions(ConnectionCategory category)
     {
         return acceptVersions != null ? acceptVersions
-                                      : type.isMessaging()
-                                        ? MessagingService.accept_messaging
-                                        : MessagingService.accept_streaming;
+                                      : category.isStreaming()
+                                        ? MessagingService.accept_streaming
+                                        : MessagingService.accept_messaging;
     }
 
-    public InetAddressAndPort connectTo(int messagingVersion)
+    public OutboundConnectionSettings withLegacyPortIfNecessary(int messagingVersion)
+    {
+        return withConnectTo(maybeWithSecurePort(connectTo(), messagingVersion, withEncryption()));
+    }
+
+    public InetAddressAndPort connectTo()
     {
         InetAddressAndPort connectTo = this.connectTo;
         if (connectTo == null)
             connectTo = SystemKeyspace.getPreferredIP(to);
-        connectTo = maybeWithSecurePort(connectTo, messagingVersion, withEncryption());
         return connectTo;
     }
 
-    public Framing framing(ConnectionType type)
+    public Framing framing(ConnectionCategory category)
     {
         if (framing != null)
             return framing;
 
-        if (type.isStreaming())
+        if (category.isStreaming())
             return Framing.UNPROTECTED;
 
         return shouldCompressConnection(getEndpointSnitch(), getBroadcastAddressAndPort(), to)
@@ -479,18 +474,18 @@ public class OutboundConnectionSettings
     }
 
     // note that connectTo is updated even if specified, in the case of pre40 messaging and using encryption (to update port)
-    public OutboundConnectionSettings withDefaults(ConnectionType type, int messagingVersion)
+    public OutboundConnectionSettings withDefaults(ConnectionCategory category)
     {
         if (to == null)
             throw new IllegalArgumentException();
 
-        return new OutboundConnectionSettings(authenticator(), to, connectTo(messagingVersion),
-                                              encryption(), framing(type), coalescingStrategy(type),
+        return new OutboundConnectionSettings(authenticator(), to, connectTo(),
+                                              encryption(), framing(category),
                                               socketSendBufferSizeInBytes(), applicationSendQueueCapacityInBytes(),
                                               applicationReserveSendQueueEndpointCapacityInBytes(),
                                               applicationReserveSendQueueGlobalCapacityInBytes(),
                                               tcpNoDelay(), flushLowWaterMark, flushHighWaterMark,
-                                              tcpConnectTimeoutInMS(), tcpUserTimeoutInMS(), acceptVersions(type),
+                                              tcpConnectTimeoutInMS(), tcpUserTimeoutInMS(), acceptVersions(category),
                                               from(), socketFactory(), callbacks(), debug(), endpointToVersion());
     }
 

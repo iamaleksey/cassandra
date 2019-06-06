@@ -23,6 +23,7 @@ import java.net.UnknownHostException;
 import com.google.common.annotations.VisibleForTesting;
 
 import org.apache.cassandra.gms.*;
+import org.apache.cassandra.net.ConnectionCategory;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.OutboundConnectionSettings;
 
@@ -65,8 +66,7 @@ public class ReconnectableSnitchHelper implements IEndpointStateChangeSubscriber
     @VisibleForTesting
     static void reconnect(InetAddressAndPort publicAddress, InetAddressAndPort localAddress, IEndpointSnitch snitch, String localDc)
     {
-        int version = MessagingService.instance().versions.get(publicAddress);
-        if (!new OutboundConnectionSettings(publicAddress, localAddress).withDefaults(SMALL_MESSAGES, version).authenticate())
+        if (!new OutboundConnectionSettings(publicAddress, localAddress).withDefaults(ConnectionCategory.MESSAGING).authenticate())
         {
             logger.debug("InternodeAuthenticator said don't reconnect to {} on {}", publicAddress, localAddress);
             return;

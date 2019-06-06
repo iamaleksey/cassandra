@@ -74,7 +74,6 @@ import static org.apache.cassandra.net.Verifier.ExpiredMessageEvent.ExpirationTy
  * TODO: periodically stop all activity to/from a given endpoint, until it stops (and verify queues all empty, counters all accurate)
  * TODO: integrate with proxy that corrupts frames
  * TODO: test _OutboundConnection_ close
- * TODO: verify that we do not process very expired messages
  */
 @SuppressWarnings("WeakerAccess")
 public class Verifier
@@ -445,6 +444,12 @@ public class Verifier
     private void fail(String message, Object ... params)
     {
         logger.error("{}", String.format(message, params));
+        logger.error("Connection: {}", currentConnection);
+    }
+
+    private void fail(String message, Throwable t, Object ... params)
+    {
+        logger.error("{}", String.format(message, params), t);
         logger.error("Connection: {}", currentConnection);
     }
 

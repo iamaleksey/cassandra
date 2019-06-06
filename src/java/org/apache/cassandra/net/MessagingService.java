@@ -544,7 +544,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     {
         OutboundConnections connections = channelManagers.get(to);
         if (connections == null)
-            connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to), backPressure.newState(to));
+            connections = OutboundConnections.tryRegister(channelManagers, to, new OutboundConnectionSettings(to).withDefaults(ConnectionCategory.MESSAGING), backPressure.newState(to));
         return connections;
     }
 

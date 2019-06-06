@@ -78,7 +78,7 @@ public class OutboundConnectionSettingsTest
 
     private static void test(Function<OutboundConnectionSettings, OutboundConnectionSettings> f)
     {
-        f.apply(new OutboundConnectionSettings(LOCAL_ADDR)).withDefaults(SMALL_MESSAGES, current_version);
+        f.apply(new OutboundConnectionSettings(LOCAL_ADDR)).withDefaults(ConnectionCategory.MESSAGING);
     }
 
     private static class TestSnitch extends AbstractEndpointSnitch

@@ -25,12 +25,12 @@ import com.google.common.annotations.VisibleForTesting;
 import io.netty.channel.Channel;
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
+import org.apache.cassandra.net.ConnectionCategory;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.StreamingSuccess;
 import org.apache.cassandra.net.OutboundConnectionSettings;
 
-import static org.apache.cassandra.net.ConnectionType.*;
 import static org.apache.cassandra.net.OutboundConnectionInitiator.initiateStreaming;
 
 public class DefaultConnectionFactory implements StreamConnectionFactory
@@ -46,7 +46,7 @@ public class DefaultConnectionFactory implements StreamConnectionFactory
         int attempts = 0;
         while (true)
         {
-            Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, template.withDefaults(STREAMING, messagingVersion), messagingVersion);
+            Future<Result<StreamingSuccess>> result = initiateStreaming(eventLoop, template.withDefaults(ConnectionCategory.STREAMING), messagingVersion);
             result.awaitUninterruptibly(); // initiate has its own timeout, so this is "guaranteed" to return relatively promptly
             if (result.isSuccess())
                 return result.getNow().success().channel;

@@ -19,7 +19,6 @@
 package org.apache.cassandra.net;
 
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -47,7 +46,6 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.sun.management.HotSpotDiagnosticMXBean;
 import io.netty.channel.Channel;
 import net.openhft.chronicle.core.util.ThrowingBiConsumer;
 import net.openhft.chronicle.core.util.ThrowingRunnable;
@@ -355,7 +353,7 @@ public class ConnectionBurnTest
                         OutboundConnectionSettings template = connection.outboundTemplate;
                         template = ConnectionTest.SETTINGS.get(random.nextInt(ConnectionTest.SETTINGS.size()))
                                    .outbound.apply(template);
-                        connection.reconnect(template);
+                        connection.reconnectWith(template);
                     }
                 });
 
@@ -543,7 +541,7 @@ public class ConnectionBurnTest
 
         public void fail(Message.Header header, Throwable failure)
         {
-            // TODO: verify this
+            forId(header.id).verifier.logFailure("Unexpected failure", failure);
         }
 
         public void accept(Message<?> message)

@@ -248,7 +248,8 @@ public class ConnectionTest
         InboundSockets inbound = new InboundSockets(Collections.singletonList(inboundSettings));
         OutboundConnectionSettings outboundTemplate = settings.outbound.apply(new OutboundConnectionSettings(endpoint))
                                                                        .withDefaultReserveLimits()
-                                                                       .withSocketFactory(factory);
+                                                                       .withSocketFactory(factory)
+                                                                       .withDefaults(ConnectionCategory.MESSAGING);
         ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundTemplate.applicationReserveSendQueueEndpointCapacityInBytes), outboundTemplate.applicationReserveSendQueueGlobalCapacityInBytes);
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundTemplate, reserveCapacityInBytes);
         try

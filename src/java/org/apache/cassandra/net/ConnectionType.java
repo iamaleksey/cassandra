@@ -55,6 +55,11 @@ public enum ConnectionType
         return !isStreaming();
     }
 
+    public ConnectionCategory category()
+    {
+        return this == STREAMING ? ConnectionCategory.STREAMING : ConnectionCategory.MESSAGING;
+    }
+
     private static final ConnectionType[] values = values();
 
     public static ConnectionType fromId(int id)

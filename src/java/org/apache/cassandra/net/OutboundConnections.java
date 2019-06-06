@@ -80,17 +80,17 @@ public class OutboundConnections
         connectionFor(msg, type).enqueue(msg);
     }
 
-    static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings template, BackPressureState backPressureState)
+    static <K> OutboundConnections tryRegister(ConcurrentMap<K, OutboundConnections> in, K key, OutboundConnectionSettings settings, BackPressureState backPressureState)
     {
         OutboundConnections connections = in.get(key);
         if (connections == null)
         {
-            connections = new OutboundConnections(template, backPressureState);
+            connections = new OutboundConnections(settings, backPressureState);
             OutboundConnections existing = in.putIfAbsent(key, connections);
 
             if (existing == null)
             {
-                connections.metrics = new InternodeOutboundMetrics(template.to, connections);
+                connections.metrics = new InternodeOutboundMetrics(settings.to, connections);
                 connections.metricsReady.signalAll();
             }
             else
@@ -119,7 +119,7 @@ public class OutboundConnections
     {
         template = template.withConnectTo(addr);
         return new FutureCombiner(
-            apply(c -> c.reconnectWithNewTemplate(template))
+            apply(c -> c.reconnectWith(template))
         );
     }
 

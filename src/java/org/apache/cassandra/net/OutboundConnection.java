@@ -155,8 +155,8 @@ public class OutboundConnection
     private final ConnectionType type;
 
     /**
-     * Contains the user-specified properties for the connection, with defaults filled in at connection time.
-     * New templates may be provided by external calls, at which point we will disconnect reconnect to enact any modifications.
+     * Contains the base settings for this connection, _including_ any defaults filled in.
+     *
      */
     private OutboundConnectionSettings template;
 
@@ -285,19 +285,18 @@ public class OutboundConnection
     /** The connection is being permanently closed in the near future */
     private volatile Future<Void> scheduledClose;
 
-    OutboundConnection(ConnectionType type, OutboundConnectionSettings template, EndpointAndGlobal reserveCapacityInBytes)
+    OutboundConnection(ConnectionType type, OutboundConnectionSettings settings, EndpointAndGlobal reserveCapacityInBytes)
     {
-        this.template = template;
-        OutboundConnectionSettings settings = template.withDefaults(type, template.endpointToVersion().get(template.to));
+        this.template = settings.withDefaults(ConnectionCategory.MESSAGING);
         this.type = type;
-        this.eventLoop = settings.socketFactory.defaultGroup().next();
-        this.pendingCapacityInBytes = settings.applicationSendQueueCapacityInBytes;
+        this.eventLoop = template.socketFactory.defaultGroup().next();
+        this.pendingCapacityInBytes = template.applicationSendQueueCapacityInBytes;
         this.reserveCapacityInBytes = reserveCapacityInBytes;
-        this.callbacks = settings.callbacks;
-        this.debug = settings.debug;
+        this.callbacks = template.callbacks;
+        this.debug = template.debug;
         this.queue = new OutboundMessageQueue(this::onExpired);
         this.delivery = type == ConnectionType.LARGE_MESSAGES
-                        ? new LargeMessageDelivery(settings.socketFactory.synchronousWorkExecutor)
+                        ? new LargeMessageDelivery(template.socketFactory.synchronousWorkExecutor)
                         : new EventLoopDelivery();
         setDisconnected();
     }
@@ -1102,17 +1101,7 @@ public class OutboundConnection
                         assert !state.isClosed();
 
                         MessagingSuccess success = result.success();
-                        if (messagingVersion != success.messagingVersion)
-                        {
-                            // TODO: is this incorrect, since we've already connected? we shouldn't be updating our settings after successfully negotiating
-                            //       for instance, should we ensure all connection-modifying parameters are consistent between versions
-                            //       e.g. crc becomes crc-if-greatereq-40
-                            // TODO: test case for this scenario - sending incompatible options for negotiated version
-                            settings = template.withDefaults(type, messagingVersion);
-                            messagingVersion = success.messagingVersion;
-                        }
-                        debug.onConnect(messagingVersion, settings);
-
+                        debug.onConnect(success.messagingVersion, settings);
                         state.disconnected().maintenance.cancel(false);
 
                         FrameEncoder.PayloadAllocator payloadAllocator = success.allocator;
@@ -1144,7 +1133,7 @@ public class OutboundConnection
 
                         logger.info("{} successfully connected, version = {}, framing = {}, encryption = {}",
                                     id(true),
-                                    messagingVersion,
+                                    success.messagingVersion,
                                     settings.framing,
                                     encryptionLogStatement(settings.encryption));
                         break;
@@ -1185,14 +1174,12 @@ public class OutboundConnection
             {
                 ++connectionAttempts;
 
-                settings = template.withDefaults(type, messagingVersion);
+                settings = template;
                 if (messagingVersion > settings.acceptVersions.max)
-                {
                     messagingVersion = settings.acceptVersions.max;
-                    settings = template.withDefaults(type, messagingVersion);
-                    assert messagingVersion <= settings.acceptVersions.max;
-                }
 
+                // ensure we connect to the correct SSL port
+                settings = settings.withLegacyPortIfNecessary(messagingVersion);
 
                 initiateMessaging(eventLoop, type, settings, messagingVersion, result)
                 .addListener(future -> {
@@ -1272,8 +1259,9 @@ public class OutboundConnection
      *
      * Returns null if the connection is closed.
      */
-    Future<Void> reconnectWithNewTemplate(OutboundConnectionSettings newTemplate)
+    Future<Void> reconnectWith(OutboundConnectionSettings reconnectWith)
     {
+        OutboundConnectionSettings newTemplate = reconnectWith.withDefaults(ConnectionCategory.MESSAGING);
         if (newTemplate.socketFactory != template.socketFactory) throw new IllegalArgumentException();
         if (newTemplate.callbacks != template.callbacks) throw new IllegalArgumentException();
         if (!Objects.equals(newTemplate.applicationSendQueueCapacityInBytes, template.applicationSendQueueCapacityInBytes)) throw new IllegalArgumentException();
@@ -1691,8 +1679,7 @@ public class OutboundConnection
     OutboundConnectionSettings settings()
     {
         State state = this.state;
-        return state.isEstablished() ? state.established().settings
-                                     : template.withDefaults(type, template.endpointToVersion().get(template.to));
+        return state.isEstablished() ? state.established().settings : template;
     }
 
     @VisibleForTesting

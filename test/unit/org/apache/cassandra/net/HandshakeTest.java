@@ -32,14 +32,8 @@ import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.net.AcceptVersions;
-import org.apache.cassandra.net.AsyncPromise;
-import org.apache.cassandra.net.InboundConnectionSettings;
-import org.apache.cassandra.net.InboundSockets;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
-import org.apache.cassandra.net.OutboundConnectionSettings;
-import org.apache.cassandra.net.SocketFactory;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
@@ -86,7 +80,7 @@ public class HandshakeTest
                               SMALL_MESSAGES,
                               new OutboundConnectionSettings(endpoint)
                                                     .withAcceptVersions(acceptOutbound)
-                                                    .withDefaults(SMALL_MESSAGES, req),
+                                                    .withDefaults(ConnectionCategory.MESSAGING),
                               req, new AsyncPromise<>(eventLoop));
             return future.get();
         }
