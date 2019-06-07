@@ -30,8 +30,6 @@ import org.apache.cassandra.config.EncryptionOptions.ServerEncryptionOptions;
 import org.apache.cassandra.db.SystemKeyspace;
 import org.apache.cassandra.locator.IEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.utils.CoalescingStrategies;
-import org.apache.cassandra.utils.CoalescingStrategies.CoalescingStrategy;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.config.DatabaseDescriptor.getEndpointSnitch;
@@ -218,15 +216,6 @@ public class OutboundConnectionSettings
     public OutboundConnectionSettings withFraming(Framing framing)
     {
         return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing, socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
-                                              applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
-                                              tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
-                                              tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
-    }
-
-    public OutboundConnectionSettings withCoalescingStrategy(CoalescingStrategy coalescingStrategy)
-    {
-        return new OutboundConnectionSettings(authenticator, to, connectTo, encryption, framing,
-                                              socketSendBufferSizeInBytes, applicationSendQueueCapacityInBytes,
                                               applicationReserveSendQueueEndpointCapacityInBytes, applicationReserveSendQueueGlobalCapacityInBytes,
                                               tcpNoDelay, flushLowWaterMark, flushHighWaterMark, tcpConnectTimeoutInMS,
                                               tcpUserTimeoutInMS, acceptVersions, from, socketFactory, callbacks, debug, endpointToVersion);
@@ -508,24 +497,6 @@ public class OutboundConnectionSettings
     {
         return (DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.all)
                || ((DatabaseDescriptor.internodeCompression() == Config.InternodeCompression.dc) && !isInLocalDC(snitch, localHost, remoteHost));
-    }
-
-    private static CoalescingStrategy defaultCoalescingStrategy(InetAddressAndPort remote, ConnectionType type)
-    {
-        // potentially harmful to coalesce gossip
-        if (type == ConnectionType.URGENT_MESSAGES)
-            return null;
-        // no point coalescing large messages
-        if (type == ConnectionType.LARGE_MESSAGES)
-            return null;
-
-        String strategyName = DatabaseDescriptor.getOtcCoalescingStrategy();
-        String displayName = remote.toString();
-        return CoalescingStrategies.newCoalescingStrategy(strategyName,
-                                                          DatabaseDescriptor.getOtcCoalescingWindow(),
-                                                          OutboundConnection.logger,
-                                                          displayName);
-
     }
 
     private static InetAddressAndPort maybeWithSecurePort(InetAddressAndPort address, int messagingVersion, boolean isEncrypted)

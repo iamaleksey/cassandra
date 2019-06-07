@@ -2563,31 +2563,6 @@ public class DatabaseDescriptor
         return conf.tracetype_query_ttl;
     }
 
-    public static String getOtcCoalescingStrategy()
-    {
-        return conf.otc_coalescing_strategy;
-    }
-
-    public static void setOtcCoalescingStrategy(String strategy)
-    {
-        conf.otc_coalescing_strategy = strategy;
-    }
-
-    public static int getOtcCoalescingWindow()
-    {
-        return conf.otc_coalescing_window_us;
-    }
-
-    public static int getOtcCoalescingEnoughCoalescedMessages()
-    {
-        return conf.otc_coalescing_enough_coalesced_messages;
-    }
-
-    public static void setOtcCoalescingEnoughCoalescedMessages(int otc_coalescing_enough_coalesced_messages)
-    {
-        conf.otc_coalescing_enough_coalesced_messages = otc_coalescing_enough_coalesced_messages;
-    }
-
     public static int getWindowsTimerInterval()
     {
         return conf.windows_timer_interval;
