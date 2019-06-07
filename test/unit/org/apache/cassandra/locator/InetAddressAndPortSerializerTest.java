@@ -26,6 +26,7 @@ import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.net.MessagingService;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 import static org.junit.Assert.assertEquals;
 
 public class InetAddressAndPortSerializerTest
@@ -47,15 +48,15 @@ public class InetAddressAndPortSerializerTest
         ByteBuffer out;
         try (DataOutputBuffer dob = new DataOutputBuffer())
         {
-            InetAddressAndPort.serializer.serialize(address, dob, version);
+            inetAddressAndPortSerializer.serialize(address, dob, version);
             out = dob.buffer();
         }
-        assertEquals(out.remaining(), InetAddressAndPort.serializer.serializedSize(address, version));
+        assertEquals(out.remaining(), inetAddressAndPortSerializer.serializedSize(address, version));
 
         InetAddressAndPort roundtripped;
         try (DataInputBuffer dib = new DataInputBuffer(out, false))
         {
-            roundtripped = InetAddressAndPort.serializer.deserialize(dib, version);
+            roundtripped = inetAddressAndPortSerializer.deserialize(dib, version);
         }
 
         if (version >= MessagingService.VERSION_40)

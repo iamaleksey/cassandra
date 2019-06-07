@@ -27,6 +27,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.UUIDSerializer;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+
 public class PrepareConsistentResponse extends RepairMessage
 {
     public final UUID parentSession;
@@ -68,21 +70,21 @@ public class PrepareConsistentResponse extends RepairMessage
         public void serialize(PrepareConsistentResponse response, DataOutputPlus out, int version) throws IOException
         {
             UUIDSerializer.serializer.serialize(response.parentSession, out, version);
-            InetAddressAndPort.serializer.serialize(response.participant, out, version);
+            inetAddressAndPortSerializer.serialize(response.participant, out, version);
             out.writeBoolean(response.success);
         }
 
         public PrepareConsistentResponse deserialize(DataInputPlus in, int version) throws IOException
         {
             return new PrepareConsistentResponse(UUIDSerializer.serializer.deserialize(in, version),
-                                                 InetAddressAndPort.serializer.deserialize(in, version),
+                                                 inetAddressAndPortSerializer.deserialize(in, version),
                                                  in.readBoolean());
         }
 
         public long serializedSize(PrepareConsistentResponse response, int version)
         {
             long size = UUIDSerializer.serializer.serializedSize(response.parentSession, version);
-            size += InetAddressAndPort.serializer.serializedSize(response.participant, version);
+            size += inetAddressAndPortSerializer.serializedSize(response.participant, version);
             size += TypeSizes.sizeof(response.success);
             return size;
         }

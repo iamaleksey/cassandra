@@ -48,6 +48,7 @@ import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.db.TypeSizes.sizeofUnsignedVInt;
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
@@ -819,7 +820,7 @@ public class Message<T>
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
             out.writeInt((int) ApproximateTime.toCurrentTimeMillis(header.createdAtNanos));
-            InetAddressAndPort.serializer.serialize(header.from, out, version);
+            inetAddressAndPortSerializer.serialize(header.from, out, version);
             out.writeInt(header.verb.toPre40Verb().id);
             serializeParams(addFlagsToLegacyParams(header.params, header.flags), out, version);
         }
@@ -831,7 +832,7 @@ public class Message<T>
             long currentTimeNanos = ApproximateTime.nanoTime();
             AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
             long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
-            InetAddressAndPort from = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort from = inetAddressAndPortSerializer.deserialize(in, version);
             Verb verb = Verb.fromId(in.readInt());
             Map<ParamType, Object> params = deserializeParams(in, version);
             int flags = removeFlagsFromLegacyParams(params);
@@ -852,7 +853,7 @@ public class Message<T>
         {
             long size = 0;
             size += PRE_40_MESSAGE_PREFIX_SIZE;
-            size += InetAddressAndPort.serializer.serializedSize(header.from, version);
+            size += inetAddressAndPortSerializer.serializedSize(header.from, version);
             size += sizeof(header.verb.id);
             size += serializedParamsSize(addFlagsToLegacyParams(header.params, header.flags), version);
             return Ints.checkedCast(size);
@@ -872,7 +873,7 @@ public class Message<T>
             int createdAtMillis = buf.getInt(index);
             index += 4;
 
-            InetAddressAndPort from = InetAddressAndPort.serializer.extract(buf, index);
+            InetAddressAndPort from = inetAddressAndPortSerializer.extract(buf, index);
             index += 1 + buf.get(index);
 
             Verb verb = Verb.fromId(buf.getInt(index));

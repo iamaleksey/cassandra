@@ -34,6 +34,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+
 public class StreamRequest
 {
     public static final IVersionedSerializer<StreamRequest> serializer = new StreamRequestSerializer();
@@ -66,7 +68,7 @@ public class StreamRequest
             out.writeUTF(request.keyspace);
             out.writeInt(request.columnFamilies.size());
 
-            InetAddressAndPort.serializer.serialize(request.full.endpoint(), out, version);
+            inetAddressAndPortSerializer.serialize(request.full.endpoint(), out, version);
             serializeReplicas(request.full, out, version);
             serializeReplicas(request.transientReplicas, out, version);
             for (String cf : request.columnFamilies)
@@ -89,7 +91,7 @@ public class StreamRequest
         {
             String keyspace = in.readUTF();
             int cfCount = in.readInt();
-            InetAddressAndPort endpoint = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort endpoint = inetAddressAndPortSerializer.deserialize(in, version);
 
             RangesAtEndpoint full = deserializeReplicas(in, version, endpoint, true);
             RangesAtEndpoint transientReplicas = deserializeReplicas(in, version, endpoint, false);
@@ -120,7 +122,7 @@ public class StreamRequest
         {
             int size = TypeSizes.sizeof(request.keyspace);
             size += TypeSizes.sizeof(request.columnFamilies.size());
-            size += InetAddressAndPort.serializer.serializedSize(request.full.endpoint(), version);
+            size += inetAddressAndPortSerializer.serializedSize(request.full.endpoint(), version);
             size += replicasSerializedSize(request.transientReplicas, version);
             size += replicasSerializedSize(request.full, version);
             for (String cf : request.columnFamilies)

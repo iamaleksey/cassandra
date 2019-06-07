@@ -29,6 +29,7 @@ import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.UUIDSerializer;
 
 import static java.lang.Math.max;
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 
 /**
  * Type names and serializers for various parameters that can be put in {@link Message} params map.
@@ -41,7 +42,7 @@ import static java.lang.Math.max;
 public enum ParamType
 {
     FORWARD_TO          (0, "FORWARD_TO",    ForwardingInfo.serializer),
-    RESPOND_TO          (1, "FORWARD_FROM",  InetAddressAndPort.serializer),
+    RESPOND_TO          (1, "FORWARD_FROM",  inetAddressAndPortSerializer),
 
     @Deprecated
     FAILURE_RESPONSE    (2, "FAIL",          LegacyFlag.serializer),

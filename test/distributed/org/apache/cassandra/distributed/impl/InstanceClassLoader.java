@@ -20,6 +20,8 @@ package org.apache.cassandra.distributed.impl;
 
 import com.google.common.base.Predicate;
 import org.apache.cassandra.config.ParameterizedClass;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.io.util.Memory;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.Pair;
 

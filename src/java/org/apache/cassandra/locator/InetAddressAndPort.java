@@ -52,8 +52,6 @@ import org.apache.cassandra.utils.FastByteOperations;
 @SuppressWarnings("UnstableApiUsage")
 public final class InetAddressAndPort implements Comparable<InetAddressAndPort>, Serializable
 {
-    public static final Serializer serializer = new Serializer();
-
     private static final long serialVersionUID = 0;
 
     //Store these here to avoid requiring DatabaseDescriptor to be loaded. DatabaseDescriptor will set
@@ -232,6 +230,12 @@ public final class InetAddressAndPort implements Comparable<InetAddressAndPort>,
     public static final class Serializer implements IVersionedSerializer<InetAddressAndPort>
     {
         public static final int MAXIMUM_SIZE = 19;
+
+        // We put the static instance here, to avoid complexity with dtests.
+        // InetAddressAndPort is one of the only classes we share between instances, which is possible cleanly
+        // because it has no type-dependencies in its public API, however Serializer requires DataOutputPlus, which requires...
+        // and the chain becomes quite unwieldy
+        public static final Serializer inetAddressAndPortSerializer = new Serializer();
 
         private Serializer() {}
 

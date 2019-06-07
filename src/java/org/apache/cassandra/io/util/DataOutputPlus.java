@@ -20,7 +20,6 @@ package org.apache.cassandra.io.util;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.channels.WritableByteChannel;
 
 import org.apache.cassandra.utils.vint.VIntCoding;
 

@@ -34,6 +34,8 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.RepairJobDesc;
 import org.apache.cassandra.streaming.PreviewKind;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+
 public class AsymmetricSyncRequest extends RepairMessage
 {
     public static MessageSerializer serializer = new SyncRequestSerializer();
@@ -79,9 +81,9 @@ public class AsymmetricSyncRequest extends RepairMessage
         public void serialize(AsymmetricSyncRequest message, DataOutputPlus out, int version) throws IOException
         {
             RepairJobDesc.serializer.serialize(message.desc, out, version);
-            InetAddressAndPort.serializer.serialize(message.initiator, out, version);
-            InetAddressAndPort.serializer.serialize(message.fetchingNode, out, version);
-            InetAddressAndPort.serializer.serialize(message.fetchFrom, out, version);
+            inetAddressAndPortSerializer.serialize(message.initiator, out, version);
+            inetAddressAndPortSerializer.serialize(message.fetchingNode, out, version);
+            inetAddressAndPortSerializer.serialize(message.fetchFrom, out, version);
             out.writeInt(message.ranges.size());
             for (Range<Token> range : message.ranges)
             {
@@ -94,9 +96,9 @@ public class AsymmetricSyncRequest extends RepairMessage
         public AsymmetricSyncRequest deserialize(DataInputPlus in, int version) throws IOException
         {
             RepairJobDesc desc = RepairJobDesc.serializer.deserialize(in, version);
-            InetAddressAndPort owner = InetAddressAndPort.serializer.deserialize(in, version);
-            InetAddressAndPort src = InetAddressAndPort.serializer.deserialize(in, version);
-            InetAddressAndPort dst = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort owner = inetAddressAndPortSerializer.deserialize(in, version);
+            InetAddressAndPort src = inetAddressAndPortSerializer.deserialize(in, version);
+            InetAddressAndPort dst = inetAddressAndPortSerializer.deserialize(in, version);
             int rangesCount = in.readInt();
             List<Range<Token>> ranges = new ArrayList<>(rangesCount);
             for (int i = 0; i < rangesCount; ++i)
@@ -108,9 +110,9 @@ public class AsymmetricSyncRequest extends RepairMessage
         public long serializedSize(AsymmetricSyncRequest message, int version)
         {
             long size = RepairJobDesc.serializer.serializedSize(message.desc, version);
-            size += InetAddressAndPort.serializer.serializedSize(message.initiator, version);
-            size += InetAddressAndPort.serializer.serializedSize(message.fetchingNode, version);
-            size += InetAddressAndPort.serializer.serializedSize(message.fetchFrom, version);
+            size += inetAddressAndPortSerializer.serializedSize(message.initiator, version);
+            size += inetAddressAndPortSerializer.serializedSize(message.fetchingNode, version);
+            size += inetAddressAndPortSerializer.serializedSize(message.fetchFrom, version);
             size += TypeSizes.sizeof(message.ranges.size());
             for (Range<Token> range : message.ranges)
                 size += AbstractBounds.tokenSerializer.serializedSize(range, version);

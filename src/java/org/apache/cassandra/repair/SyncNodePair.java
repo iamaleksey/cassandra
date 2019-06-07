@@ -26,6 +26,8 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+
 /**
  * SyncNodePair is used for repair message body to indicate the pair of nodes.
  *
@@ -70,21 +72,21 @@ public class SyncNodePair
     {
         public void serialize(SyncNodePair nodePair, DataOutputPlus out, int version) throws IOException
         {
-            InetAddressAndPort.serializer.serialize(nodePair.coordinator, out, version);
-            InetAddressAndPort.serializer.serialize(nodePair.peer, out, version);
+            inetAddressAndPortSerializer.serialize(nodePair.coordinator, out, version);
+            inetAddressAndPortSerializer.serialize(nodePair.peer, out, version);
         }
 
         public SyncNodePair deserialize(DataInputPlus in, int version) throws IOException
         {
-            InetAddressAndPort ep1 = InetAddressAndPort.serializer.deserialize(in, version);
-            InetAddressAndPort ep2 = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort ep1 = inetAddressAndPortSerializer.deserialize(in, version);
+            InetAddressAndPort ep2 = inetAddressAndPortSerializer.deserialize(in, version);
             return new SyncNodePair(ep1, ep2);
         }
 
         public long serializedSize(SyncNodePair nodePair, int version)
         {
-            return InetAddressAndPort.serializer.serializedSize(nodePair.coordinator, version)
-                   + InetAddressAndPort.serializer.serializedSize(nodePair.peer, version);
+            return inetAddressAndPortSerializer.serializedSize(nodePair.coordinator, version)
+                   + inetAddressAndPortSerializer.serializedSize(nodePair.peer, version);
         }
     }
 }

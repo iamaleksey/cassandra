@@ -35,6 +35,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.Message.validateLegacyProtocolMagic;
@@ -142,7 +143,7 @@ class HandshakeProtocol
 
                 if (requestMessagingVersion >= VERSION_40 && acceptVersions.max >= VERSION_40)
                 {
-                    InetAddressAndPort.serializer.serialize(from, out, requestMessagingVersion);
+                    inetAddressAndPortSerializer.serialize(from, out, requestMessagingVersion);
                     out.writeInt(computeCrc32(buffer, 0, buffer.position()));
                 }
                 buffer.flip();
@@ -182,7 +183,7 @@ class HandshakeProtocol
 
                 if (requestedMessagingVersion >= VERSION_40 && maxMessagingVersion >= MessagingService.VERSION_40)
                 {
-                    from = InetAddressAndPort.serializer.deserialize(in, requestedMessagingVersion);
+                    from = inetAddressAndPortSerializer.deserialize(in, requestedMessagingVersion);
 
                     int computed = computeCrc32(nio, start, nio.position());
                     int read = in.readInt();
@@ -351,7 +352,7 @@ class HandshakeProtocol
             {
                 out.writeInt(maxMessagingVersion);
                 // pre-4.0 nodes should only receive the address, never port, and it's ok to hardcode VERSION_30
-                InetAddressAndPort.serializer.serialize(from, out, VERSION_30);
+                inetAddressAndPortSerializer.serialize(from, out, VERSION_30);
                 buffer.flip();
                 return GlobalBufferPoolAllocator.wrap(buffer);
             }
@@ -370,7 +371,7 @@ class HandshakeProtocol
             try
             {
                 int version = input.readInt();
-                InetAddressAndPort address = InetAddressAndPort.serializer.deserialize(input, version);
+                InetAddressAndPort address = inetAddressAndPortSerializer.deserialize(input, version);
                 in.skipBytes(nio.position() - start);
                 return new ConfirmOutboundPre40(version, address);
             }

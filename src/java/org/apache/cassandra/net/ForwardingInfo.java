@@ -32,6 +32,7 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
 
@@ -94,7 +95,7 @@ public final class ForwardingInfo implements Serializable
 
             for (int i = 0; i < count; i++)
             {
-                InetAddressAndPort.serializer.serialize(targets.get(i), out, version);
+                inetAddressAndPortSerializer.serialize(targets.get(i), out, version);
                 if (version >= VERSION_40)
                     out.writeUnsignedVInt(ids[i]);
                 else
@@ -112,7 +113,7 @@ public final class ForwardingInfo implements Serializable
 
             for (int i = 0; i < count; i++)
             {
-                size += InetAddressAndPort.serializer.serializedSize(targets.get(i), version);
+                size += inetAddressAndPortSerializer.serializedSize(targets.get(i), version);
                 size += version >= VERSION_40 ? computeUnsignedVIntSize(ids[i]) : 4;
             }
 
@@ -128,7 +129,7 @@ public final class ForwardingInfo implements Serializable
 
             for (int i = 0; i < count; i++)
             {
-                targets.add(InetAddressAndPort.serializer.deserialize(in, version));
+                targets.add(inetAddressAndPortSerializer.deserialize(in, version));
                 ids[i] = version >= VERSION_40 ? Ints.checkedCast(in.readUnsignedVInt()) : in.readInt();
             }
 

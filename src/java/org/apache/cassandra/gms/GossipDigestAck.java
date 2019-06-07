@@ -28,6 +28,8 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 
+import static org.apache.cassandra.locator.InetAddressAndPort.Serializer.inetAddressAndPortSerializer;
+
 /**
  * This ack gets sent out as a result of the receipt of a GossipDigestSynMessage by an
  * endpoint. This is the 2 stage of the 3 way messaging in the Gossip protocol.
@@ -65,7 +67,7 @@ class GossipDigestAckSerializer implements IVersionedSerializer<GossipDigestAck>
         for (Map.Entry<InetAddressAndPort, EndpointState> entry : gDigestAckMessage.epStateMap.entrySet())
         {
             InetAddressAndPort ep = entry.getKey();
-            InetAddressAndPort.serializer.serialize(ep, out, version);
+            inetAddressAndPortSerializer.serialize(ep, out, version);
             EndpointState.serializer.serialize(entry.getValue(), out, version);
         }
     }
@@ -78,7 +80,7 @@ class GossipDigestAckSerializer implements IVersionedSerializer<GossipDigestAck>
 
         for (int i = 0; i < size; ++i)
         {
-            InetAddressAndPort ep = InetAddressAndPort.serializer.deserialize(in, version);
+            InetAddressAndPort ep = inetAddressAndPortSerializer.deserialize(in, version);
             EndpointState epState = EndpointState.serializer.deserialize(in, version);
             epStateMap.put(ep, epState);
         }
@@ -90,7 +92,7 @@ class GossipDigestAckSerializer implements IVersionedSerializer<GossipDigestAck>
         int size = GossipDigestSerializationHelper.serializedSize(ack.gDigestList, version);
         size += TypeSizes.sizeof(ack.epStateMap.size());
         for (Map.Entry<InetAddressAndPort, EndpointState> entry : ack.epStateMap.entrySet())
-            size += InetAddressAndPort.serializer.serializedSize(entry.getKey(), version)
+            size += inetAddressAndPortSerializer.serializedSize(entry.getKey(), version)
                     + EndpointState.serializer.serializedSize(entry.getValue(), version);
         return size;
     }
