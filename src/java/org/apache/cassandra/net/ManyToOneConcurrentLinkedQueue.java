@@ -17,7 +17,10 @@
  */
 package org.apache.cassandra.net;
 
+import java.util.Collection;
+import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.Queue;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 import java.util.function.Consumer;
 
@@ -34,7 +37,7 @@ import java.util.function.Consumer;
  * In addition to that, provides a {@link #relaxedPeekLastAndOffer(Object)} method that we use to avoid a CAS when
  * putting message handlers onto the wait queue.
  */
-class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHead<E>
+class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHead<E> implements Queue<E>
 {
     @SuppressWarnings("unused") // pad two cache lines after the head to prevent false sharing
     protected long p31, p32, p33, p34, p35, p36, p37, p38, p39, p40, p41, p42, p43, p44, p45;
@@ -42,6 +45,15 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
     ManyToOneConcurrentLinkedQueue()
     {
         head = tail = new Node<>(null);
+    }
+
+    /**
+     * See {@link #relaxedIsEmpty()}.
+     */
+    @Override
+    public boolean isEmpty()
+    {
+        return relaxedIsEmpty();
     }
 
     /**
@@ -56,7 +68,18 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         return null == head.next;
     }
 
-    E peek()
+    @Override
+    public int size()
+    {
+        int size = 0;
+        Node<E> next = head;
+        while (null != (next = next.next))
+            size++;
+        return size;
+    }
+
+    @Override
+    public E peek()
     {
         Node<E> next = head.next;
         if (null == next)
@@ -64,7 +87,17 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         return next.item;
     }
 
-    E poll()
+    @Override
+    public E element()
+    {
+        E item = peek();
+        if (null == item)
+            throw new NoSuchElementException("Queue is empty");
+        return item;
+    }
+
+    @Override
+    public E poll()
     {
         Node<E> head = this.head;
         Node<E> next = head.next;
@@ -80,12 +113,40 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
         return item;
     }
 
-    E remove()
+    @Override
+    public E remove()
     {
         E item = poll();
         if (null == item)
             throw new NoSuchElementException("Queue is empty");
         return item;
+    }
+
+    @Override
+    public boolean remove(Object o)
+    {
+        if (null == o)
+            throw new NullPointerException();
+
+        Node<E> prev = this.head;
+        Node<E> next = prev.next;
+
+        while (null != next)
+        {
+            if (o.equals(next.item))
+            {
+                prev.lazySetNext(next.next); // update prev reference to next before making removed node unreachable,
+                next.lazySetNext(next);      // to maintain the guarantee of tail being always reachable from head
+
+                next.item = null;
+                return true;
+            }
+
+            prev = next;
+            next = next.next;
+        }
+
+        return false;
     }
 
     /**
@@ -102,7 +163,14 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
             consumer.accept(item);
     }
 
-    boolean offer(E e)
+    @Override
+    public boolean add(E e)
+    {
+        return offer(e);
+    }
+
+    @Override
+    public boolean offer(E e)
     {
         internalOffer(e); return true;
     }
@@ -159,6 +227,60 @@ class ManyToOneConcurrentLinkedQueue<E> extends ManyToOneConcurrentLinkedQueueHe
                 p = (p != t && t != (t = tail)) ? t : q;
             }
         }
+    }
+
+    @Override
+    public boolean contains(Object o)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Iterator<E> iterator()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Object[] toArray()
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public <T> T[] toArray(T[] a)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean containsAll(Collection<?> c)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean addAll(Collection<? extends E> c)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean removeAll(Collection<?> c)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public boolean retainAll(Collection<?> c)
+    {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void clear()
+    {
+        throw new UnsupportedOperationException();
     }
 }
 

@@ -18,6 +18,7 @@
 package org.apache.cassandra.net;
 
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.nio.channels.ClosedChannelException;
@@ -39,6 +40,7 @@ import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
+import io.netty.channel.MultithreadEventLoopGroup;
 import io.netty.channel.SingleThreadEventLoop;
 import io.netty.channel.epoll.EpollChannelOption;
 import io.netty.channel.epoll.EpollEventLoopGroup;
@@ -52,6 +54,9 @@ import io.netty.handler.ssl.OpenSsl;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import io.netty.util.concurrent.EventExecutor;
+import io.netty.util.concurrent.MultithreadEventExecutorGroup;
+import io.netty.util.concurrent.SingleThreadEventExecutor;
 import io.netty.util.internal.logging.InternalLoggerFactory;
 import io.netty.util.internal.logging.Slf4JLoggerFactory;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
@@ -61,7 +66,6 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.service.NativeTransportService;
 import org.apache.cassandra.utils.ExecutorUtils;
 import org.apache.cassandra.utils.FBUtilities;
-import org.apache.cassandra.utils.memory.BufferPool;
 
 import static io.netty.channel.unix.Errors.ERRNO_ECONNRESET_NEGATIVE;
 import static io.netty.channel.unix.Errors.ERROR_ECONNREFUSED_NEGATIVE;
@@ -112,10 +116,10 @@ public final class SocketFactory
         {
             case EPOLL:
                 logger.debug("using netty epoll event loop for pool prefix {}", threadNamePrefix);
-                return new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
+                return overwriteMPSCQueues(new EpollEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true)));
             case NIO:
                 logger.debug("using netty nio event loop for pool prefix {}", threadNamePrefix);
-                return new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true));
+                return overwriteMPSCQueues(new NioEventLoopGroup(threadCount, new DefaultThreadFactory(threadNamePrefix, true)));
             default:
                 throw new IllegalStateException();
         }
@@ -254,11 +258,11 @@ public final class SocketFactory
         return addressId(from, realFrom) + "->" + addressId(to, realTo) + '-' + type + '-' + id;
     }
 
-    public static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
+    static String addressId(InetAddressAndPort address, InetSocketAddress realAddress)
     {
         String str = address.toString();
         if (!address.address.equals(realAddress.getAddress()) || address.port != realAddress.getPort())
-            str += "(" + InetAddressAndPort.toString(realAddress.getAddress(), realAddress.getPort()) + ")";
+            str += '(' + InetAddressAndPort.toString(realAddress.getAddress(), realAddress.getPort()) + ')';
         return str;
     }
 
@@ -267,4 +271,57 @@ public final class SocketFactory
         return from + "->" + to + '-' + type + '-' + id;
     }
 
+    /**
+     * The default task queue used by {@code NioEventLoop} and {@code EpollEventLoop} is {@code MpscUnboundedArrayQueue},
+     * provided by JCTools. While efficient, it has an undesirable quality for a queue backing an event loop: it is
+     * not non-blocking, and can cause the event loop to busy-spin while waiting for a partially completed task
+     * offer, if the producer thread has been suspended mid-offer. Sadly, there is currently no way to work around
+     * this behaviour in application-logic.
+     *
+     * As it happens, however, we have an MPSC queue implementation that is perfectly fit for this purpose -
+     * {@link ManyToOneConcurrentLinkedQueue}, that is non-blocking, and already used throughout the codebase.
+     *
+     * Unfortunately, there is no Netty API or to override the default queue, so we have to resort to reflection,
+     * for now.
+     *
+     * We filed a Netty issue asking for this capability to be provided cleanly:
+     * https://github.com/netty/netty/issues/9105, and hopefully Netty will implement it some day. When and if
+     * that happens, this reflection-based workaround should be removed.
+     */
+    private static EventLoopGroup overwriteMPSCQueues(MultithreadEventLoopGroup eventLoopGroup)
+    {
+        try
+        {
+            for (EventExecutor eventExecutor : (EventExecutor[]) childrenField.get(eventLoopGroup))
+            {
+                SingleThreadEventLoop eventLoop = (SingleThreadEventLoop) eventExecutor;
+                taskQueueField.set(eventLoop, new ManyToOneConcurrentLinkedQueue<>());
+                tailTasksField.set(eventLoop, new ManyToOneConcurrentLinkedQueue<>());
+            }
+            return eventLoopGroup;
+        }
+        catch (IllegalAccessException e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static final Field childrenField, taskQueueField, tailTasksField;
+    static
+    {
+        try
+        {
+            childrenField = MultithreadEventExecutorGroup.class.getDeclaredField("children");
+            taskQueueField = SingleThreadEventExecutor.class.getDeclaredField("taskQueue");
+            tailTasksField = SingleThreadEventLoop.class.getDeclaredField("tailTasks");
+
+            childrenField.setAccessible(true);
+            taskQueueField.setAccessible(true);
+            tailTasksField.setAccessible(true);
+        }
+        catch (NoSuchFieldException e)
+        {
+            throw new IllegalStateException(e);
+        }
+    }
 }

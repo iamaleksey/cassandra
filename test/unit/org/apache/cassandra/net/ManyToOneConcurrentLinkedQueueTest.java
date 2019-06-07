@@ -26,6 +26,7 @@ import org.junit.Test;
 
 import static org.junit.Assert.*;
 
+@SuppressWarnings("ConstantConditions")
 public class ManyToOneConcurrentLinkedQueueTest
 {
     private final ManyToOneConcurrentLinkedQueue<Integer> queue = new ManyToOneConcurrentLinkedQueue<>();
@@ -41,6 +42,23 @@ public class ManyToOneConcurrentLinkedQueueTest
     {
         queue.offer(0);
         assertFalse(queue.relaxedIsEmpty());
+    }
+
+    @Test
+    public void testSizeWhenEmpty()
+    {
+        assertEquals(0, queue.size());
+    }
+
+    @Test
+    public void testSizeWhenNotEmpty()
+    {
+        queue.offer(0);
+        assertEquals(1, queue.size());
+
+        for (int i = 1; i < 100; i++)
+            queue.offer(i);
+        assertEquals(100, queue.size());
     }
 
     @Test
@@ -80,6 +98,76 @@ public class ManyToOneConcurrentLinkedQueueTest
     {
         queue.offer(0);
         assertEquals(0, (int) queue.remove());
+    }
+
+    @Test
+    public void testOtherRemoveWhenEmpty()
+    {
+        assertFalse(queue.remove(0));
+    }
+
+    @Test
+    public void testOtherRemoveSingleNode()
+    {
+        queue.offer(0);
+        assertTrue(queue.remove(0));
+        assertTrue(queue.isEmpty());
+    }
+
+    @Test
+    public void testOtherRemoveWhenFirst()
+    {
+        queue.offer(0);
+        queue.offer(1);
+        queue.offer(2);
+
+        assertTrue(queue.remove(0));
+
+        assertEquals(1, (int) queue.poll());
+        assertEquals(2, (int) queue.poll());
+        assertNull(queue.poll());
+    }
+
+    @Test
+    public void testOtherRemoveFromMiddle()
+    {
+        queue.offer(0);
+        queue.offer(1);
+        queue.offer(2);
+
+        assertTrue(queue.remove(1));
+
+        assertEquals(0, (int) queue.poll());
+        assertEquals(2, (int) queue.poll());
+        assertNull(queue.poll());
+    }
+
+    @Test
+    public void testOtherRemoveFromEnd()
+    {
+        queue.offer(0);
+        queue.offer(1);
+        queue.offer(2);
+
+        assertTrue(queue.remove(2));
+
+        assertEquals(0, (int) queue.poll());
+        assertEquals(1, (int) queue.poll());
+        assertNull(queue.poll());
+    }
+
+    @Test
+    public void testOtherRemoveWhenDoesnNotExist()
+    {
+        queue.offer(0);
+        queue.offer(1);
+        queue.offer(2);
+
+        assertFalse(queue.remove(3));
+
+        assertEquals(0, (int) queue.poll());
+        assertEquals(1, (int) queue.poll());
+        assertEquals(2, (int) queue.poll());
     }
 
     @Test
