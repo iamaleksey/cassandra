@@ -22,9 +22,9 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 class ResponseVerbHandler implements IVerbHandler
 {
@@ -44,7 +44,7 @@ class ResponseVerbHandler implements IVerbHandler
             return;
         }
 
-        long latencyNanos = ApproximateTime.nanoTime() - callbackInfo.createdAtNanos;
+        long latencyNanos = approxTime.now() - callbackInfo.createdAtNanos;
         Tracing.trace("Processing response from {}", message.from());
 
         RequestCallback cb = callbackInfo.callback;

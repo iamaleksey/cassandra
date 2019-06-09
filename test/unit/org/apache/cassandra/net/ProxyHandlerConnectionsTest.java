@@ -44,7 +44,6 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.proxy.InboundProxyHandler;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.Pair;
 
@@ -52,6 +51,7 @@ import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.apache.cassandra.net.ConnectionTest.SETTINGS;
 import static org.apache.cassandra.net.OutboundConnectionSettings.Framing.CRC;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class ProxyHandlerConnectionsTest
 {
@@ -183,7 +183,7 @@ public class ProxyHandlerConnectionsTest
             handler.withLatency(100, MILLISECONDS);
 
             int expireMessages = 20;
-            long nanoTime = ApproximateTime.nanoTime();
+            long nanoTime = approxTime.now();
             CountDownLatch enqueueDone = new CountDownLatch(1);
             outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 10, SECONDS));
             for (int i = 0; i < expireMessages; i++)

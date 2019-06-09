@@ -36,6 +36,7 @@ import org.apache.cassandra.utils.ApproximateTime;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -95,7 +96,7 @@ public class MonitoringTaskTest
     private static void waitForOperationsToComplete(List<Monitorable> operations) throws InterruptedException
     {
         long timeout = operations.stream().map(Monitorable::timeoutNanos).reduce(0L, Long::max);
-        Thread.sleep(NANOSECONDS.toMillis(timeout * 2 + ApproximateTime.nanoTimePrecision()));
+        Thread.sleep(NANOSECONDS.toMillis(timeout * 2 + approxTime.error()));
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -114,7 +115,7 @@ public class MonitoringTaskTest
     private static void waitForOperationsToBeReportedAsSlow(List<Monitorable> operations) throws InterruptedException
     {
         long timeout = operations.stream().map(Monitorable::slowTimeoutNanos).reduce(0L, Long::max);
-        Thread.sleep(NANOSECONDS.toMillis(timeout * 2 + ApproximateTime.nanoTimePrecision()));
+        Thread.sleep(NANOSECONDS.toMillis(timeout * 2 + approxTime.error()));
 
         long start = System.nanoTime();
         while(System.nanoTime() - start <= MAX_SPIN_TIME_NANOS)
@@ -224,10 +225,10 @@ public class MonitoringTaskTest
         assertFalse(operation.isCompleted());
 
         // aborted operations are not logged as slow
-        assertFalse(MonitoringTask.instance.logSlowOperations(ApproximateTime.nanoTime()));
+        assertFalse(MonitoringTask.instance.logSlowOperations(approxTime.now()));
         assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
 
-        assertTrue(MonitoringTask.instance.logFailedOperations(ApproximateTime.nanoTime()));
+        assertTrue(MonitoringTask.instance.logFailedOperations(approxTime.now()));
         assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
     }
 
@@ -250,7 +251,7 @@ public class MonitoringTaskTest
             assertFalse(operation2.isAborted());
             assertTrue(operation2.isCompleted());
 
-            Thread.sleep(2 * ApproximateTime.currentTimeMillisPrecision() + 500);
+            Thread.sleep(2 * NANOSECONDS.toMillis(approxTime.error()) + 500);
             assertEquals(0, MonitoringTask.instance.getFailedOperations().size());
             assertEquals(0, MonitoringTask.instance.getSlowOperations().size());
         }

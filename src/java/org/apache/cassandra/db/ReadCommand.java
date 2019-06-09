@@ -71,6 +71,7 @@ import org.apache.cassandra.utils.HashingUtils;
 
 import static com.google.common.collect.Iterables.any;
 import static com.google.common.collect.Iterables.filter;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * General interface for storage-engine read commands (common to both range and
@@ -632,14 +633,15 @@ public abstract class ReadCommand extends AbstractReadQuery
         private boolean maybeAbort()
         {
             /**
-             * The value returned by ApproximateTime.currentTimeMillis() is updated only every
-             * {@link ApproximateTime.CHECK_INTERVAL_MS}, by default 10 millis. Since MonitorableImpl
-             * relies on ApproximateTime, we don't need to check unless the approximate time has elapsed.
+             * TODO: this is not a great way to abort early; why not expressly limit checks to 10ms intervals?
+             * The value returned by approxTime.now() is updated only every
+             * {@link org.apache.cassandra.utils.MonotonicClock.SampledClock.CHECK_INTERVAL_MS}, by default 2 millis. Since MonitorableImpl
+             * relies on approxTime, we don't need to check unless the approximate time has elapsed.
              */
-            if (lastChecked == ApproximateTime.currentTimeMillis())
+            if (lastChecked == approxTime.now())
                 return false;
 
-            lastChecked = ApproximateTime.currentTimeMillis();
+            lastChecked = approxTime.now();
 
             if (isAborted())
             {

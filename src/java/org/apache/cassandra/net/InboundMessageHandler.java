@@ -58,7 +58,7 @@ import static java.lang.Math.max;
 import static java.lang.Math.min;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.net.Crc.*;
-import static org.apache.cassandra.utils.ApproximateTime.*;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * Core logic for handling inbound message deserialization and execution (in tandem with {@link FrameDecoder}).
@@ -277,11 +277,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
     {
         ByteBuffer buf = bytes.get();
 
-        long currentTimeNanos = nanoTime();
+        long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
-        if (isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+        if (approxTime.isAfter(currentTimeNanos, header.expiresAtNanos))
         {
             callbacks.onArrivedExpired(size, header, currentTimeNanos - header.createdAtNanos, NANOSECONDS);
             receivedCount++;
@@ -361,11 +361,11 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         ShareableBytes bytes = frame.contents;
         ByteBuffer buf = bytes.get();
 
-        long currentTimeNanos = nanoTime();
+        long currentTimeNanos = approxTime.now();
         Header header = serializer.extractHeader(buf, peer, currentTimeNanos, version);
         int size = serializer.inferMessageSize(buf, buf.position(), buf.limit(), version);
 
-        boolean expired = isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
+        boolean expired = approxTime.isAfter(currentTimeNanos, header.expiresAtNanos);
 
         if (!expired && !acquireCapacity(endpointReserve, globalReserve, size, currentTimeNanos, header.expiresAtNanos))
             return false;
@@ -755,8 +755,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
              * Verify that the message is still fresh and is worth deserializing; if not, release the buffers,
              * release capacity, and switch to skipping.
              */
-            long currentTimeNanos = nanoTime();
-            if (!isSkipping && isAfterNanoTime(currentTimeNanos, header.expiresAtNanos))
+            long currentTimeNanos = approxTime.now();
+            if (!isSkipping && approxTime.isAfter(currentTimeNanos, header.expiresAtNanos))
             {
                 try
                 {
@@ -872,8 +872,8 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         public void run()
         {
             Header header = header();
-            long currentTimeNanos = nanoTime();
-            boolean expired = isAfterNanoTime(currentTimeNanos, header.expiresAtNanos);
+            long currentTimeNanos = approxTime.now();
+            boolean expired = approxTime.isAfter(currentTimeNanos, header.expiresAtNanos);
 
             boolean processed = false;
             try
@@ -903,7 +903,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
                 releaseResources();
 
-                callbacks.onExecuted(size(), header, nanoTime() - currentTimeNanos, NANOSECONDS);
+                callbacks.onExecuted(size(), header, approxTime.now() - currentTimeNanos, NANOSECONDS);
             }
         }
 
@@ -1056,7 +1056,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
         {
             Map<EventLoop, ReactivateHandlers> tasks = null;
 
-            long currentTimeNanos = nanoTime();
+            long currentTimeNanos = approxTime.now();
 
             Ticket t;
             while ((t = queue.peek()) != null)
@@ -1152,7 +1152,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
             private void reactivateHandler(Limit capacity)
             {
-                long elapsedNanos = nanoTime() - reigsteredAtNanos;
+                long elapsedNanos = approxTime.now() - reigsteredAtNanos;
                 try
                 {
                     if (waitQueue.kind == Kind.ENDPOINT)
@@ -1173,7 +1173,7 @@ public class InboundMessageHandler extends ChannelInboundHandlerAdapter implemen
 
             private boolean isLive(long currentTimeNanos)
             {
-                return !isAfterNanoTime(currentTimeNanos, expiresAtNanos);
+                return !approxTime.isAfter(currentTimeNanos, expiresAtNanos);
             }
 
             private void invalidate()

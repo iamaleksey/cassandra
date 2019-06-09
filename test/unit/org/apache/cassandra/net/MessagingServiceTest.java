@@ -158,7 +158,7 @@ public class MessagingServiceTest
         ConcurrentHashMap<String, MessagingMetrics.DCLatencyRecorder> dcLatency = MessagingService.instance().metrics.dcLatency;
         dcLatency.clear();
 
-        long now = ApproximateTime.currentTimeMillis();
+        long now = System.currentTimeMillis();
         long sentAt = now - latency;
         assertNull(dcLatency.get("datacenter1"));
         addDCLatency(sentAt, now);
@@ -176,7 +176,7 @@ public class MessagingServiceTest
         // if clocks are off should just not track anything
         int latency = -100;
 
-        long now = ApproximateTime.currentTimeMillis();
+        long now = System.currentTimeMillis();
         long sentAt = now - latency;
 
         long count = updater.dcLatency.getCount();

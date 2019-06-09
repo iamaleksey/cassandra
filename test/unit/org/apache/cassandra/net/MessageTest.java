@@ -35,7 +35,6 @@ import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing.TraceType;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static org.apache.cassandra.net.Message.serializer;
@@ -46,6 +45,7 @@ import static org.apache.cassandra.net.NoPayload.noPayload;
 import static org.apache.cassandra.net.ParamType.RESPOND_TO;
 import static org.apache.cassandra.net.ParamType.TRACE_SESSION;
 import static org.apache.cassandra.net.ParamType.TRACE_TYPE;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.junit.Assert.*;
 
 public class MessageTest
@@ -88,8 +88,8 @@ public class MessageTest
             Message.builder(Verb._TEST_2, 37)
                    .withId(1)
                    .from(FBUtilities.getLocalAddressAndPort())
-                   .withCreatedAt(ApproximateTime.nanoTime())
-                   .withExpiresAt(ApproximateTime.nanoTime())
+                   .withCreatedAt(approxTime.now())
+                   .withExpiresAt(approxTime.now())
                    .withFlag(MessageFlag.CALL_BACK_ON_FAILURE)
                    .withFlag(MessageFlag.TRACK_REPAIRED_DATA)
                    .withParam(TRACE_TYPE, TraceType.QUERY)
@@ -128,7 +128,7 @@ public class MessageTest
     {
         long id = 1;
         InetAddressAndPort from = FBUtilities.getLocalAddressAndPort();
-        long createAtNanos = ApproximateTime.nanoTime();
+        long createAtNanos = approxTime.now();
         long expiresAtNanos = createAtNanos + TimeUnit.SECONDS.toNanos(1);
         TraceType traceType = TraceType.QUERY;
         UUID traceSession = UUID.randomUUID();
@@ -163,8 +163,8 @@ public class MessageTest
             Message.builder(Verb._TEST_1, noPayload)
                    .withId(1)
                    .from(FBUtilities.getLocalAddressAndPort())
-                   .withCreatedAt(ApproximateTime.nanoTime())
-                   .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.SECONDS.toNanos(1))
+                   .withCreatedAt(approxTime.now())
+                   .withExpiresAt(approxTime.now() + TimeUnit.SECONDS.toNanos(1))
                    .withFlag(MessageFlag.CALL_BACK_ON_FAILURE)
                    .withParam(TRACE_SESSION, UUID.randomUUID())
                    .build();
@@ -183,7 +183,7 @@ public class MessageTest
     @Test
     public void testFailureResponse() throws IOException
     {
-        long expiresAt = ApproximateTime.nanoTime();
+        long expiresAt = approxTime.now();
         Message<RequestFailureReason> msg = Message.failureResponse(1, expiresAt, RequestFailureReason.INCOMPATIBLE_SCHEMA);
 
         assertEquals(1, msg.id());
@@ -222,7 +222,7 @@ public class MessageTest
             ByteBuffer buffer = out.buffer();
             try (DataInputBuffer in = new DataInputBuffer(out.buffer(), false))
             {
-                Message.Header headerOut = serializer.extractHeader(buffer, msg.from(), ApproximateTime.nanoTime(), version);
+                Message.Header headerOut = serializer.extractHeader(buffer, msg.from(), approxTime.now(), version);
                 Message msgOut = serializer.deserialize(in, headerOut, version);
                 assertEquals(0, in.available());
                 assertMessagesEqual(msg, msgOut);

@@ -29,10 +29,8 @@ import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.concurrent.ScheduledExecutors;
 import org.apache.cassandra.config.Config;
-import org.apache.cassandra.config.DatabaseDescriptor;
 
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
-import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_NOW;
 import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
 
@@ -190,64 +188,5 @@ public class ApproximateTime
     public static long nanoTime()
     {
         return almostNowNanos;
-    }
-
-    public static long almostNowPrecision(TimeUnit units)
-    {
-        return units.convert(ALMOST_NOW_UPDATE_INTERVAL_MS, MILLISECONDS);
-    }
-
-    public static long currentTimeMillisPrecision()
-    {
-        return almostNowPrecision(MILLISECONDS);
-    }
-
-    public static long nanoTimePrecision()
-    {
-        return almostNowPrecision(NANOSECONDS);
-    }
-
-    /*
-     * System.currentTimeMillis() is 25 nanoseconds. This is 2 nanoseconds (maybe) according to JMH.
-     * Faster than calling both currentTimeMillis() and nanoTime().
-     *
-     * There is also the issue of how scalable nanoTime() and currentTimeMillis() are which is a moving target.
-     *
-     * These timestamps don't order with System.currentTimeMillis() because currentTimeMillis() can tick over
-     * before this one does. I have seen it behind by as much as 2ms on Linux and 25ms on Windows.
-     */
-    public static long toCurrentTimeMillis(long nanoTime)
-    {
-        return almostSameTime.toCurrentTimeMillis(nanoTime);
-    }
-
-    public static long toNanoTime(long currentTimeMillis)
-    {
-        return almostSameTime.toNanoTime(currentTimeMillis);
-    }
-
-    public static AlmostSameTime snapshot()
-    {
-        return almostSameTime;
-    }
-
-    public static long conversionErrorNanos()
-    {
-        return almostSameTime.error;
-    }
-
-    public static long minElapsedSinceNanoTime(long approxInstantNanos)
-    {
-        return (nanoTime() - approxInstantNanos) - nanoTimePrecision();
-    }
-
-    public static boolean isAfterNanoTime(long approxInstantNanos)
-    {
-        return isAfterNanoTime(nanoTime(), approxInstantNanos);
-    }
-
-    public static boolean isAfterNanoTime(long approxCurrentTimeNanos, long approxInstantNanos)
-    {
-        return approxCurrentTimeNanos - nanoTimePrecision() > approxInstantNanos;
     }
 }

@@ -62,7 +62,6 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
@@ -76,6 +75,7 @@ import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
 import static org.apache.cassandra.net.ConnectionType.SMALL_MESSAGES;
 import static org.apache.cassandra.net.OutboundConnectionSettings.Framing.LZ4;
 import static org.apache.cassandra.net.OutboundConnections.LARGE_MESSAGE_THRESHOLD;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class ConnectionTest
 {
@@ -504,7 +504,7 @@ public class ConnectionTest
             AtomicInteger delivered = new AtomicInteger();
             Verb._TEST_1.unsafeSetHandler(() -> msg -> delivered.incrementAndGet());
             Message<?> message = Message.builder(Verb._TEST_1, noPayload)
-                                        .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.DAYS.toNanos(1L))
+                                        .withExpiresAt(approxTime.now() + TimeUnit.DAYS.toNanos(1L))
                                         .build();
             long sentSize = message.serializedSize(version);
             outbound.enqueue(message);
@@ -512,7 +512,7 @@ public class ConnectionTest
             while (delivered.get() < 1);
             outbound.unsafeRunOnDelivery(() -> Uninterruptibles.awaitUninterruptibly(enqueueDone, 1L, TimeUnit.DAYS));
             message = Message.builder(Verb._TEST_1, noPayload)
-                             .withExpiresAt(ApproximateTime.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
+                             .withExpiresAt(approxTime.now() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis))
                              .build();
             for (int i = 0 ; i < count ; ++i)
                 outbound.enqueue(message);

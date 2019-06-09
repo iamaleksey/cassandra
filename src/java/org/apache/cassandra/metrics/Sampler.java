@@ -27,7 +27,7 @@ import org.apache.cassandra.concurrent.JMXEnabledThreadPoolExecutor;
 import org.apache.cassandra.concurrent.NamedThreadFactory;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.utils.Clock;
+import org.apache.cassandra.utils.MonotonicClock;
 
 import com.google.common.annotations.VisibleForTesting;
 
@@ -39,7 +39,7 @@ public abstract class Sampler<T>
     }
 
     @VisibleForTesting
-    Clock clock = Clock.instance;
+    MonotonicClock clock = MonotonicClock.approxTime;
 
     @VisibleForTesting
     static final ThreadPoolExecutor samplerExecutor = new JMXEnabledThreadPoolExecutor(1, 1,

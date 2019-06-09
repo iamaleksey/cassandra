@@ -1782,11 +1782,11 @@ public class StorageProxy implements StorageProxyMBean
                 }
                 else
                 {
-                    MessagingService.instance().metrics.recordSelfDroppedMessage(verb, ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
+                    MessagingService.instance().metrics.recordSelfDroppedMessage(verb, MonotonicClock.approxTime.now() - approxCreationTimeNanos, NANOSECONDS);
                     handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailureReason.UNKNOWN);
                 }
 
-                MessagingService.instance().latencySubscribers.add(FBUtilities.getBroadcastAddressAndPort(), ApproximateTime.nanoTime() - approxCreationTimeNanos, NANOSECONDS);
+                MessagingService.instance().latencySubscribers.add(FBUtilities.getBroadcastAddressAndPort(), MonotonicClock.approxTime.now() - approxCreationTimeNanos, NANOSECONDS);
             }
             catch (Throwable t)
             {
@@ -2426,13 +2426,13 @@ public class StorageProxy implements StorageProxyMBean
 
         public DroppableRunnable(Verb verb)
         {
-            this.approxCreationTimeNanos = ApproximateTime.nanoTime();
+            this.approxCreationTimeNanos = MonotonicClock.approxTime.now();
             this.verb = verb;
         }
 
         public final void run()
         {
-            long approxCurrentTimeNanos = ApproximateTime.nanoTime();
+            long approxCurrentTimeNanos = MonotonicClock.approxTime.now();
             long expirationTimeNanos = verb.expiresAtNanos(approxCreationTimeNanos);
             if (approxCurrentTimeNanos > expirationTimeNanos)
             {
@@ -2459,7 +2459,7 @@ public class StorageProxy implements StorageProxyMBean
      */
     private static abstract class LocalMutationRunnable implements Runnable
     {
-        private final long approxCreationTimeNanos = ApproximateTime.nanoTime();
+        private final long approxCreationTimeNanos = MonotonicClock.approxTime.now();
 
         private final Replica localReplica;
 
@@ -2471,7 +2471,7 @@ public class StorageProxy implements StorageProxyMBean
         public final void run()
         {
             final Verb verb = verb();
-            long nowNanos = ApproximateTime.nanoTime();
+            long nowNanos = MonotonicClock.approxTime.now();
             long expirationTimeNanos = verb.expiresAtNanos(approxCreationTimeNanos);
             if (nowNanos > expirationTimeNanos)
             {

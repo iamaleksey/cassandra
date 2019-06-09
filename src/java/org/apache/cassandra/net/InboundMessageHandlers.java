@@ -30,6 +30,9 @@ import org.apache.cassandra.metrics.InternodeInboundMetrics;
 import org.apache.cassandra.net.Message.Header;
 import org.apache.cassandra.utils.ApproximateTime;
 
+import static java.util.concurrent.TimeUnit.NANOSECONDS;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+
 /**
  * An aggregation of {@link InboundMessageHandler}s for all connections from a peer.
  *
@@ -191,7 +194,7 @@ public final class InboundMessageHandlers
             public void onArrived(int messageSize, Header header, long timeElapsed, TimeUnit unit)
             {
                 // do not log latency if we are within error bars of zero
-                if (timeElapsed > ApproximateTime.almostNowPrecision(unit))
+                if (timeElapsed > unit.convert(approxTime.error(), NANOSECONDS))
                     internodeLatency.accept(timeElapsed, unit);
             }
 

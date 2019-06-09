@@ -31,9 +31,8 @@ import com.google.common.util.concurrent.Uninterruptibles;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import org.apache.cassandra.utils.ApproximateTime;
-
 import static java.lang.Math.min;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * A composite queue holding messages to be delivered by an {@link OutboundConnection}.
@@ -106,7 +105,7 @@ class OutboundMessageQueue
      */
     void runEventually(Consumer<WithLock> runEventually)
     {
-        try (WithLock withLock = lockOrCallback(ApproximateTime.nanoTime(), () -> runEventually(runEventually)))
+        try (WithLock withLock = lockOrCallback(approxTime.now(), () -> runEventually(runEventually)))
         {
             if (withLock != null)
                 runEventually.accept(withLock);
@@ -196,12 +195,12 @@ class OutboundMessageQueue
      */
     boolean maybePruneExpired()
     {
-        return maybePruneExpired(ApproximateTime.nanoTime());
+        return maybePruneExpired(approxTime.now());
     }
 
     private boolean maybePruneExpired(long nowNanos)
     {
-        if (ApproximateTime.isAfterNanoTime(nowNanos, earliestExpiresAt))
+        if (approxTime.isAfter(nowNanos, earliestExpiresAt))
             return tryRun(() -> pruneWithLock(nowNanos));
         return false;
     }
@@ -480,6 +479,6 @@ class OutboundMessageQueue
 
     private static boolean shouldSend(Message<?> m, long nowNanos)
     {
-        return !ApproximateTime.isAfterNanoTime(nowNanos, m.expiresAtNanos());
+        return !approxTime.isAfter(nowNanos, m.expiresAtNanos());
     }
 }

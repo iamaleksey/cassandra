@@ -20,6 +20,8 @@ package org.apache.cassandra.db.monitoring;
 
 import org.apache.cassandra.utils.ApproximateTime;
 
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+
 public abstract class MonitorableImpl implements Monitorable
 {
     private MonitoringState state;
@@ -98,7 +100,7 @@ public abstract class MonitorableImpl implements Monitorable
         if (state == MonitoringState.IN_PROGRESS)
         {
             if (approxCreationTimeNanos >= 0)
-                MonitoringTask.addFailedOperation(this, ApproximateTime.nanoTime());
+                MonitoringTask.addFailedOperation(this, approxTime.now());
 
             state = MonitoringState.ABORTED;
             return true;
@@ -112,7 +114,7 @@ public abstract class MonitorableImpl implements Monitorable
         if (state == MonitoringState.IN_PROGRESS)
         {
             if (isSlow && slowTimeoutNanos > 0 && approxCreationTimeNanos >= 0)
-                MonitoringTask.addSlowOperation(this, ApproximateTime.nanoTime());
+                MonitoringTask.addSlowOperation(this, approxTime.now());
 
             state = MonitoringState.COMPLETED;
             return true;
@@ -126,7 +128,7 @@ public abstract class MonitorableImpl implements Monitorable
         if (approxCreationTimeNanos < 0 || state != MonitoringState.IN_PROGRESS)
             return;
 
-        long minElapsedNanos = ApproximateTime.minElapsedSinceNanoTime(approxCreationTimeNanos);
+        long minElapsedNanos = (approxTime.now() - approxCreationTimeNanos) - approxTime.error();
 
         if (minElapsedNanos >= slowTimeoutNanos && !isSlow)
             isSlow = true;

@@ -43,13 +43,13 @@ import org.apache.cassandra.metrics.InternodeOutboundMetrics;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.StorageProxy;
 import org.apache.cassandra.service.paxos.Commit;
-import org.apache.cassandra.utils.Clock;
 import org.apache.cassandra.utils.FBUtilities;
 
 import static java.lang.String.format;
 import static java.util.concurrent.TimeUnit.MILLISECONDS;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.concurrent.Stage.INTERNAL_RESPONSE;
+import static org.apache.cassandra.utils.MonotonicClock.preciseTime;
 
 /**
  * An expiring map of request callbacks.
@@ -138,7 +138,7 @@ public class RequestCallbacks implements OutboundMessageCallbacks
 
     private void expire()
     {
-        long start = Clock.instance.nanoTime();
+        long start = preciseTime.now();
         int n = 0;
         for (Map.Entry<CallbackKey, CallbackInfo> entry : callbacks.entrySet())
         {

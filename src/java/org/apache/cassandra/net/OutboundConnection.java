@@ -52,7 +52,6 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.util.DataOutputBufferFixed;
 import org.apache.cassandra.net.OutboundConnectionInitiator.Result.MessagingSuccess;
 import org.apache.cassandra.tracing.Tracing;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.NoSpamLogger;
@@ -66,6 +65,7 @@ import static org.apache.cassandra.net.OutboundConnections.LARGE_MESSAGE_THRESHO
 import static org.apache.cassandra.net.ResourceLimits.*;
 import static org.apache.cassandra.net.ResourceLimits.Outcome.*;
 import static org.apache.cassandra.net.SocketFactory.*;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.apache.cassandra.utils.Throwables.isCausedBy;
 
 /**
@@ -756,7 +756,7 @@ public class OutboundConnection
             int canonicalSize = 0; // number of bytes we must use for our resource accounting
             int sendingBytes = 0;
             int sendingCount = 0;
-            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(ApproximateTime.nanoTime(), this::execute))
+            try (OutboundMessageQueue.WithLock withLock = queue.lockOrCallback(approxTime.now(), this::execute))
             {
                 if (withLock == null)
                     return false; // we failed to acquire the queue lock, so return; we will be scheduled again when the lock is available
@@ -949,7 +949,7 @@ public class OutboundConnection
         @SuppressWarnings({ "resource", "RedundantSuppression" }) // make eclipse warnings go away
         boolean doRun(Established established)
         {
-            Message<?> send = queue.tryPoll(ApproximateTime.nanoTime(), this::execute);
+            Message<?> send = queue.tryPoll(approxTime.now(), this::execute);
             if (send == null)
                 return false;
 

@@ -36,8 +36,9 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ByteBufferUtil;
+
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class Mutation implements IMutation
 {
@@ -60,7 +61,7 @@ public class Mutation implements IMutation
 
     public Mutation(PartitionUpdate update)
     {
-        this(update.metadata().keyspace, update.partitionKey(), ImmutableMap.of(update.metadata().id, update), ApproximateTime.nanoTime());
+        this(update.metadata().keyspace, update.partitionKey(), ImmutableMap.of(update.metadata().id, update), approxTime.now());
     }
 
     public Mutation(String keyspaceName, DecoratedKey key, ImmutableMap<TableId, PartitionUpdate> modifications, long approxCreatedAtNanos)
@@ -177,7 +178,7 @@ public class Mutation implements IMutation
             modifications.put(table, updates.size() == 1 ? updates.get(0) : PartitionUpdate.merge(updates));
             updates.clear();
         }
-        return new Mutation(ks, key, modifications.build(), ApproximateTime.nanoTime());
+        return new Mutation(ks, key, modifications.build(), approxTime.now());
     }
 
     public CompletableFuture<?> applyFuture()
@@ -353,7 +354,7 @@ public class Mutation implements IMutation
                 update = PartitionUpdate.serializer.deserialize(in, version, flag);
                 modifications.put(update.metadata().id, update);
             }
-            return new Mutation(update.metadata().keyspace, dk, modifications.build(), ApproximateTime.nanoTime());
+            return new Mutation(update.metadata().keyspace, dk, modifications.build(), approxTime.now());
         }
 
         public Mutation deserialize(DataInputPlus in, int version) throws IOException
@@ -379,7 +380,7 @@ public class Mutation implements IMutation
         private final ImmutableMap.Builder<TableId, PartitionUpdate> modifications = new ImmutableMap.Builder<>();
         private final String keyspaceName;
         private final DecoratedKey key;
-        private final long approxCreatedAtNanos = ApproximateTime.nanoTime();
+        private final long approxCreatedAtNanos = approxTime.now();
         private boolean empty = true;
 
         public PartitionUpdateCollector(String keyspaceName, DecoratedKey key)

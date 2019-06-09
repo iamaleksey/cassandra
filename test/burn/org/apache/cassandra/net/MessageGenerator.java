@@ -27,11 +27,11 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.vint.VIntCoding;
 import sun.misc.Unsafe;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 abstract class MessageGenerator
 {
@@ -47,7 +47,7 @@ abstract class MessageGenerator
     Message.Builder<Object> builder(long id)
     {
         random.setSeed(id ^ seed);
-        long now = ApproximateTime.nanoTime();
+        long now = approxTime.now();
 
         int expiresInMillis;
         int expiryMask = random.nextInt();

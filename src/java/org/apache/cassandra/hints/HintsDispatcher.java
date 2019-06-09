@@ -28,7 +28,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.net.RequestCallback;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.metrics.HintsServiceMetrics;
@@ -37,6 +36,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.utils.concurrent.SimpleCondition;
 
 import static org.apache.cassandra.net.Verb.HINT_REQ;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * Dispatches a single hints file to a specified node in a batched manner.
@@ -209,14 +209,14 @@ final class HintsDispatcher implements AutoCloseable
     {
         enum Outcome { SUCCESS, TIMEOUT, FAILURE, INTERRUPTED }
 
-        private final long start = System.nanoTime();
+        private final long start = approxTime.now();
         private final SimpleCondition condition = new SimpleCondition();
         private volatile Outcome outcome;
-        private final long hintCreationTime;
+        private final long hintCreationNanoTime;
 
-        private Callback(long hintCreationTime)
+        private Callback(long hintCreationTimeMillisSinceEpoch)
         {
-            this.hintCreationTime = hintCreationTime;
+            this.hintCreationNanoTime = approxTime.translate().fromMillisSinceEpoch(hintCreationTimeMillisSinceEpoch);
         }
 
         Outcome await()
@@ -251,7 +251,7 @@ final class HintsDispatcher implements AutoCloseable
         @Override
         public void onResponse(Message msg)
         {
-            HintsServiceMetrics.updateDelayMetrics(msg.from(), ApproximateTime.currentTimeMillis() - this.hintCreationTime);
+            HintsServiceMetrics.updateDelayMetrics(msg.from(), approxTime.now() - this.hintCreationNanoTime);
             outcome = Outcome.SUCCESS;
             condition.signalAll();
         }

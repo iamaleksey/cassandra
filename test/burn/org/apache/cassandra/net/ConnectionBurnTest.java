@@ -55,14 +55,15 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessageGenerator.UniformPayloadGenerator;
-import org.apache.cassandra.utils.ApproximateTime;
 import org.apache.cassandra.utils.ExecutorUtils;
+import org.apache.cassandra.utils.MonotonicClock;
 import org.apache.cassandra.utils.memory.BufferPool;
 
 import static java.lang.Math.min;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.net.ConnectionType.LARGE_MESSAGES;
-import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_SAME_TIME;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
+import static org.apache.cassandra.utils.MonotonicClock.preciseTime;
 
 public class ConnectionBurnTest
 {
@@ -71,7 +72,7 @@ public class ConnectionBurnTest
     static
     {
         // stop updating ALMOST_SAME_TIME so that we get consistent message expiration times
-        ApproximateTime.stop(ALMOST_SAME_TIME);
+        ((MonotonicClock.AbstractEpochSamplingClock) preciseTime).pauseEpochSampling();
         DatabaseDescriptor.daemonInitialization();
         DatabaseDescriptor.setCrossNodeTimeout(true);
     }
@@ -269,7 +270,7 @@ public class ConnectionBurnTest
                         try
                         {
                             ThreadLocalRandom random = ThreadLocalRandom.current();
-                            while (ApproximateTime.nanoTime() < deadline && !Thread.currentThread().isInterrupted())
+                            while (approxTime.now() < deadline && !Thread.currentThread().isInterrupted())
                             {
                                 Connection connection = connections[random.nextInt(connections.length)];
                                 if (!connection.registerSender())
@@ -292,7 +293,7 @@ public class ConnectionBurnTest
 
                                     while (connection.isSending()
                                            && count-- > 0
-                                           && ApproximateTime.nanoTime() < deadline
+                                           && approxTime.now() < deadline
                                            && !Thread.currentThread().isInterrupted())
                                         connection.sendOne();
                                 }

@@ -31,11 +31,11 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Verifier.Destiny;
-import org.apache.cassandra.utils.ApproximateTime;
 
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.current_version;
 import static org.apache.cassandra.utils.ExecutorUtils.runWithThreadName;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 public class Connection implements InboundMessageCallbacks, OutboundMessageCallbacks, OutboundDebugCallbacks
 {
@@ -346,7 +346,7 @@ public class Connection implements InboundMessageCallbacks, OutboundMessageCallb
     public void onExpired(Message<?> message, InetAddressAndPort peer)
     {
         controller.fail(message.serializedSize(current_version));
-        verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), ApproximateTime.nanoTime() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
+        verifier.onExpiredBeforeSend(message.id(), message.serializedSize(current_version), approxTime.now() - message.createdAtNanos(), TimeUnit.NANOSECONDS);
     }
 
     public void onFailedSerialize(Message<?> message, InetAddressAndPort peer, int messagingVersion, int bytesWrittenToNetwork, Throwable failure)

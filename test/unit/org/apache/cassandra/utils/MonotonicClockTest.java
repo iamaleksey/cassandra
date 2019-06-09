@@ -17,12 +17,12 @@
  */
 package org.apache.cassandra.utils;
 
-import static org.apache.cassandra.utils.ApproximateTime.Measurement.ALMOST_NOW;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.junit.Assert.*;
 
 import org.junit.Test;
 
-public class ApproximateTimeTest
+public class MonotonicClockTest
 {
     @Test
     public void testTimestampOrdering() throws Exception
@@ -35,12 +35,12 @@ public class ApproximateTimeTest
             now = Math.max(now, System.currentTimeMillis());
             if (ii % 10000 == 0)
             {
-                ApproximateTime.refresh(ALMOST_NOW);
+                ((MonotonicClock.SampledClock) approxTime).refreshNow();
                 Thread.sleep(1);
             }
 
             nowNanos = Math.max(nowNanos, System.nanoTime());
-            long convertedNow = ApproximateTime.toCurrentTimeMillis(nowNanos);
+            long convertedNow = approxTime.translate().toMillisSinceEpoch(nowNanos);
 
             int maxDiff = FBUtilities.isWindows ? 15 : 1;
             assertTrue("convertedNow = " + convertedNow + " lastConverted = " + lastConverted + " in iteration " + ii,

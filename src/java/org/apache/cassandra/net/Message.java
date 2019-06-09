@@ -40,9 +40,8 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.tracing.Tracing.TraceType;
-import org.apache.cassandra.utils.ApproximateTime;
-import org.apache.cassandra.utils.ApproximateTime.AlmostSameTime;
 import org.apache.cassandra.utils.FBUtilities;
+import org.apache.cassandra.utils.MonotonicClockTranslation;
 
 import static java.util.concurrent.TimeUnit.MINUTES;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -53,6 +52,7 @@ import static org.apache.cassandra.net.MessagingService.VERSION_3014;
 import static org.apache.cassandra.net.MessagingService.VERSION_30;
 import static org.apache.cassandra.net.MessagingService.VERSION_40;
 import static org.apache.cassandra.net.MessagingService.instance;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 import static org.apache.cassandra.utils.vint.VIntCoding.computeUnsignedVIntSize;
 import static org.apache.cassandra.utils.vint.VIntCoding.getUnsignedVInt;
 import static org.apache.cassandra.utils.vint.VIntCoding.skipUnsignedVInt;
@@ -122,12 +122,12 @@ public class Message<T>
     /** For how long the message has lived. */
     public long elapsedSinceCreated(TimeUnit units)
     {
-        return units.convert(ApproximateTime.nanoTime() - createdAtNanos(), NANOSECONDS);
+        return units.convert(approxTime.now() - createdAtNanos(), NANOSECONDS);
     }
 
     public long creationTimeMillis()
     {
-        return ApproximateTime.toCurrentTimeMillis(createdAtNanos());
+        return approxTime.translate().toMillisSinceEpoch(createdAtNanos());
     }
 
     /** Whether a failure response should be returned upon failure */
@@ -216,7 +216,7 @@ public class Message<T>
             throw new IllegalArgumentException();
 
         InetAddressAndPort from = FBUtilities.getBroadcastAddressAndPort();
-        long createdAtNanos = ApproximateTime.nanoTime();
+        long createdAtNanos = approxTime.now();
         if (expiresAtNanos == 0)
             expiresAtNanos = verb.expiresAtNanos(createdAtNanos);
 
@@ -532,7 +532,7 @@ public class Message<T>
     public static <T> Builder<T> builder(Verb verb, T payload)
     {
         return new Builder<T>().ofVerb(verb)
-                               .withCreatedAt(ApproximateTime.nanoTime())
+                               .withCreatedAt(approxTime.now())
                                .withPayload(payload);
     }
 
@@ -665,7 +665,7 @@ public class Message<T>
             out.writeUnsignedVInt(header.id);
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
-            out.writeInt((int) ApproximateTime.toCurrentTimeMillis(header.createdAtNanos));
+            out.writeInt((int) approxTime.translate().toMillisSinceEpoch(header.createdAtNanos));
             out.writeUnsignedVInt(1 + NANOSECONDS.toMillis(header.expiresAtNanos - header.createdAtNanos));
             out.writeUnsignedVInt(header.verb.id);
             out.writeUnsignedVInt(header.flags);
@@ -675,8 +675,8 @@ public class Message<T>
         private Header deserializeHeaderPost40(DataInputPlus in, InetAddressAndPort peer, int version) throws IOException
         {
             long id = in.readUnsignedVInt();
-            long currentTimeNanos = ApproximateTime.nanoTime();
-            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            long currentTimeNanos = approxTime.now();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
             long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
             long expiresAtNanos = getExpiresAtNanos(creationTimeNanos, currentTimeNanos, TimeUnit.MILLISECONDS.toNanos(in.readUnsignedVInt()));
             Verb verb = Verb.fromId(Ints.checkedCast(in.readUnsignedVInt()));
@@ -709,7 +709,7 @@ public class Message<T>
 
         private Header extractHeaderPost40(ByteBuffer buf, InetAddressAndPort from, long currentTimeNanos, int version) throws IOException
         {
-            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
 
             int index = buf.position();
 
@@ -819,7 +819,7 @@ public class Message<T>
             out.writeInt(Ints.checkedCast(header.id));
             // int cast cuts off the high-order half of the timestamp, which we can assume remains
             // the same between now and when the recipient reconstructs it.
-            out.writeInt((int) ApproximateTime.toCurrentTimeMillis(header.createdAtNanos));
+            out.writeInt((int) approxTime.translate().toMillisSinceEpoch(header.createdAtNanos));
             inetAddressAndPortSerializer.serialize(header.from, out, version);
             out.writeInt(header.verb.toPre40Verb().id);
             serializeParams(addFlagsToLegacyParams(header.params, header.flags), out, version);
@@ -829,8 +829,8 @@ public class Message<T>
         {
             validateLegacyProtocolMagic(in.readInt());
             int id = in.readInt();
-            long currentTimeNanos = ApproximateTime.nanoTime();
-            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            long currentTimeNanos = approxTime.now();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
             long creationTimeNanos = calculateCreationTimeNanos(in.readInt(), timeSnapshot, currentTimeNanos);
             InetAddressAndPort from = inetAddressAndPortSerializer.deserialize(in, version);
             Verb verb = Verb.fromId(in.readInt());
@@ -861,7 +861,7 @@ public class Message<T>
 
         private Header extractHeaderPre40(ByteBuffer buf, long currentTimeNanos, int version) throws IOException
         {
-            AlmostSameTime timeSnapshot = ApproximateTime.snapshot();
+            MonotonicClockTranslation timeSnapshot = approxTime.translate();
 
             int index = buf.position();
 
@@ -1032,9 +1032,9 @@ public class Message<T>
         private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_START  = 0xFFFFFFFFL - MINUTES.toMillis(15L);
         private static final long TIMESTAMP_WRAPAROUND_GRACE_PERIOD_END    =               MINUTES.toMillis(15L);
 
-        private static long calculateCreationTimeNanos(int messageTimestampMillis, AlmostSameTime timeSnapshot, long currentTimeNanos)
+        private static long calculateCreationTimeNanos(int messageTimestampMillis, MonotonicClockTranslation timeSnapshot, long currentTimeNanos)
         {
-            long currentTimeMillis = timeSnapshot.toCurrentTimeMillis(currentTimeNanos);
+            long currentTimeMillis = timeSnapshot.toMillisSinceEpoch(currentTimeNanos);
             // Reconstruct the message construction time sent by the remote host (we sent only the lower 4 bytes, assuming the
             // higher 4 bytes wouldn't change between the sender and receiver)
             long highBits = currentTimeMillis & 0xFFFFFFFF00000000L;
@@ -1052,7 +1052,7 @@ public class Message<T>
             }
 
             long sentTimeMillis = (highBits | sentLowBits);
-            return timeSnapshot.toNanoTime(sentTimeMillis);
+            return timeSnapshot.fromMillisSinceEpoch(sentTimeMillis);
         }
 
         /*

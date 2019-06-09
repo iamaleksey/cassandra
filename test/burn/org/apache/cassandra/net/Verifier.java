@@ -23,7 +23,6 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentSkipListMap;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReferenceArray;
 import java.util.concurrent.locks.LockSupport;
@@ -63,6 +62,7 @@ import static org.apache.cassandra.net.Verifier.EventType.SEND_FRAME;
 import static org.apache.cassandra.net.Verifier.EventType.SENT_FRAME;
 import static org.apache.cassandra.net.Verifier.EventType.SERIALIZE;
 import static org.apache.cassandra.net.Verifier.ExpiredMessageEvent.ExpirationType.ON_SENT;
+import static org.apache.cassandra.utils.MonotonicClock.approxTime;
 
 /**
  * This class is a single-threaded verifier monitoring a single link, with events supplied by inbound and outbound threads
@@ -548,7 +548,7 @@ public class Verifier
         public String toString()
         {
             return String.format("{id:%d, state:[%s,%s], upd:%d, ver:%d, enqueue:[%d,%d], ser:%d, arr:%d, deser:%d, expires:%d, sentOn: %d}",
-                                 message.id(), sendState, receiveState, lastUpdateAt, messagingVersion, enqueueStart, enqueueEnd, serialize, arrive, deserialize, ApproximateTime.toCurrentTimeMillis(expiresAtNanos), sentOn == null ? -1 : sentOn.connectionId);
+                                 message.id(), sendState, receiveState, lastUpdateAt, messagingVersion, enqueueStart, enqueueEnd, serialize, arrive, deserialize, approxTime.translate().toMillisSinceEpoch(expiresAtNanos), sentOn == null ? -1 : sentOn.connectionId);
         }
     }
 
@@ -618,8 +618,8 @@ public class Verifier
     {
         try
         {
-            long lastEventAt = ApproximateTime.nanoTime();
-            while ((now = ApproximateTime.nanoTime()) < deadlineNanos)
+            long lastEventAt = approxTime.now();
+            while ((now = approxTime.now()) < deadlineNanos)
             {
                 Event next = events.await(nextMessageId, 100L, MILLISECONDS);
                 if (next == null)
