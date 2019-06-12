@@ -1266,8 +1266,8 @@ public class OutboundConnection
         if (newTemplate.socketFactory != template.socketFactory) throw new IllegalArgumentException();
         if (newTemplate.callbacks != template.callbacks) throw new IllegalArgumentException();
         if (!Objects.equals(newTemplate.applicationSendQueueCapacityInBytes, template.applicationSendQueueCapacityInBytes)) throw new IllegalArgumentException();
-        if (!Objects.equals(newTemplate.applicationReserveSendQueueEndpointCapacityInBytes, template.applicationReserveSendQueueEndpointCapacityInBytes)) throw new IllegalArgumentException();
-        if (newTemplate.applicationReserveSendQueueGlobalCapacityInBytes != template.applicationReserveSendQueueGlobalCapacityInBytes) throw new IllegalArgumentException();
+        if (!Objects.equals(newTemplate.applicationSendQueueReserveEndpointCapacityInBytes, template.applicationSendQueueReserveEndpointCapacityInBytes)) throw new IllegalArgumentException();
+        if (newTemplate.applicationSendQueueReserveGlobalCapacityInBytes != template.applicationSendQueueReserveGlobalCapacityInBytes) throw new IllegalArgumentException();
 
         logger.info("{} updating connection settings", id());
 

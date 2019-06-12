@@ -227,7 +227,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
 
     // the inbound global reserve limits and associated wait queue
     private final InboundMessageHandlers.GlobalResourceLimits inboundGlobalReserveLimits = new InboundMessageHandlers.GlobalResourceLimits(
-        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes()));
+        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReceiveQueueReserveGlobalCapacityInBytes()));
 
     // the socket bindings we accept incoming connections on
     private final InboundSockets inboundSockets = new InboundSockets(new InboundConnectionSettings()
@@ -238,7 +238,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
     public final OutboundSink outboundSink = new OutboundSink(this::doSend);
 
     final ResourceLimits.Limit outboundGlobalReserveLimit =
-        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationReserveSendQueueGlobalCapacityInBytes());
+        new ResourceLimits.Concurrent(DatabaseDescriptor.getInternodeApplicationSendQueueReserveGlobalCapacityInBytes());
 
     // back-pressure implementation
     private final BackPressureStrategy backPressure = DatabaseDescriptor.getBackPressureStrategy();
@@ -558,7 +558,7 @@ public final class MessagingService extends MessagingServiceMBeanImpl
             new InboundMessageHandlers(FBUtilities.getLocalAddressAndPort(),
                                        addr,
                                        DatabaseDescriptor.getInternodeApplicationReceiveQueueCapacityInBytes(),
-                                       DatabaseDescriptor.getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes(),
+                                       DatabaseDescriptor.getInternodeApplicationReceiveQueueReserveEndpointCapacityInBytes(),
                                        inboundGlobalReserveLimits, metrics, inboundSink)
         );
     }

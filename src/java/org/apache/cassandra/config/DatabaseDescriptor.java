@@ -807,23 +807,23 @@ public class DatabaseDescriptor
         Integer maxMessageSize = conf.internode_max_message_size_in_bytes;
         if (maxMessageSize != null)
         {
-            if (maxMessageSize > conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes)
-                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_endpoint_capacity_in_bytes", false);
+            if (maxMessageSize > conf.internode_application_receive_queue_reserve_endpoint_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_receive_queue_reserve_endpoint_capacity_in_bytes", false);
 
-            if (maxMessageSize > conf.internode_application_reserve_receive_queue_global_capacity_in_bytes)
-                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_receive_queue_global_capacity_in_bytes", false);
+            if (maxMessageSize > conf.internode_application_receive_queue_reserve_global_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_receive_queue_reserve_global_capacity_in_bytes", false);
 
-            if (maxMessageSize > conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes)
-                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_endpoint_capacity_in_bytes", false);
+            if (maxMessageSize > conf.internode_application_send_queue_reserve_endpoint_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_send_queue_reserve_endpoint_capacity_in_bytes", false);
 
-            if (maxMessageSize > conf.internode_application_reserve_send_queue_global_capacity_in_bytes)
-                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_reserve_send_queue_global_capacity_in_bytes", false);
+            if (maxMessageSize > conf.internode_application_send_queue_reserve_global_capacity_in_bytes)
+                throw new ConfigurationException("internode_max_message_size_in_mb must no exceed internode_application_send_queue_reserve_global_capacity_in_bytes", false);
         }
         else
         {
             conf.internode_max_message_size_in_bytes =
-                Math.min(conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes,
-                         conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes);
+                Math.min(conf.internode_application_receive_queue_reserve_endpoint_capacity_in_bytes,
+                         conf.internode_application_send_queue_reserve_endpoint_capacity_in_bytes);
         }
 
         validateMaxConcurrentAutoUpgradeTasksConf(conf.max_concurrent_automatic_sstable_upgrades);
@@ -1878,14 +1878,14 @@ public class DatabaseDescriptor
         return conf.internode_application_send_queue_capacity_in_bytes;
     }
 
-    public static int getInternodeApplicationReserveSendQueueEndpointCapacityInBytes()
+    public static int getInternodeApplicationSendQueueReserveEndpointCapacityInBytes()
     {
-        return conf.internode_application_reserve_send_queue_endpoint_capacity_in_bytes;
+        return conf.internode_application_send_queue_reserve_endpoint_capacity_in_bytes;
     }
 
-    public static int getInternodeApplicationReserveSendQueueGlobalCapacityInBytes()
+    public static int getInternodeApplicationSendQueueReserveGlobalCapacityInBytes()
     {
-        return conf.internode_application_reserve_send_queue_global_capacity_in_bytes;
+        return conf.internode_application_send_queue_reserve_global_capacity_in_bytes;
     }
 
     public static int getInternodeApplicationReceiveQueueCapacityInBytes()
@@ -1893,14 +1893,14 @@ public class DatabaseDescriptor
         return conf.internode_application_receive_queue_capacity_in_bytes;
     }
 
-    public static int getInternodeApplicationReserveReceiveQueueEndpointCapacityInBytes()
+    public static int getInternodeApplicationReceiveQueueReserveEndpointCapacityInBytes()
     {
-        return conf.internode_application_reserve_receive_queue_endpoint_capacity_in_bytes;
+        return conf.internode_application_receive_queue_reserve_endpoint_capacity_in_bytes;
     }
 
-    public static int getInternodeApplicationReserveReceiveQueueGlobalCapacityInBytes()
+    public static int getInternodeApplicationReceiveQueueReserveGlobalCapacityInBytes()
     {
-        return conf.internode_application_reserve_receive_queue_global_capacity_in_bytes;
+        return conf.internode_application_receive_queue_reserve_global_capacity_in_bytes;
     }
 
     public static int getInternodeTcpConnectTimeoutInMS()

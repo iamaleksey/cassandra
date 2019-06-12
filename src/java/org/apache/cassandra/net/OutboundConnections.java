@@ -65,8 +65,8 @@ public class OutboundConnections
     {
         this.backPressureState = backPressureState;
         this.template = template = template.withDefaultReserveLimits();
-        reserveCapacity = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveCapacity, template.applicationReserveSendQueueGlobalCapacityInBytes);
+        reserveCapacity = new ResourceLimits.Concurrent(template.applicationSendQueueReserveEndpointCapacityInBytes);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveCapacity, template.applicationSendQueueReserveGlobalCapacityInBytes);
         this.small = new OutboundConnection(SMALL_MESSAGES, template, reserveCapacityInBytes);
         this.large = new OutboundConnection(LARGE_MESSAGES, template, reserveCapacityInBytes);
         this.urgent = new OutboundConnection(URGENT_MESSAGES, template, reserveCapacityInBytes);

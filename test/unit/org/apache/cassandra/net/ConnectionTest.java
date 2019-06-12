@@ -250,7 +250,7 @@ public class ConnectionTest
                                                                        .withDefaultReserveLimits()
                                                                        .withSocketFactory(factory)
                                                                        .withDefaults(ConnectionCategory.MESSAGING);
-        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundTemplate.applicationReserveSendQueueEndpointCapacityInBytes), outboundTemplate.applicationReserveSendQueueGlobalCapacityInBytes);
+        ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(new ResourceLimits.Concurrent(outboundTemplate.applicationSendQueueReserveEndpointCapacityInBytes), outboundTemplate.applicationSendQueueReserveGlobalCapacityInBytes);
         OutboundConnection outbound = new OutboundConnection(settings.type, outboundTemplate, reserveCapacityInBytes);
         try
         {

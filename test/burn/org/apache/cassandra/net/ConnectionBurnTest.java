@@ -209,8 +209,8 @@ public class ConnectionBurnTest
                 {
                     InboundMessageHandlers inboundHandlers = inbound.handlersByRecipientThenSender.get(recipient).get(sender);
                     OutboundConnectionSettings template = outboundTemplate.withDefaultReserveLimits();
-                    ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(template.applicationReserveSendQueueEndpointCapacityInBytes);
-                    ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationReserveSendQueueGlobalCapacityInBytes);
+                    ResourceLimits.Limit reserveEndpointCapacityInBytes = new ResourceLimits.Concurrent(template.applicationSendQueueReserveEndpointCapacityInBytes);
+                    ResourceLimits.EndpointAndGlobal reserveCapacityInBytes = new ResourceLimits.EndpointAndGlobal(reserveEndpointCapacityInBytes, template.applicationSendQueueReserveGlobalCapacityInBytes);
                     for (ConnectionType type : ConnectionType.MESSAGING_TYPES)
                     {
                         Connection connection = new Connection(sender, recipient, type, inboundHandlers, template, reserveCapacityInBytes, messageGenerators.get(type), minId, maxId);
