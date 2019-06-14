@@ -44,7 +44,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.repair.messages.ValidationComplete;
+import org.apache.cassandra.repair.messages.ValidationResponse;
 import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.utils.FBUtilities;
@@ -52,7 +52,7 @@ import org.apache.cassandra.utils.MerkleTree;
 import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTrees;
 
-import static org.apache.cassandra.net.Verb.REPAIR_REQ;
+import static org.apache.cassandra.net.Verb.VALIDATION_RSP;
 
 /**
  * Handles the building of a merkle tree for a column family.
@@ -405,7 +405,7 @@ public class Validator implements Runnable
     {
         logger.error("Failed creating a merkle tree for {}, {} (see log for details)", desc, initiator);
         // send fail message only to nodes >= version 2.0
-        MessagingService.instance().send(Message.out(REPAIR_REQ, new ValidationComplete(desc)), initiator);
+        MessagingService.instance().send(Message.out(VALIDATION_RSP, new ValidationResponse(desc)), initiator);
     }
 
     /**
@@ -419,6 +419,6 @@ public class Validator implements Runnable
             logger.info("{} Sending completed merkle tree to {} for {}.{}", previewKind.logPrefix(desc.sessionId), initiator, desc.keyspace, desc.columnFamily);
             Tracing.traceRepair("Sending completed merkle tree to {} for {}.{}", initiator, desc.keyspace, desc.columnFamily);
         }
-        MessagingService.instance().send(Message.out(REPAIR_REQ, new ValidationComplete(desc, trees)), initiator);
+        MessagingService.instance().send(Message.out(VALIDATION_RSP, new ValidationResponse(desc, trees)), initiator);
     }
 }
