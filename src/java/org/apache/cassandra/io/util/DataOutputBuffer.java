@@ -201,6 +201,17 @@ public class DataOutputBuffer extends BufferedDataOutputStreamPlus
 
     public ByteBuffer buffer()
     {
+        return buffer(true);
+    }
+
+    public ByteBuffer buffer(boolean duplicate)
+    {
+        if (!duplicate)
+        {
+            buffer.flip();
+            return buffer;
+        }
+
         ByteBuffer result = buffer.duplicate();
         result.flip();
         return result;
