@@ -23,6 +23,7 @@ import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
@@ -41,6 +42,9 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.handler.codec.ByteToMessageDecoder;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
+import io.netty.handler.timeout.IdleState;
+import io.netty.handler.timeout.IdleStateEvent;
+import io.netty.handler.timeout.IdleStateHandler;
 import io.netty.util.Version;
 import io.netty.util.concurrent.EventExecutor;
 import io.netty.util.concurrent.GlobalEventExecutor;
@@ -359,6 +363,26 @@ public class Server implements CassandraDaemon.Server
         protected void initChannel(Channel channel) throws Exception
         {
             ChannelPipeline pipeline = channel.pipeline();
+
+            if (DatabaseDescriptor.nativeTransportIdleTimeout() > 0)
+            {
+                long timeout = DatabaseDescriptor.nativeTransportIdleTimeout();
+                pipeline.addLast("idleStateHandler", new IdleStateHandler(false, 0, 0,
+                                                                          timeout, TimeUnit.MILLISECONDS) {
+                    @Override
+                    protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception {
+                        super.channelIdle(ctx, evt);
+
+                        if (evt.state() == IdleState.ALL_IDLE)
+                        {
+                            logger.info("Closing client connection {} after timeout of {}ms",
+                                        channel.remoteAddress().toString(),
+                                        timeout);
+                            ctx.channel().close();
+                        }
+                    }
+                });
+            }
 
             // Add the ConnectionLimitHandler to the pipeline if configured to do so.
             if (DatabaseDescriptor.getNativeTransportMaxConcurrentConnections() > 0

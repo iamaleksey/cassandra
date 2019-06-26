@@ -683,6 +683,10 @@ native_transport_port: 9042
 # The default is true, which means all supported protocols will be honored.
 native_transport_allow_older_protocols: true
 
+# Controls when idle client connections (e.g., ones that had neither reads or writes) to be closed.
+# Disabled by default.
+# native_transport_idle_timeout_in_ms: 60000
+
 # The address or interface to bind the native transport server to.
 #
 # Set rpc_address OR rpc_interface, not both.
