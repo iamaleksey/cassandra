@@ -1062,13 +1062,10 @@ public class MerkleTree
         {
             if (Ref.DEBUG_ENABLED)
                 MemoryUtil.setAttachment(buffer, new Ref<>(this, null));
-            else
-                MemoryUtil.setAttachment(buffer, this);
-
             return this;
         }
 
-        public void release()
+        void release()
         {
             Object attachment = MemoryUtil.getAttachment(buffer);
             if (attachment instanceof Ref)
