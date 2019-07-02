@@ -38,11 +38,11 @@ import org.slf4j.LoggerFactory;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
-import io.netty.channel.ChannelOption;
+import io.netty.channel.ChannelFactory;
 import io.netty.channel.DefaultSelectStrategyFactory;
 import io.netty.channel.EventLoop;
 import io.netty.channel.EventLoopGroup;
-import io.netty.channel.SingleThreadEventLoop;
+import io.netty.channel.ServerChannel;
 import io.netty.channel.epoll.EpollChannelOption;
 import io.netty.channel.epoll.EpollEventLoopGroup;
 import io.netty.channel.epoll.EpollServerSocketChannel;
@@ -97,6 +97,7 @@ public final class SocketFactory
     {
         NIO
         {
+            @Override
             NioEventLoopGroup makeEventLoopGroup(int threadCount, ThreadFactory threadFactory)
             {
                 return new NioEventLoopGroup(threadCount,
@@ -107,9 +108,22 @@ public final class SocketFactory
                                              RejectedExecutionHandlers.reject(),
                                              capacity -> new ManyToOneConcurrentLinkedQueue<>());
             }
+
+            @Override
+            ChannelFactory<NioSocketChannel> clientChannelFactory()
+            {
+                return NioSocketChannel::new;
+            }
+
+            @Override
+            ChannelFactory<NioServerSocketChannel> serverChannelFactory()
+            {
+                return NioServerSocketChannel::new;
+            }
         },
         EPOLL
         {
+            @Override
             EpollEventLoopGroup makeEventLoopGroup(int threadCount, ThreadFactory threadFactory)
             {
                 return new EpollEventLoopGroup(threadCount,
@@ -118,6 +132,18 @@ public final class SocketFactory
                                                DefaultSelectStrategyFactory.INSTANCE,
                                                RejectedExecutionHandlers.reject(),
                                                capacity -> new ManyToOneConcurrentLinkedQueue<>());
+            }
+
+            @Override
+            ChannelFactory<EpollSocketChannel> clientChannelFactory()
+            {
+                return EpollSocketChannel::new;
+            }
+
+            @Override
+            ChannelFactory<EpollServerSocketChannel> serverChannelFactory()
+            {
+                return EpollServerSocketChannel::new;
             }
         };
 
@@ -128,6 +154,8 @@ public final class SocketFactory
         }
 
         abstract EventLoopGroup makeEventLoopGroup(int threadCount, ThreadFactory threadFactory);
+        abstract ChannelFactory<? extends Channel> clientChannelFactory();
+        abstract ChannelFactory<? extends ServerChannel> serverChannelFactory();
 
         static Provider optimalProvider()
         {
@@ -143,76 +171,42 @@ public final class SocketFactory
             InternalLoggerFactory.setDefaultFactory(Slf4JLoggerFactory.INSTANCE);
     }
 
+    private final Provider provider;
     private final EventLoopGroup acceptGroup;
     private final EventLoopGroup defaultGroup;
     // we need a separate EventLoopGroup for outbound streaming because sendFile is blocking
     private final EventLoopGroup outboundStreamingGroup;
     final ExecutorService synchronousWorkExecutor = Executors.newCachedThreadPool(new NamedThreadFactory("Messaging-SynchronousWork"));
 
-    SocketFactory() { this(Provider.optimalProvider()); }
+    SocketFactory()
+    {
+        this(Provider.optimalProvider());
+    }
+
     SocketFactory(Provider provider)
     {
-        acceptGroup  = provider.makeEventLoopGroup(1, "Messaging-AcceptLoop");
-        defaultGroup = provider.makeEventLoopGroup(EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
-        outboundStreamingGroup = provider.makeEventLoopGroup(EVENT_THREADS, "Streaming-EventLoop");
+        this.provider = provider;
+        this.acceptGroup = provider.makeEventLoopGroup(1, "Messaging-AcceptLoop");
+        this.defaultGroup = provider.makeEventLoopGroup(EVENT_THREADS, NamedThreadFactory.globalPrefix() + "Messaging-EventLoop");
+        this.outboundStreamingGroup = provider.makeEventLoopGroup(EVENT_THREADS, "Streaming-EventLoop");
     }
 
-    private static Provider providerOf(EventLoopGroup eventLoopGroup)
-    {
-        while (eventLoopGroup instanceof SingleThreadEventLoop)
-            eventLoopGroup = ((SingleThreadEventLoop) eventLoopGroup).parent();
-
-        if (eventLoopGroup instanceof EpollEventLoopGroup)
-            return Provider.EPOLL;
-        if (eventLoopGroup instanceof NioEventLoopGroup)
-            return Provider.NIO;
-        throw new IllegalStateException();
-    }
-
-    static Bootstrap newBootstrap(EventLoop eventLoop, int tcpUserTimeoutInMS)
+    Bootstrap newClientBootstrap(EventLoop eventLoop, int tcpUserTimeoutInMS)
     {
         if (eventLoop == null)
             throw new IllegalArgumentException("must provide eventLoop");
 
-        Bootstrap bootstrap = new Bootstrap()
-                              .group(eventLoop)
-                              .option(ChannelOption.ALLOCATOR, GlobalBufferPoolAllocator.instance)
-                              .option(ChannelOption.SO_KEEPALIVE, true);
+        Bootstrap bootstrap = new Bootstrap().group(eventLoop).channelFactory(provider.clientChannelFactory());
 
-        switch (providerOf(eventLoop))
-        {
-            case EPOLL:
-                bootstrap.channel(EpollSocketChannel.class);
-                bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, tcpUserTimeoutInMS);
-                break;
-            case NIO:
-                bootstrap.channel(NioSocketChannel.class);
-        }
+        if (provider == Provider.EPOLL)
+            bootstrap.option(EpollChannelOption.TCP_USER_TIMEOUT, tcpUserTimeoutInMS);
+
         return bootstrap;
     }
 
     ServerBootstrap newServerBootstrap()
     {
-        return newServerBootstrap(acceptGroup, defaultGroup);
-    }
-
-    private static ServerBootstrap newServerBootstrap(EventLoopGroup acceptGroup, EventLoopGroup defaultGroup)
-    {
-        ServerBootstrap bootstrap = new ServerBootstrap()
-               .group(acceptGroup, defaultGroup)
-               .option(ChannelOption.ALLOCATOR, GlobalBufferPoolAllocator.instance)
-               .option(ChannelOption.SO_REUSEADDR, true);
-
-        switch (providerOf(defaultGroup))
-        {
-            case EPOLL:
-               bootstrap.channel(EpollServerSocketChannel.class);
-               break;
-            case NIO:
-               bootstrap.channel(NioServerSocketChannel.class);
-        }
-
-        return bootstrap;
+        return new ServerBootstrap().group(acceptGroup, defaultGroup).channelFactory(provider.serverChannelFactory());
     }
 
     /**
