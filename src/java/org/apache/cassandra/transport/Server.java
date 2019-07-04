@@ -364,32 +364,26 @@ public class Server implements CassandraDaemon.Server
         {
             ChannelPipeline pipeline = channel.pipeline();
 
-            if (DatabaseDescriptor.nativeTransportIdleTimeout() > 0)
-            {
-                long timeout = DatabaseDescriptor.nativeTransportIdleTimeout();
-                pipeline.addLast("idleStateHandler", new IdleStateHandler(false, 0, 0,
-                                                                          timeout, TimeUnit.MILLISECONDS) {
-                    @Override
-                    protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt) throws Exception {
-                        super.channelIdle(ctx, evt);
-
-                        if (evt.state() == IdleState.ALL_IDLE)
-                        {
-                            logger.info("Closing client connection {} after timeout of {}ms",
-                                        channel.remoteAddress().toString(),
-                                        timeout);
-                            ctx.channel().close();
-                        }
-                    }
-                });
-            }
-
             // Add the ConnectionLimitHandler to the pipeline if configured to do so.
             if (DatabaseDescriptor.getNativeTransportMaxConcurrentConnections() > 0
                     || DatabaseDescriptor.getNativeTransportMaxConcurrentConnectionsPerIp() > 0)
             {
                 // Add as first to the pipeline so the limit is enforced as first action.
                 pipeline.addFirst("connectionLimitHandler", connectionLimitHandler);
+            }
+
+            long idleTimeout = DatabaseDescriptor.nativeTransportIdleTimeout();
+            if (idleTimeout > 0)
+            {
+                pipeline.addLast("idleStateHandler", new IdleStateHandler(false, 0, 0, idleTimeout, TimeUnit.MILLISECONDS)
+                {
+                    @Override
+                    protected void channelIdle(ChannelHandlerContext ctx, IdleStateEvent evt)
+                    {
+                        logger.info("Closing client connection {} after timeout of {}ms", channel.remoteAddress(), idleTimeout);
+                        ctx.close();
+                    }
+                });
             }
 
             //pipeline.addLast("debug", new LoggingHandler());
