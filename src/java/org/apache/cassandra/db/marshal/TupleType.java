@@ -284,6 +284,9 @@ public class TupleType extends AbstractType<ByteBuffer>
         if (!(previous instanceof TupleType))
             return false;
 
+        if (isMultiCell() != previous.isMultiCell())
+            return false;
+
         // Extending with new components is fine, removing is not
         TupleType tt = (TupleType)previous;
         if (size() < tt.size())
@@ -303,6 +306,9 @@ public class TupleType extends AbstractType<ByteBuffer>
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
         if (!(otherType instanceof TupleType))
+            return false;
+
+        if (isMultiCell() != otherType.isMultiCell())
             return false;
 
         // Extending with new components is fine, removing is not

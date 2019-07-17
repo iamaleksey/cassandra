@@ -80,8 +80,12 @@ public class BytesType extends AbstractType<ByteBuffer>
     @Override
     public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
     {
-        // BytesType can read anything
-        return true;
+        return otherType.valueLengthIfFixed() == -1  // the other type cannot be fixed length
+            && !otherType.isMultiCell()              // the other type cannot be complex
+            && otherType != ByteType.instance        // 'byte' is currently not fixed length, but this is a bug
+            && otherType != SimpleDateType.instance  // 'date' is currently not fixed length, but this is a bug
+            && otherType != ShortType.instance       // 'smallint' is currently not fixed length, but this is a bug
+            && otherType != TimeType.instance;       // 'time' is currently not fixed length, but this is a bug
     }
 
     public CQL3Type asCQL3Type()

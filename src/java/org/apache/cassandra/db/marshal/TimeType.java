@@ -40,12 +40,6 @@ public class TimeType extends AbstractType<Long>
         return decompose(TimeSerializer.timeStringToLong(source));
     }
 
-    @Override
-    public boolean isValueCompatibleWithInternal(AbstractType<?> otherType)
-    {
-        return this == otherType || otherType == LongType.instance;
-    }
-
     public Term fromJSONObject(Object parsed) throws MarshalException
     {
         try
