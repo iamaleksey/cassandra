@@ -46,7 +46,12 @@ import static org.junit.Assert.*;
 
 public class MerkleTreeTest
 {
-    private static final byte[] DUMMY = HashingUtils.newMessageDigest("SHA-256").digest("dummy".getBytes());
+    private static final byte[] DUMMY = digest("dummy");
+
+    private static byte[] digest(String string)
+    {
+        return HashingUtils.newMessageDigest("SHA-256").digest(string.getBytes());
+    }
 
     /**
      * If a test assumes that the tree is 8 units wide, then it should set this value
@@ -452,8 +457,8 @@ public class MerkleTreeTest
 
         // set the hashes for the leaf of the created split
         middle = mt.get(leftmost.right);
-        middle.hash("arbitrary!".getBytes());
-        mt.get(partitioner.midpoint(leftmost.left, leftmost.right)).hash("even more arbitrary!".getBytes());
+        middle.hash(digest("arbitrary!"));
+        mt.get(partitioner.midpoint(leftmost.left, leftmost.right)).hash(digest("even more arbitrary!"));
 
         // trees should disagree for (leftmost.left, middle.right]
         List<TreeRange> diffs = MerkleTree.difference(mt, mt2);
@@ -491,7 +496,8 @@ public class MerkleTreeTest
 
         List<TreeRange> diffs = MerkleTree.difference(ltree, rtree);
         assertEquals(Lists.newArrayList(range), diffs);
-        assertEquals(MerkleTree.FULLY_INCONSISTENT, MerkleTree.differenceHelper(ltree, rtree, new ArrayList<>(), new MerkleTree.TreeRange(ltree.fullRange.left, ltree.fullRange.right, (byte)0)));
+        assertEquals(MerkleTree.Difference.FULLY_INCONSISTENT,
+                     MerkleTree.differenceHelper(ltree, rtree, new ArrayList<>(), new MerkleTree.TreeRange(ltree.fullRange.left, ltree.fullRange.right, (byte)0)));
     }
 
     /**
@@ -548,7 +554,7 @@ public class MerkleTreeTest
             while (depth.equals(dstack.peek()))
             {
                 // consume the stack
-                hash = FBUtilities.xor(hstack.pop(), hash);
+                hash = MerkleTree.xor(hstack.pop(), hash);
                 depth = dstack.pop() - 1;
             }
             dstack.push(depth);

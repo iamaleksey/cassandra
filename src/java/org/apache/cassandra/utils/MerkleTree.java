@@ -44,6 +44,7 @@ import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.utils.concurrent.Ref;
 import org.apache.cassandra.utils.memory.MemoryUtil;
 
+import static java.lang.String.format;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.utils.ByteBufferUtil.compare;
 
@@ -85,12 +86,6 @@ public class MerkleTree
     }
 
     public static final byte RECOMMENDED_DEPTH = Byte.MAX_VALUE - 1;
-
-    @SuppressWarnings("WeakerAccess")
-    static final int CONSISTENT = 0;
-    static final int FULLY_INCONSISTENT = 1;
-    @SuppressWarnings("WeakerAccess")
-    static final int PARTIALLY_INCONSISTENT = 2;
 
     private final int hashdepth;
 
@@ -150,13 +145,6 @@ public class MerkleTree
         size = (long) Math.pow(2, depth);
     }
 
-    public void release()
-    {
-        if (root instanceof OffHeapNode)
-            ((OffHeapNode) root).release();
-        root = null;
-    }
-
     private OnHeapNode initHelper(Token left, Token right, int depth, int max)
     {
         if (depth == max)
@@ -170,6 +158,13 @@ public class MerkleTree
         OnHeapNode leftChild = initHelper(left, midpoint, depth + 1, max);
         OnHeapNode rightChild = initHelper(midpoint, right, depth + 1, max);
         return new OnHeapInner(midpoint, leftChild, rightChild);
+    }
+
+    public void release()
+    {
+        if (root instanceof OffHeapNode)
+            ((OffHeapNode) root).release();
+        root = null;
     }
 
     public IPartitioner partitioner()
@@ -222,7 +217,7 @@ public class MerkleTree
             else
             {
                 logger.debug("Digest mismatch detected, traversing trees [{}, {}]", ltree, rtree);
-                if (FULLY_INCONSISTENT == differenceHelper(ltree, rtree, diff, active))
+                if (Difference.FULLY_INCONSISTENT == differenceHelper(ltree, rtree, diff, active))
                 {
                     logger.debug("Range {} fully inconsistent", active);
                     diff.add(active);
@@ -233,6 +228,8 @@ public class MerkleTree
         return diff;
     }
 
+    enum Difference { CONSISTENT, FULLY_INCONSISTENT, PARTIALLY_INCONSISTENT }
+
     /**
      * TODO: This function could be optimized into a depth first traversal of the two trees in parallel.
      *
@@ -240,10 +237,10 @@ public class MerkleTree
      * @return FULLY_INCONSISTENT if active is inconsistent, PARTIALLY_INCONSISTENT if only a subrange is inconsistent.
      */
     @VisibleForTesting
-    static int differenceHelper(MerkleTree ltree, MerkleTree rtree, List<TreeRange> diff, TreeRange active)
+    static Difference differenceHelper(MerkleTree ltree, MerkleTree rtree, List<TreeRange> diff, TreeRange active)
     {
         if (active.depth == Byte.MAX_VALUE)
-            return CONSISTENT;
+            return Difference.CONSISTENT;
 
         Token midpoint = ltree.partitioner().midpoint(active.left, active.right);
         // sanity check for midpoint calculation, see CASSANDRA-13052
@@ -252,7 +249,7 @@ public class MerkleTree
             // If the midpoint equals either the left or the right, we have a range that's too small to split - we'll simply report the
             // whole range as inconsistent
             logger.debug("({}) No sane midpoint ({}) for range {} , marking whole range as inconsistent", active.depth, midpoint, active);
-            return FULLY_INCONSISTENT;
+            return Difference.FULLY_INCONSISTENT;
         }
 
         TreeRange left = new TreeRange(active.left, midpoint, active.depth + 1);
@@ -264,13 +261,13 @@ public class MerkleTree
         lnode = ltree.find(left);
         rnode = rtree.find(left);
 
-        int ldiff = CONSISTENT;
+        Difference ldiff = Difference.CONSISTENT;
         if (lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on left sub-range {}: [{}, {}]", active.depth, left, lnode, rnode);
 
             if (lnode instanceof Leaf)
-                ldiff = FULLY_INCONSISTENT;
+                ldiff = Difference.FULLY_INCONSISTENT;
             else
                 ldiff = differenceHelper(ltree, rtree, diff, left);
         }
@@ -279,118 +276,37 @@ public class MerkleTree
         lnode = ltree.find(right);
         rnode = rtree.find(right);
 
-        int rdiff = CONSISTENT;
+        Difference rdiff = Difference.CONSISTENT;
         if (lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on right sub-range {}: [{}, {}]", active.depth, right, lnode, rnode);
 
             if (rnode instanceof Leaf)
-                rdiff = FULLY_INCONSISTENT;
+                rdiff = Difference.FULLY_INCONSISTENT;
             else
                 rdiff = differenceHelper(ltree, rtree, diff, right);
         }
 
-        if (ldiff == FULLY_INCONSISTENT && rdiff == FULLY_INCONSISTENT)
+        if (ldiff == Difference.FULLY_INCONSISTENT && rdiff == Difference.FULLY_INCONSISTENT)
         {
             // both children are fully inconsistent
             logger.debug("({}) Fully inconsistent range [{}, {}]", active.depth, left, right);
-            return FULLY_INCONSISTENT;
+            return Difference.FULLY_INCONSISTENT;
         }
-        else if (ldiff == FULLY_INCONSISTENT)
+        else if (ldiff == Difference.FULLY_INCONSISTENT)
         {
             logger.debug("({}) Adding left sub-range to diff as fully inconsistent {}", active.depth, left);
             diff.add(left);
-            return PARTIALLY_INCONSISTENT;
+            return Difference.PARTIALLY_INCONSISTENT;
         }
-        else if (rdiff == FULLY_INCONSISTENT)
+        else if (rdiff == Difference.FULLY_INCONSISTENT)
         {
             logger.debug("({}) Adding right sub-range to diff as fully inconsistent {}", active.depth, right);
             diff.add(right);
-            return PARTIALLY_INCONSISTENT;
+            return Difference.PARTIALLY_INCONSISTENT;
         }
         logger.debug("({}) Range {} partially inconstent", active.depth, active);
-        return PARTIALLY_INCONSISTENT;
-    }
-
-    /**
-     * For testing purposes.
-     * Gets the smallest range containing the token.
-     */
-    public TreeRange get(Token t)
-    {
-        return getHelper(root, fullRange.left, fullRange.right, t);
-    }
-
-    private TreeRange getHelper(Node node, Token pleft, Token pright, Token t)
-    {
-        int depth = 0;
-
-        while (true)
-        {
-            if (node instanceof Leaf)
-            {
-                // we've reached a hash: wrap it up and deliver it
-                return new TreeRange(this, pleft, pright, depth, node);
-            }
-
-            assert node instanceof Inner;
-            Inner inner = (Inner) node;
-
-            if (Range.contains(pleft, inner.token(), t)) // left child contains token
-            {
-                pright = inner.token();
-                node = inner.left();
-            }
-            else // right child contains token
-            {
-                pleft = inner.token();
-                node = inner.right();
-            }
-
-            depth++;
-        }
-    }
-
-    /**
-     * Invalidates the ranges containing the given token.
-     * Useful for testing.
-     */
-    public void invalidate(Token t)
-    {
-        invalidateHelper(root, fullRange.left, t);
-    }
-
-    private void invalidateHelper(Node node, Token pleft, Token t)
-    {
-        node.hash(EMPTY_HASH);
-
-        if (node instanceof Leaf)
-            return;
-
-        assert node instanceof Inner;
-        Inner inner = (Inner) node;
-        // TODO: reset computed flag on OnHeapInners
-
-        if (Range.contains(pleft, inner.token(), t))
-            invalidateHelper(inner.left(), pleft, t); // left child contains token
-        else
-            invalidateHelper(inner.right(), inner.token(), t); // right child contains token
-    }
-
-    /**
-     * Hash the given range in the tree. The range must have been generated
-     * with recursive applications of partitioner.midpoint().
-     *
-     * NB: Currently does not support wrapping ranges that do not end with
-     * partitioner.getMinimumToken().
-     *
-     * @return {@link #EMPTY_HASH} if any subrange of the range is invalid, or if the exact
-     *         range cannot be calculated using this tree.
-     */
-    @VisibleForTesting
-    public byte[] hash(Range<Token> range)
-    {
-        return find(range).hash();
+        return Difference.PARTIALLY_INCONSISTENT;
     }
 
     /**
@@ -409,44 +325,17 @@ public class MerkleTree
      * @param range Range to find
      * @return {@link Node} found. If nothing found, return {@link Leaf} with empty hash.
      */
-    private Node find(Range<Token> range)
+    @VisibleForTesting
+    Node find(Range<Token> range)
     {
         try
         {
-            return findHelper(root, new Range<>(fullRange.left, fullRange.right), range);
+            return findHelper(root, fullRange, range);
         }
         catch (StopRecursion e)
         {
             return new OnHeapLeaf();
         }
-    }
-
-    interface Consumer<E extends Exception>
-    {
-        void accept(Node node) throws E;
-    }
-
-    @VisibleForTesting
-    <E extends Exception> boolean ifHashesRange(Range<Token> range, Consumer<E> consumer) throws E
-    {
-        try
-        {
-            Node node = findHelper(root, new Range<>(fullRange.left, fullRange.right), range);
-            boolean hasHash = !node.hasEmptyHash();
-            if (hasHash)
-                consumer.accept(node);
-            return hasHash;
-        }
-        catch (StopRecursion e)
-        {
-            return false;
-        }
-    }
-
-    @VisibleForTesting
-    boolean hashesRange(Range<Token> range)
-    {
-        return ifHashesRange(range, n -> {});
     }
 
     /**
@@ -812,18 +701,33 @@ public class MerkleTree
         return new MerkleTree(root, partitioner, fullRange, hashDepth, maxSize, innerNodeCount);
     }
 
-    private static boolean warnedOnce;
-    private static Node deserializeTree(DataInputPlus in, IPartitioner partitioner, int innerNodeCount, boolean offHeapRequested, int version) throws IOException
+    private static boolean shouldUseOffHeapTrees(IPartitioner partitioner, boolean offHeapRequested)
     {
         boolean offHeapSupported = partitioner instanceof Murmur3Partitioner || partitioner instanceof RandomPartitioner;
 
         if (offHeapRequested && !offHeapSupported && !warnedOnce)
         {
-            logger.warn("Configuration requests offheap memtables, but partitioner does not support it. Ignoring.");
+            logger.warn("Configuration requests off-heap merkle trees, but partitioner does not support it. Ignoring.");
             warnedOnce = true;
         }
 
-        return offHeapRequested && offHeapSupported
+        return offHeapRequested && offHeapSupported;
+    }
+    private static boolean warnedOnce;
+
+    private static ByteBuffer allocate(int innerNodeCount, IPartitioner partitioner)
+    {
+        int size = offHeapBufferSize(innerNodeCount, partitioner);
+        logger.debug("Allocating direct buffer of size {} for an off-heap merkle tree", size);
+        ByteBuffer buffer = ByteBuffer.allocateDirect(size);
+        if (Ref.DEBUG_ENABLED)
+            MemoryUtil.setAttachment(buffer, new Ref<>(null, null));
+        return buffer;
+    }
+
+    private static Node deserializeTree(DataInputPlus in, IPartitioner partitioner, int innerNodeCount, boolean offHeapRequested, int version) throws IOException
+    {
+        return shouldUseOffHeapTrees(partitioner, offHeapRequested)
              ? deserializeOffHeap(in, partitioner, innerNodeCount, version)
              : OnHeapNode.deserialize(in, partitioner, version);
     }
@@ -833,39 +737,27 @@ public class MerkleTree
      * On the deserialization path, we know in advance what the tree looks like,
      * So we can pre-size an offheap buffer and deserialize into that.
      */
-
     MerkleTree tryMoveOffHeap() throws IOException
     {
-        boolean offHeapEnabled = DatabaseDescriptor.getOffheapMerkleTreesEnabled();
-        boolean offHeapSupported = partitioner instanceof Murmur3Partitioner || partitioner instanceof RandomPartitioner;
-
-        if (offHeapEnabled && !offHeapSupported && !warnedOnce)
-        {
-            logger.warn("Configuration requests offheap memtables, but partitioner does not support it. Ignoring.");
-            warnedOnce = true;
-        }
-
-        return root instanceof OnHeapNode && offHeapEnabled && offHeapSupported ? moveOffHeap() : this;
+        return root instanceof OnHeapNode && shouldUseOffHeapTrees(partitioner, DatabaseDescriptor.getOffheapMerkleTreesEnabled())
+             ? moveOffHeap()
+             : this;
     }
 
     private MerkleTree moveOffHeap() throws IOException
     {
         assert root instanceof OnHeapNode;
-        int bufferSize = offHeapBufferSize(Ints.checkedCast(size), partitioner);
-        logger.debug("Allocating direct buffer of size {} to move merkle tree off heap", bufferSize);
-        ByteBuffer buffer = ByteBuffer.allocateDirect(bufferSize);
+        ByteBuffer buffer = allocate(Ints.checkedCast(size), partitioner);
         int pointer = ((OnHeapNode) root).serializeOffHeap(buffer, partitioner);
-        OffHeapNode newRoot = fromPointer(pointer, buffer, partitioner).attachRef();
+        OffHeapNode newRoot = fromPointer(pointer, buffer, partitioner);
         return new MerkleTree(newRoot, partitioner, fullRange, hashdepth, maxsize, size);
     }
 
     private static OffHeapNode deserializeOffHeap(DataInputPlus in, IPartitioner partitioner, int innerNodeCount, int version) throws IOException
     {
-        int bufferSize = offHeapBufferSize(innerNodeCount, partitioner);
-        logger.debug("Allocating direct buffer of size {} for merkle tree deserialization", bufferSize);
-        ByteBuffer buffer = ByteBuffer.allocateDirect(bufferSize);
+        ByteBuffer buffer = allocate(innerNodeCount, partitioner);
         int pointer = OffHeapNode.deserialize(in, buffer, partitioner, version);
-        return fromPointer(pointer, buffer, partitioner).attachRef();
+        return fromPointer(pointer, buffer, partitioner);
     }
 
     private static OffHeapNode fromPointer(int pointer, ByteBuffer buffer, IPartitioner partitioner)
@@ -1059,13 +951,6 @@ public class MerkleTree
             return false;
         }
 
-        OffHeapNode attachRef()
-        {
-            if (Ref.DEBUG_ENABLED)
-                MemoryUtil.setAttachment(buffer, new Ref<>(this, null));
-            return this;
-        }
-
         void release()
         {
             Object attachment = MemoryUtil.getAttachment(buffer);
@@ -1160,7 +1045,7 @@ public class MerkleTree
             if (hasEmptyHash())
                 hash(partitionHash);
             else
-                FBUtilities.xorOntoLeft(hash, partitionHash);
+                xorOntoLeft(hash, partitionHash);
 
             sizeOfRange += partitionSize;
             partitionsInRange += 1;
@@ -1168,15 +1053,17 @@ public class MerkleTree
 
         static OnHeapLeaf deserializeWithoutIdent(DataInputPlus in) throws IOException
         {
-            if (in.readByte() > 0)
+            int size = in.readByte();
+            switch (size)
             {
-                byte[] hash = new byte[HASH_SIZE];
-                in.readFully(hash);
-                return new OnHeapLeaf(hash);
-            }
-            else
-            {
-                return new OnHeapLeaf();
+                case HASH_SIZE:
+                    byte[] hash = new byte[HASH_SIZE];
+                    in.readFully(hash);
+                    return new OnHeapLeaf(hash);
+                case 0:
+                    return new OnHeapLeaf();
+                default:
+                    throw new IllegalStateException(format("Hash of size %d encountered, expecting %d or %d", size, HASH_SIZE, 0));
             }
         }
 
@@ -1318,6 +1205,10 @@ public class MerkleTree
             Inner that = (Inner) other;
             return !hashesDiffer(other) && this.left().equals(that.left()) && this.right().equals(that.right());
         }
+
+        default void unsafeInvalidate()
+        {
+        }
     }
 
     static class OnHeapInner extends OnHeapNode implements Inner
@@ -1372,7 +1263,7 @@ public class MerkleTree
                 right.compute();
 
                 if (!left.hasEmptyHash() && !right.hasEmptyHash())
-                    hash = FBUtilities.xor(left.hash(), right.hash());
+                    hash = xor(left.hash(), right.hash());
                 else if (left.hasEmptyHash())
                     hash = right.hash();
                 else if (right.hasEmptyHash())
@@ -1432,6 +1323,12 @@ public class MerkleTree
             toString(buff, 1);
             return buff.toString();
         }
+
+        @Override
+        public void unsafeInvalidate()
+        {
+            computed = false;
+        }
     }
 
     static class OffHeapInner extends OffHeapNode implements Inner
@@ -1468,13 +1365,17 @@ public class MerkleTree
 
         public Node left()
         {
-            int pointer = buffer.getInt(offset + LEFT_CHILD_POINTER_OFFSET);
-            return pointer >= 0 ? new OffHeapInner(buffer, pointer, partitioner) : new OffHeapLeaf(buffer, ~pointer);
+            return child(LEFT_CHILD_POINTER_OFFSET);
         }
 
         public Node right()
         {
-            int pointer = buffer.getInt(offset + RIGHT_CHILD_POINTER_OFFSET);
+            return child(RIGHT_CHILD_POINTER_OFFSET);
+        }
+
+        private Node child(int childOffset)
+        {
+            int pointer = buffer.getInt(offset + childOffset);
             return pointer >= 0 ? new OffHeapInner(buffer, pointer, partitioner) : new OffHeapLeaf(buffer, ~pointer);
         }
 
@@ -1539,6 +1440,30 @@ public class MerkleTree
     }
 
     /**
+     * @return The bitwise XOR of the inputs.
+     */
+    static byte[] xor(byte[] left, byte[] right)
+    {
+        assert left.length == right.length;
+
+        byte[] out = Arrays.copyOf(right, right.length);
+        for (int i = 0; i < left.length; i++)
+            out[i] = (byte)((left[i] & 0xFF) ^ (right[i] & 0xFF));
+        return out;
+    }
+
+    /**
+     * Bitwise XOR of the inputs, in place on the left array.
+     */
+    private static void xorOntoLeft(byte[] left, byte[] right)
+    {
+        assert left.length == right.length;
+
+        for (int i = 0; i < left.length; i++)
+            left[i] = (byte) ((left[i] & 0xFF) ^ (right[i] & 0xFF));
+    }
+
+    /**
      * Estimate the allowable depth while keeping the resulting heap usage of this tree under the provided
      * number of bytes. This is important for ensuring that we do not allocate overly large trees that could
      * OOM the JVM and cause instability.
@@ -1582,5 +1507,126 @@ public class MerkleTree
 
         long adjustedBytes = Math.max(1, (numBytes + sizeOfInner) / (sizeOfLeaf + sizeOfInner));
         return Math.max(1, (int) Math.floor(Math.log(adjustedBytes) / Math.log(2)));
+    }
+
+    /*
+     * Test-only methods.
+     */
+
+    /**
+     * Invalidates the ranges containing the given token.
+     * Useful for testing.
+     */
+    @VisibleForTesting
+    void unsafeInvalidate(Token t)
+    {
+        unsafeInvalidateHelper(root, fullRange.left, t);
+    }
+
+    private void unsafeInvalidateHelper(Node node, Token pleft, Token t)
+    {
+        node.hash(EMPTY_HASH);
+
+        if (node instanceof Leaf)
+            return;
+
+        assert node instanceof Inner;
+        Inner inner = (Inner) node;
+        inner.unsafeInvalidate();
+
+        if (Range.contains(pleft, inner.token(), t))
+            unsafeInvalidateHelper(inner.left(), pleft, t); // left child contains token
+        else
+            unsafeInvalidateHelper(inner.right(), inner.token(), t); // right child contains token
+    }
+
+    /**
+     * Hash the given range in the tree. The range must have been generated
+     * with recursive applications of partitioner.midpoint().
+     *
+     * NB: Currently does not support wrapping ranges that do not end with
+     * partitioner.getMinimumToken().
+     *
+     * @return {@link #EMPTY_HASH} if any subrange of the range is invalid, or if the exact
+     *         range cannot be calculated using this tree.
+     */
+    @VisibleForTesting
+    byte[] hash(Range<Token> range)
+    {
+        return find(range).hash();
+    }
+
+    interface Consumer<E extends Exception>
+    {
+        void accept(Node node) throws E;
+    }
+
+    @VisibleForTesting
+    <E extends Exception> boolean ifHashesRange(Range<Token> range, Consumer<E> consumer) throws E
+    {
+        try
+        {
+            Node node = findHelper(root, new Range<>(fullRange.left, fullRange.right), range);
+            boolean hasHash = !node.hasEmptyHash();
+            if (hasHash)
+                consumer.accept(node);
+            return hasHash;
+        }
+        catch (StopRecursion e)
+        {
+            return false;
+        }
+    }
+
+    @VisibleForTesting
+    boolean hashesRange(Range<Token> range)
+    {
+        return ifHashesRange(range, n -> {});
+    }
+
+    /**
+     * For testing purposes.
+     * Gets the smallest range containing the token.
+     */
+    @VisibleForTesting
+    public TreeRange get(Token t)
+    {
+        return getHelper(root, fullRange.left, fullRange.right, t);
+    }
+
+    private TreeRange getHelper(Node node, Token pleft, Token pright, Token t)
+    {
+        int depth = 0;
+
+        while (true)
+        {
+            if (node instanceof Leaf)
+            {
+                // we've reached a hash: wrap it up and deliver it
+                return new TreeRange(this, pleft, pright, depth, node);
+            }
+
+            assert node instanceof Inner;
+            Inner inner = (Inner) node;
+
+            if (Range.contains(pleft, inner.token(), t)) // left child contains token
+            {
+                pright = inner.token();
+                node = inner.left();
+            }
+            else // right child contains token
+            {
+                pleft = inner.token();
+                node = inner.right();
+            }
+
+            depth++;
+        }
+    }
+
+    @VisibleForTesting
+    void compute()
+    {
+        root.compute();
     }
 }

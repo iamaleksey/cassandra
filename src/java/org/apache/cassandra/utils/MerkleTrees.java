@@ -147,7 +147,8 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
      */
     public void release()
     {
-        merkleTrees.values().forEach(MerkleTree::release); merkleTrees.clear();
+        merkleTrees.values().forEach(MerkleTree::release);
+        merkleTrees.clear();
     }
 
     /**
@@ -179,7 +180,7 @@ public class MerkleTrees implements Iterable<Map.Entry<Range<Token>, MerkleTree>
     @VisibleForTesting
     public void invalidate(Token t)
     {
-        getMerkleTree(t).invalidate(t);
+        getMerkleTree(t).unsafeInvalidate(t);
     }
 
     /**

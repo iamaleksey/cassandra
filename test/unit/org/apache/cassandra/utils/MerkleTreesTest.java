@@ -42,7 +42,12 @@ import static org.junit.Assert.*;
 
 public class MerkleTreesTest
 {
-    private static final byte[] DUMMY = HashingUtils.newMessageDigest("SHA-256").digest("dummy".getBytes());
+    private static final byte[] DUMMY = digest("dummy");
+
+    private static byte[] digest(String string)
+    {
+        return HashingUtils.newMessageDigest("SHA-256").digest(string.getBytes());
+    }
 
     /**
      * If a test assumes that the tree is 8 units wide, then it should set this value
@@ -469,8 +474,8 @@ public class MerkleTreesTest
 
         // set the hashes for the leaf of the created split
         middle = mts.get(leftmost.right);
-        middle.hash("arbitrary!".getBytes());
-        mts.get(partitioner.midpoint(leftmost.left, leftmost.right)).hash("even more arbitrary!".getBytes());
+        middle.hash(digest("arbitrary!"));
+        mts.get(partitioner.midpoint(leftmost.left, leftmost.right)).hash(digest("even more arbitrary!"));
 
         // trees should disagree for (leftmost.left, middle.right]
         List<Range<Token>> diffs = MerkleTrees.difference(mts, mts2);
@@ -499,7 +504,7 @@ public class MerkleTreesTest
             while (depth.equals(dstack.peek()))
             {
                 // consume the stack
-                hash = FBUtilities.xor(hstack.pop(), hash);
+                hash = MerkleTree.xor(hstack.pop(), hash);
                 depth = dstack.pop()-1;
             }
             dstack.push(depth);
