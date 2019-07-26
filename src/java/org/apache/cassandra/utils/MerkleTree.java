@@ -262,7 +262,7 @@ public class MerkleTree
         rnode = rtree.find(left);
 
         Difference ldiff = Difference.CONSISTENT;
-        if (lnode.hashesDiffer(rnode))
+        if (null != lnode && null != rnode && lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on left sub-range {}: [{}, {}]", active.depth, left, lnode, rnode);
 
@@ -271,13 +271,18 @@ public class MerkleTree
             else
                 ldiff = differenceHelper(ltree, rtree, diff, left);
         }
+        else if (null == lnode || null == rnode)
+        {
+            logger.debug("({}) Left sub-range fully inconsistent {}", active.depth, left);
+            ldiff = Difference.FULLY_INCONSISTENT;
+        }
 
         // see if we should recurse right
         lnode = ltree.find(right);
         rnode = rtree.find(right);
 
         Difference rdiff = Difference.CONSISTENT;
-        if (lnode.hashesDiffer(rnode))
+        if (null != lnode && null != rnode && lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on right sub-range {}: [{}, {}]", active.depth, right, lnode, rnode);
 
@@ -285,6 +290,11 @@ public class MerkleTree
                 rdiff = Difference.FULLY_INCONSISTENT;
             else
                 rdiff = differenceHelper(ltree, rtree, diff, right);
+        }
+        else if (null == lnode || null == rnode)
+        {
+            logger.debug("({}) Right sub-range fully inconsistent {}", active.depth, right);
+            rdiff = Difference.FULLY_INCONSISTENT;
         }
 
         if (ldiff == Difference.FULLY_INCONSISTENT && rdiff == Difference.FULLY_INCONSISTENT)
@@ -326,7 +336,7 @@ public class MerkleTree
      * @return {@link Node} found. If nothing found, return {@link Leaf} with empty hash.
      */
     @VisibleForTesting
-    Node find(Range<Token> range)
+    private Node find(Range<Token> range)
     {
         try
         {
@@ -334,7 +344,7 @@ public class MerkleTree
         }
         catch (StopRecursion e)
         {
-            return new OnHeapLeaf();
+            return null;
         }
     }
 
