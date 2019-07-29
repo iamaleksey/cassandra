@@ -72,11 +72,11 @@ public class MerkleTree
 {
     private static final Logger logger = LoggerFactory.getLogger(MerkleTree.class);
 
-    private static final int HASH_SIZE = 32; // SHA-256 = 32 bytes.
+    private static final int HASH_SIZE = 32; // 2xMM3_128 = 32 bytes.
     private static final byte[] EMPTY_HASH = new byte[HASH_SIZE];
 
     /*
-     * Thread-local byte array, large enough to host SHA256 bytes or MM3/Random partitoners' tokens
+     * Thread-local byte array, large enough to host 32B of digest or MM3/Random partitoners' tokens
      */
     private static final ThreadLocal<byte[]> byteArray = ThreadLocal.withInitial(() -> new byte[HASH_SIZE]);
 
@@ -201,11 +201,15 @@ public class MerkleTree
         if (!ltree.fullRange.equals(rtree.fullRange))
             throw new IllegalArgumentException("Difference only make sense on tree covering the same range (but " + ltree.fullRange + " != " + rtree.fullRange + ')');
 
+        // ensure on-heap trees' inner node hashes have been computed
+        ltree.fillInnerHashes();
+        rtree.fillInnerHashes();
+
         List<TreeRange> diff = new ArrayList<>();
         TreeRange active = new TreeRange(ltree.fullRange.left, ltree.fullRange.right, 0);
 
-        Node lnode = ltree.find(active);
-        Node rnode = rtree.find(active);
+        Node lnode = ltree.root;
+        Node rnode = rtree.root;
 
         if (lnode.hashesDiffer(rnode))
         {
@@ -366,11 +370,12 @@ public class MerkleTree
             assert current instanceof Inner;
             Inner inner = (Inner) current;
 
-            Range<Token> leftRange  = new Range<>(activeRange.left, inner.token());
-            Range<Token> rightRange = new Range<>(inner.token(), activeRange.right);
-
             if (find.contains(activeRange)) // this node is fully contained in the range
-                return inner.compute();
+                return inner.fillInnerHashes();
+
+            Token midpoint = inner.token();
+            Range<Token>  leftRange = new Range<>(activeRange.left, midpoint);
+            Range<Token> rightRange = new Range<>(midpoint, activeRange.right);
 
             // else: one of our children contains the range
 
@@ -757,6 +762,7 @@ public class MerkleTree
     private MerkleTree moveOffHeap() throws IOException
     {
         assert root instanceof OnHeapNode;
+        root.fillInnerHashes(); // ensure on-heap trees' inner node hashes have been computed
         ByteBuffer buffer = allocate(Ints.checkedCast(size), partitioner);
         int pointer = ((OnHeapNode) root).serializeOffHeap(buffer, partitioner);
         OffHeapNode newRoot = fromPointer(pointer, buffer, partitioner);
@@ -790,7 +796,7 @@ public class MerkleTree
 
         boolean hashesDiffer(Node other);
 
-        default Node compute()
+        default Node fillInnerHashes()
         {
             return this;
         }
@@ -1265,12 +1271,12 @@ public class MerkleTree
         }
 
         @Override
-        public Node compute()
+        public Node fillInnerHashes()
         {
             if (!computed) // hash and size haven't been calculated; compute children then compute this
             {
-                left.compute();
-                right.compute();
+                left.fillInnerHashes();
+                right.fillInnerHashes();
 
                 if (!left.hasEmptyHash() && !right.hasEmptyHash())
                     hash = xor(left.hash(), right.hash());
@@ -1503,7 +1509,7 @@ public class MerkleTree
         OnHeapLeaf left = new OnHeapLeaf(hashLeft);
         OnHeapLeaf right = new OnHeapLeaf(hashRigth);
         Inner inner = new OnHeapInner(partitioner.getMinimumToken(), left, right);
-        inner.compute();
+        inner.fillInnerHashes();
 
         // Some partioners have variable token sizes, try to estimate as close as we can by using the same
         // heap estimate as the memtables use.
@@ -1635,8 +1641,8 @@ public class MerkleTree
     }
 
     @VisibleForTesting
-    void compute()
+    void fillInnerHashes()
     {
-        root.compute();
+        root.fillInnerHashes();
     }
 }
