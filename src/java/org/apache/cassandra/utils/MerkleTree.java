@@ -553,16 +553,20 @@ public class MerkleTree
          */
         public void addHash(RowHash entry)
         {
+            addHash(entry.hash, entry.size);
+        }
+
+        void addHash(byte[] hash, long partitionSize)
+        {
             assert tree != null : "Not intended for modification!";
 
             assert node instanceof OnHeapLeaf;
-            ((OnHeapLeaf) node).addHash(entry.hash, entry.size);
+            ((OnHeapLeaf) node).addHash(hash, partitionSize);
         }
 
         public void addAll(Iterator<RowHash> entries)
         {
-            while (entries.hasNext())
-                addHash(entries.next());
+            while (entries.hasNext()) addHash(entries.next());
         }
 
         @Override
@@ -759,7 +763,8 @@ public class MerkleTree
              : this;
     }
 
-    private MerkleTree moveOffHeap() throws IOException
+    @VisibleForTesting
+    MerkleTree moveOffHeap() throws IOException
     {
         assert root instanceof OnHeapNode;
         root.fillInnerHashes(); // ensure on-heap trees' inner node hashes have been computed

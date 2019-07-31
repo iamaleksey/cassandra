@@ -17,11 +17,10 @@
  */
 package org.apache.cassandra.utils;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.*;
-
-import com.google.common.collect.Lists;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -41,6 +40,7 @@ import org.apache.cassandra.utils.MerkleTree.RowHash;
 import org.apache.cassandra.utils.MerkleTree.TreeRange;
 import org.apache.cassandra.utils.MerkleTree.TreeRangeIterator;
 
+import static com.google.common.collect.Lists.newArrayList;
 import static org.apache.cassandra.utils.MerkleTree.RECOMMENDED_DEPTH;
 import static org.junit.Assert.*;
 
@@ -414,7 +414,7 @@ public class MerkleTreeTest
             MerkleTree.deserialize(new DataInputBuffer(serialized), false, MessagingService.current_version);
         MerkleTree restoredOffHeap =
             MerkleTree.deserialize(new DataInputBuffer(serialized), true, MessagingService.current_version);
-        MerkleTree movedOffHeap = mt.tryMoveOffHeap();
+        MerkleTree movedOffHeap = mt.moveOffHeap();
 
         assertHashEquals(initialhash, restoredOnHeap.hash(full));
         assertHashEquals(initialhash, restoredOffHeap.hash(full));
@@ -481,8 +481,8 @@ public class MerkleTreeTest
         MerkleTree rtree = new MerkleTree(partitioner, range, RECOMMENDED_DEPTH, 16);
         rtree.init();
 
-        byte[] h1 = "asdf".getBytes();
-        byte[] h2 = "hjkl".getBytes();
+        byte[] h1 = digest("asdf");
+        byte[] h2 = digest("hjkl");
 
         // add dummy hashes to both trees
         for (TreeRange tree : ltree.rangeIterator())
@@ -495,7 +495,7 @@ public class MerkleTreeTest
         }
 
         List<TreeRange> diffs = MerkleTree.difference(ltree, rtree);
-        assertEquals(Lists.newArrayList(range), diffs);
+        assertEquals(newArrayList(range), diffs);
         assertEquals(MerkleTree.Difference.FULLY_INCONSISTENT,
                      MerkleTree.differenceHelper(ltree, rtree, new ArrayList<>(), new MerkleTree.TreeRange(ltree.fullRange.left, ltree.fullRange.right, (byte)0)));
     }
@@ -515,8 +515,8 @@ public class MerkleTreeTest
         MerkleTree rtree = new MerkleTree(partitioner, range, RECOMMENDED_DEPTH, 16);
         rtree.init();
 
-        byte[] h1 = "asdf".getBytes();
-        byte[] h2 = "asdf".getBytes();
+        byte[] h1 = digest("asdf");
+        byte[] h2 = digest("asdf");
 
 
         // add dummy hashes to both trees
@@ -530,7 +530,7 @@ public class MerkleTreeTest
         }
 
         // top level difference() should show no differences
-        assertEquals(MerkleTree.difference(ltree, rtree), Lists.newArrayList());
+        assertEquals(MerkleTree.difference(ltree, rtree), newArrayList());
     }
 
     /**
@@ -663,5 +663,230 @@ public class MerkleTreeTest
 
         tree.hash(fullRange);
         return ObjectSizes.measureDeep(tree);
+    }
+
+    @Test
+    public void testEqualTreesSameDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 3, 3);
+        testDifferences(trees, Collections.emptyList());
+    }
+
+    @Test
+    public void testEqualTreesDifferentDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 2, 3);
+        testDifferences(trees, Collections.emptyList());
+    }
+
+    @Test
+    public void testEntirelyDifferentTrees() throws IOException
+    {
+        int seed1 = makeSeed();
+        int seed2 = seed1 * 32;
+        Trees trees = Trees.make(seed1, seed2, 3, 3);
+        testDifferences(trees, newArrayList(makeTreeRange(0, 16, 0)));
+    }
+
+    @Test
+    public void testDifferentTrees1SameDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 3, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0, 2, 3)));
+    }
+
+    @Test
+    public void testDifferentTrees1DifferentDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 2, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0, 4, 2)));
+    }
+
+    @Test
+    public void testDifferentTrees2SameDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 3, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        trees.tree2.get(longToken(16)).addHash(digest("diff_16"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0,  2,  3),
+                                            makeTreeRange(14, 16, 3)));
+    }
+
+    @Test
+    public void testDifferentTrees2DifferentDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 2, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        trees.tree2.get(longToken(16)).addHash(digest("diff_16"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0,  4,  2),
+                                            makeTreeRange(12, 16, 2)));
+    }
+
+    @Test
+    public void testDifferentTrees3SameDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 3, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        trees.tree1.get(longToken(3)).addHash(digest("diff_3"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0,  4,  2)));
+    }
+
+    @Test
+    public void testDifferentTrees3Differentepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 2, 3);
+        trees.tree1.get(longToken(1)).addHash(digest("diff_1"), 1);
+        trees.tree1.get(longToken(3)).addHash(digest("diff_3"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0,  4,  2)));
+    }
+
+    @Test
+    public void testDifferentTrees4SameDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 3, 3);
+        trees.tree1.get(longToken(4)).addHash(digest("diff_4"), 1);
+        trees.tree1.get(longToken(8)).addHash(digest("diff_8"), 1);
+        trees.tree1.get(longToken(12)).addHash(digest("diff_12"), 1);
+        trees.tree1.get(longToken(16)).addHash(digest("diff_16"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(2,  4,  3),
+                                            makeTreeRange(6,  8,  3),
+                                            makeTreeRange(10, 12, 3),
+                                            makeTreeRange(14, 16, 3)));
+    }
+
+    @Test
+    public void testDifferentTrees4DifferentDepth() throws IOException
+    {
+        int seed = makeSeed();
+        Trees trees = Trees.make(seed, seed, 2, 3);
+        trees.tree1.get(longToken(4)).addHash(digest("diff_4"), 1);
+        trees.tree1.get(longToken(8)).addHash(digest("diff_8"), 1);
+        trees.tree1.get(longToken(12)).addHash(digest("diff_12"), 1);
+        trees.tree1.get(longToken(16)).addHash(digest("diff_16"), 1);
+        testDifferences(trees, newArrayList(makeTreeRange(0, 16, 0)));
+    }
+
+    private static void testDifferences(Trees trees, List<TreeRange> expectedDifference) throws IOException
+    {
+        MerkleTree mt1 = trees.tree1;
+        MerkleTree mt2 = trees.tree2;
+
+        assertDiffer(mt1,               mt2,               expectedDifference);
+        assertDiffer(mt1,               mt2.moveOffHeap(), expectedDifference);
+        assertDiffer(mt1,               cycle(mt2, true),  expectedDifference);
+        assertDiffer(mt1,               cycle(mt2, false), expectedDifference);
+
+        assertDiffer(mt1.moveOffHeap(), mt2,               expectedDifference);
+        assertDiffer(mt1.moveOffHeap(), mt2.moveOffHeap(), expectedDifference);
+        assertDiffer(mt1.moveOffHeap(), cycle(mt2, true),  expectedDifference);
+        assertDiffer(mt1.moveOffHeap(), cycle(mt2, false), expectedDifference);
+
+        assertDiffer(cycle(mt1, true),  mt2,               expectedDifference);
+        assertDiffer(cycle(mt1, true),  mt2.moveOffHeap(), expectedDifference);
+        assertDiffer(cycle(mt1, true),  cycle(mt2, true),  expectedDifference);
+        assertDiffer(cycle(mt1, true),  cycle(mt2, false), expectedDifference);
+
+        assertDiffer(cycle(mt1, false), mt2,               expectedDifference);
+        assertDiffer(cycle(mt1, false), mt2.moveOffHeap(), expectedDifference);
+        assertDiffer(cycle(mt1, false), cycle(mt2, true),  expectedDifference);
+        assertDiffer(cycle(mt1, false), cycle(mt2, false), expectedDifference);
+    }
+
+    private static void assertDiffer(MerkleTree mt1, MerkleTree mt2, List<TreeRange> expectedDifference)
+    {
+        assertEquals(expectedDifference, MerkleTree.difference(mt1, mt2));
+        assertEquals(expectedDifference, MerkleTree.difference(mt2, mt1));
+    }
+
+    private static Range<Token> longTokenRange(long start, long end)
+    {
+        return new Range<>(longToken(start), longToken(end));
+    }
+
+    private static Murmur3Partitioner.LongToken longToken(long value)
+    {
+        return new Murmur3Partitioner.LongToken(value);
+    }
+
+    private static MerkleTree cycle(MerkleTree mt, boolean offHeapRequested) throws IOException
+    {
+        try (DataOutputBuffer output = new DataOutputBuffer())
+        {
+            mt.serialize(output, MessagingService.current_version);
+
+            try (DataInputBuffer input = new DataInputBuffer(output.buffer(false), false))
+            {
+                return MerkleTree.deserialize(input, offHeapRequested, MessagingService.current_version);
+            }
+        }
+    }
+
+    private static MerkleTree makeTree(long start, long end, int depth)
+    {
+        MerkleTree mt = new MerkleTree(Murmur3Partitioner.instance, longTokenRange(start, end), depth, Long.MAX_VALUE);
+        mt.init();
+        return mt;
+    }
+
+    private static TreeRange makeTreeRange(long start, long end, int depth)
+    {
+        return new TreeRange(longToken(start), longToken(end), depth);
+    }
+
+    private static byte[][] makeHashes(int count, int seed)
+    {
+        Random random = new Random(seed);
+
+        byte[][] hashes = new byte[count][32];
+        for (int i = 0; i < count; i++)
+            random.nextBytes(hashes[i]);
+        return hashes;
+    }
+
+    private static int makeSeed()
+    {
+        int seed = (int) System.currentTimeMillis();
+        System.out.println("Using seed " + seed);
+        return seed;
+    }
+
+    private static class Trees
+    {
+        MerkleTree tree1;
+        MerkleTree tree2;
+
+        Trees(MerkleTree tree1, MerkleTree tree2)
+        {
+            this.tree1 = tree1;
+            this.tree2 = tree2;
+        }
+
+        static Trees make(int hashes1seed, int hashes2seed, int tree1depth, int tree2depth)
+        {
+            byte[][] hashes1 = makeHashes(16, hashes1seed);
+            byte[][] hashes2 = makeHashes(16, hashes2seed);
+
+            MerkleTree tree1 = makeTree(0, 16, tree1depth);
+            MerkleTree tree2 = makeTree(0, 16, tree2depth);
+
+            for (int tok = 1; tok <= 16; tok++)
+            {
+                tree1.get(longToken(tok)).addHash(hashes1[tok - 1], 1);
+                tree2.get(longToken(tok)).addHash(hashes2[tok - 1], 1);
+            }
+
+            return new Trees(tree1, tree2);
+        }
     }
 }
