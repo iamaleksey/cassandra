@@ -690,7 +690,7 @@ public class MerkleTree
 
     public static MerkleTree deserialize(DataInputPlus in, int version) throws IOException
     {
-        return deserialize(in, DatabaseDescriptor.getOffheapMerkleTreesEnabled(), version);
+        return deserialize(in, DatabaseDescriptor.useOffheapMerkleTrees(), version);
     }
 
     public static MerkleTree deserialize(DataInputPlus in, boolean offHeapRequested, int version) throws IOException
@@ -754,7 +754,7 @@ public class MerkleTree
      */
     MerkleTree tryMoveOffHeap() throws IOException
     {
-        return root instanceof OnHeapNode && shouldUseOffHeapTrees(partitioner, DatabaseDescriptor.getOffheapMerkleTreesEnabled())
+        return root instanceof OnHeapNode && shouldUseOffHeapTrees(partitioner, DatabaseDescriptor.useOffheapMerkleTrees())
              ? moveOffHeap()
              : this;
     }

@@ -2908,14 +2908,14 @@ public class DatabaseDescriptor
         return strictRuntimeChecks;
     }
 
-    public static boolean getOffheapMerkleTreesEnabled()
+    public static boolean useOffheapMerkleTrees()
     {
-        return conf.prefer_offheap_merkle_trees;
+        return conf.use_offheap_merkle_trees;
     }
 
-    public static void setOffheapMerkleTreesEnabled(boolean value)
+    public static void useOffheapMerkleTrees(boolean value)
     {
-        logger.info("Setting prefer_offheap_merkle_trees to {}", value);
-        conf.prefer_offheap_merkle_trees = value;
+        logger.info("Setting use_offheap_merkle_trees to {}", value);
+        conf.use_offheap_merkle_trees = value;
     }
 }
