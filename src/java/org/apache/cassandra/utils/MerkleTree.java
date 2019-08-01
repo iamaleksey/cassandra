@@ -47,6 +47,7 @@ import org.apache.cassandra.utils.memory.MemoryUtil;
 import static java.lang.String.format;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.utils.ByteBufferUtil.compare;
+import static org.apache.cassandra.utils.MerkleTree.Difference.*;
 
 /**
  * A MerkleTree implemented as a binary tree.
@@ -221,7 +222,7 @@ public class MerkleTree
             else
             {
                 logger.debug("Digest mismatch detected, traversing trees [{}, {}]", ltree, rtree);
-                if (Difference.FULLY_INCONSISTENT == differenceHelper(ltree, rtree, diff, active))
+                if (FULLY_INCONSISTENT == differenceHelper(ltree, rtree, diff, active))
                 {
                     logger.debug("Range {} fully inconsistent", active);
                     diff.add(active);
@@ -244,7 +245,7 @@ public class MerkleTree
     static Difference differenceHelper(MerkleTree ltree, MerkleTree rtree, List<TreeRange> diff, TreeRange active)
     {
         if (active.depth == Byte.MAX_VALUE)
-            return Difference.CONSISTENT;
+            return CONSISTENT;
 
         Token midpoint = ltree.partitioner().midpoint(active.left, active.right);
         // sanity check for midpoint calculation, see CASSANDRA-13052
@@ -253,7 +254,7 @@ public class MerkleTree
             // If the midpoint equals either the left or the right, we have a range that's too small to split - we'll simply report the
             // whole range as inconsistent
             logger.debug("({}) No sane midpoint ({}) for range {} , marking whole range as inconsistent", active.depth, midpoint, active);
-            return Difference.FULLY_INCONSISTENT;
+            return FULLY_INCONSISTENT;
         }
 
         TreeRange left = new TreeRange(active.left, midpoint, active.depth + 1);
@@ -265,62 +266,62 @@ public class MerkleTree
         lnode = ltree.find(left);
         rnode = rtree.find(left);
 
-        Difference ldiff = Difference.CONSISTENT;
+        Difference ldiff = CONSISTENT;
         if (null != lnode && null != rnode && lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on left sub-range {}: [{}, {}]", active.depth, left, lnode, rnode);
 
             if (lnode instanceof Leaf)
-                ldiff = Difference.FULLY_INCONSISTENT;
+                ldiff = FULLY_INCONSISTENT;
             else
                 ldiff = differenceHelper(ltree, rtree, diff, left);
         }
         else if (null == lnode || null == rnode)
         {
             logger.debug("({}) Left sub-range fully inconsistent {}", active.depth, left);
-            ldiff = Difference.FULLY_INCONSISTENT;
+            ldiff = FULLY_INCONSISTENT;
         }
 
         // see if we should recurse right
         lnode = ltree.find(right);
         rnode = rtree.find(right);
 
-        Difference rdiff = Difference.CONSISTENT;
+        Difference rdiff = CONSISTENT;
         if (null != lnode && null != rnode && lnode.hashesDiffer(rnode))
         {
             logger.debug("({}) Inconsistent digest on right sub-range {}: [{}, {}]", active.depth, right, lnode, rnode);
 
             if (rnode instanceof Leaf)
-                rdiff = Difference.FULLY_INCONSISTENT;
+                rdiff = FULLY_INCONSISTENT;
             else
                 rdiff = differenceHelper(ltree, rtree, diff, right);
         }
         else if (null == lnode || null == rnode)
         {
             logger.debug("({}) Right sub-range fully inconsistent {}", active.depth, right);
-            rdiff = Difference.FULLY_INCONSISTENT;
+            rdiff = FULLY_INCONSISTENT;
         }
 
-        if (ldiff == Difference.FULLY_INCONSISTENT && rdiff == Difference.FULLY_INCONSISTENT)
+        if (ldiff == FULLY_INCONSISTENT && rdiff == FULLY_INCONSISTENT)
         {
             // both children are fully inconsistent
             logger.debug("({}) Fully inconsistent range [{}, {}]", active.depth, left, right);
-            return Difference.FULLY_INCONSISTENT;
+            return FULLY_INCONSISTENT;
         }
-        else if (ldiff == Difference.FULLY_INCONSISTENT)
+        else if (ldiff == FULLY_INCONSISTENT)
         {
             logger.debug("({}) Adding left sub-range to diff as fully inconsistent {}", active.depth, left);
             diff.add(left);
-            return Difference.PARTIALLY_INCONSISTENT;
+            return PARTIALLY_INCONSISTENT;
         }
-        else if (rdiff == Difference.FULLY_INCONSISTENT)
+        else if (rdiff == FULLY_INCONSISTENT)
         {
             logger.debug("({}) Adding right sub-range to diff as fully inconsistent {}", active.depth, right);
             diff.add(right);
-            return Difference.PARTIALLY_INCONSISTENT;
+            return PARTIALLY_INCONSISTENT;
         }
         logger.debug("({}) Range {} partially inconstent", active.depth, active);
-        return Difference.PARTIALLY_INCONSISTENT;
+        return PARTIALLY_INCONSISTENT;
     }
 
     /**
