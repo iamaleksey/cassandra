@@ -1,5 +1,6 @@
 3.11.6
 Merged from 3.0:
+ * Ensure that tracing doesn't break connections in 3.x/4.0 mixed mode by default
  * Ensure legacy rows have primary key livenessinfo when they contain illegal cells (CASSANDRA-15365)
 Merged from 2.2:
  * In-JVM DTest: Set correct internode message version for upgrade test (CASSANDRA-15371)
