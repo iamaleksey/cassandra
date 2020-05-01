@@ -54,7 +54,7 @@
       <pattern>%-5level %date{HH:mm:ss,SSS} %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>WARN</level>
+      <level>ERROR</level>
     </filter>
   </appender>
 
@@ -63,7 +63,7 @@
       <pattern>%-5level %date{HH:mm:ss,SSS} %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>WARN</level>
+      <level>ERROR</level>
     </filter>
   </appender>
 
@@ -72,13 +72,13 @@
       <pattern>%-5level [%thread] ${instance_id} %date{ISO8601} %F:%L - %msg%n</pattern>
     </encoder>
     <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-      <level>DEBUG</level>
+      <level>ERROR</level>
     </filter>
   </appender>
 
-  <logger name="org.apache.hadoop" level="WARN"/>
+  <logger name="org.apache.hadoop" level="ERROR"/>
 
-  <root level="DEBUG">
+  <root level="ERROR">
     <appender-ref ref="INSTANCEASYNCFILE" />
     <appender-ref ref="INSTANCESTDERR" />
     <appender-ref ref="INSTANCESTDOUT" />
