@@ -1086,7 +1086,8 @@ public class OutboundConnection
                     Promise<Result<MessagingSuccess>> result = new AsyncPromise<>(eventLoop);
                     state = new Connecting(state.disconnected(),
                                            result,
-                                           eventLoop.schedule(() -> {
+                                           eventLoop.schedule(() ->
+                                           {
                                                // Re-evaluate messagingVersion before re-attempting the connection in case
                                                // endpointToVersion were updated. This happens if the outbound connection
                                                // is made before the endpointToVersion table is initially constructed or out
@@ -1094,14 +1095,14 @@ public class OutboundConnection
                                                // as a result of an inbound connection) and can result in the wrong outbound
                                                // port being selected if configured with enable_legacy_ssl_storage_port=true.
                                                int maybeUpdatedVersion = template.endpointToVersion().get(template.to);
-                                               if (maybeUpdatedVersion != this.messagingVersion)
+                                               if (maybeUpdatedVersion != messagingVersion)
                                                {
                                                    logger.trace("Endpoint version changed from {} to {} since connection initialized, updating.",
-                                                                this.messagingVersion, maybeUpdatedVersion);
-                                                   this.messagingVersion = maybeUpdatedVersion;
+                                                                messagingVersion, maybeUpdatedVersion);
+                                                   messagingVersion = maybeUpdatedVersion;
                                                }
                                                attempt(result);
-                                             }, max(100, retryRateMillis), MILLISECONDS));
+                                           }, max(100, retryRateMillis), MILLISECONDS));
                     retryRateMillis = min(1000, retryRateMillis * 2);
                 }
                 else

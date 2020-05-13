@@ -451,11 +451,9 @@ public class OutboundConnectionSettings
 
     public String connectToId()
     {
-        String str = this.to.toString();
-        InetAddressAndPort connectTo = connectTo();
-        if (!this.to.equals(connectTo))
-            str += '(' + connectTo.toString() + ')';
-        return str;
+        return !to.equals(connectTo())
+             ? to.toString()
+             : to.toString() + '(' + connectTo().toString() + ')';
     }
 
     public Framing framing(ConnectionCategory category)
