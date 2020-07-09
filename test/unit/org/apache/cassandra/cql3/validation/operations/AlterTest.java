@@ -31,6 +31,7 @@ import org.apache.cassandra.schema.SchemaKeyspace;
 
 import static java.lang.String.format;
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class AlterTest extends CQLTester
 {
@@ -528,4 +529,23 @@ public class AlterTest extends CQLTester
         execute("ALTER TABLE %s ALTER value1 TYPE 'org.apache.cassandra.db.marshal.BytesType'");
     }
 
+    @Test
+    public void testAlterTypeUsedInPartitionKey()
+    {
+        String  type = createType("CREATE TYPE %s (v1 int)");
+        String table = createTable("CREATE TABLE %s (pk frozen<" + type + ">, val int, PRIMARY KEY(pk));");
+
+        boolean thrown = false;
+        try
+        {
+            schemaChange("ALTER TYPE " + keyspace() + '.' + type + " ADD v2 int;");
+        }
+        catch (RuntimeException e)
+        {
+            String message = e.getCause().getMessage();
+            assertTrue(message.contains(table));
+            thrown = true;
+        }
+        assertTrue(thrown);
+    }
 }
