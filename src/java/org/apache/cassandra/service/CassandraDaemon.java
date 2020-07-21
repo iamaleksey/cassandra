@@ -26,7 +26,6 @@ import java.net.URL;
 import java.net.UnknownHostException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
-import javax.management.MBeanServer;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 import javax.management.remote.JMXConnectorServer;
@@ -267,6 +266,7 @@ public class CassandraDaemon
 
         // load schema from disk
         Schema.instance.loadFromDisk();
+        MigrationCoordinator.instance.start();
 
         SSTableHeaderFix.fixNonFrozenUDTIfUpgradeFrom30();
 
