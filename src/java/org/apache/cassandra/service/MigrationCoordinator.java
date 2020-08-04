@@ -241,8 +241,6 @@ public class MigrationCoordinator
                          Schema.schemaVersionToString(version));
             return false;
         }
-
-        // FIXME: get relevant conditions from MigrationManager
         return true;
     }
 
@@ -291,7 +289,6 @@ public class MigrationCoordinator
             logger.debug("Not pulling schema from {} because it's a gossip only member", endpoint);
             return false;
         }
-        // FIXME: get relevant conditions from MigrationManager
         return true;
     }
 
@@ -309,7 +306,6 @@ public class MigrationCoordinator
                          Schema.schemaVersionToString(version));
             return true;
         }
-        // FIXME: get relevant conditions from MigrationManager
         return false;
     }
 
@@ -326,10 +322,7 @@ public class MigrationCoordinator
     {
         if (info.wasReceived())
             return false;
-        // FIXME:
-        if (isLocalVersion(info.version))
-            return false;
-        return true;
+        return !isLocalVersion(info.version);
     }
 
     synchronized Future<Void> reportEndpointVersion(InetAddress endpoint, UUID version)
@@ -345,7 +338,9 @@ public class MigrationCoordinator
         info.requestQueue.add(endpoint);
         endpointVersions.put(endpoint, version);
 
+        // disassociate this endpoint from its (now) previous schema version
         removeEndpointFromVersion(endpoint, current);
+
         return maybePullSchema(info);
     }
 

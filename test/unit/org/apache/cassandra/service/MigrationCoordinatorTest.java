@@ -263,10 +263,8 @@ public class MigrationCoordinatorTest
         getUnchecked(coordinator.reportEndpointVersion(EP3, V2));
         coordinator.requests.remove().response(Collections.emptyList());
 
-
-
-        coordinator.reportEndpointVersion(EP1, V1);
-        coordinator.reportEndpointVersion(EP2, V1);
+        getUnchecked(coordinator.reportEndpointVersion(EP1, V1));
+        getUnchecked(coordinator.reportEndpointVersion(EP2, V1));
 
         MigrationCoordinator.Callback prev = null;
         Set<InetAddress> EPs = Sets.newHashSet(EP1, EP2);
@@ -275,7 +273,7 @@ public class MigrationCoordinatorTest
 
         for (int i=0; i<10; i++)
         {
-            Assert.assertEquals(2, coordinator.requests.size());
+            Assert.assertEquals(String.format("%s", i), 2, coordinator.requests.size());
 
             MigrationCoordinator.Callback next = coordinator.requests.remove();
 
