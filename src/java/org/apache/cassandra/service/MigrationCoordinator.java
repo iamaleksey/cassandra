@@ -24,10 +24,8 @@ import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Future;
@@ -36,7 +34,6 @@ import java.util.concurrent.TimeUnit;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.Futures;
 import org.slf4j.Logger;
@@ -76,18 +73,17 @@ public class MigrationCoordinator
     static class VersionInfo
     {
         final UUID version;
-        final Set<InetAddress> endpoints;
+
+        final Set<InetAddress> endpoints           = new ConcurrentHashSet<>();
+        final Set<InetAddress> outstandingRequests = new ConcurrentHashSet<>();
+
         private final WaitQueue waitQueue = new WaitQueue();
 
-        final Queue<InetAddress> requestQueue = new LinkedList<>();
-
         volatile boolean receivedSchema;
-        volatile int outstandingRequests = 0;
 
         VersionInfo(UUID version)
         {
             this.version = version;
-            this.endpoints = new ConcurrentHashSet<>();
         }
 
         WaitQueue.Signal register()
@@ -113,25 +109,6 @@ public class MigrationCoordinator
     private final Map<UUID, VersionInfo> versionInfo = new HashMap<>();
     private final Map<InetAddress, UUID> endpointVersions = new HashMap<>();
 
-    synchronized void removeEndpointFromVersion(InetAddress endpoint, UUID version)
-    {
-        if (version == null)
-            return;
-
-        VersionInfo info = versionInfo.get(version);
-
-        if (info == null)
-            return;
-
-        info.endpoints.remove(endpoint);
-
-        if (info.endpoints.isEmpty())
-        {
-            info.waitQueue.signalAll();
-            versionInfo.remove(version);
-        }
-    }
-
     public void start()
     {
         ScheduledExecutors.scheduledTasks.scheduleWithFixedDelay(this::pullUnreceivedSchemaVersions, 1, 1, TimeUnit.MINUTES);
@@ -147,7 +124,7 @@ public class MigrationCoordinator
         List<Future<Void>> futures = new ArrayList<>();
         for (VersionInfo info : versionInfo.values())
         {
-            if (info.receivedSchema || info.outstandingRequests > 0)
+            if (info.wasReceived() || info.outstandingRequests.size() > 0)
                 continue;
 
             Future<Void> future = maybePullSchema(info);
@@ -162,29 +139,15 @@ public class MigrationCoordinator
     {
         Preconditions.checkArgument(!info.endpoints.isEmpty());
 
-        if (info.receivedSchema || !shouldPullSchema(info.version) || info.endpoints.isEmpty())
+        if (info.wasReceived() || !shouldPullSchema(info.version))
             return FINISHED_FUTURE;
 
-        if (info.outstandingRequests >= getMaxOutstandingVersionRequests())
+        if (info.outstandingRequests.size() >= getMaxOutstandingVersionRequests())
             return FINISHED_FUTURE;
 
-        for (int i=0, isize=info.requestQueue.size(); i<isize; i++)
-        {
-            InetAddress endpoint = info.requestQueue.remove();
-            if (!info.endpoints.contains(endpoint))
-                continue;
-
-            if (shouldPullFromEndpoint(endpoint))
-            {
-                info.outstandingRequests++;
+        for (InetAddress endpoint : info.endpoints)
+            if (shouldPullFromEndpoint(endpoint) && info.outstandingRequests.add(endpoint))
                 return scheduleSchemaPull(endpoint, info);
-            }
-            else
-            {
-                // return to queue
-                info.requestQueue.offer(endpoint);
-            }
-        }
 
         // no suitable endpoints were found, check again in a minute, the periodic task will pick it up
         return null;
@@ -192,16 +155,11 @@ public class MigrationCoordinator
 
     public synchronized Map<UUID, Set<InetAddress>> outstandingVersions()
     {
-        ImmutableMap.Builder<UUID, Set<InetAddress>> builder = ImmutableMap.builder();
+        HashMap<UUID, Set<InetAddress>> map = new HashMap<>();
         for (VersionInfo info : versionInfo.values())
-        {
-            if (info.receivedSchema)
-                continue;
-
-            builder.put(info.version, ImmutableSet.copyOf(info.endpoints));
-        }
-
-        return builder.build();
+            if (!info.wasReceived())
+                map.put(info.version, ImmutableSet.copyOf(info.endpoints));
+        return map;
     }
 
     @VisibleForTesting
@@ -327,7 +285,7 @@ public class MigrationCoordinator
 
     synchronized Future<Void> reportEndpointVersion(InetAddress endpoint, UUID version)
     {
-        UUID current = endpointVersions.get(endpoint);
+        UUID current = endpointVersions.put(endpoint, version);
         if (current != null && current.equals(version))
             return FINISHED_FUTURE;
 
@@ -335,8 +293,6 @@ public class MigrationCoordinator
         if (isLocalVersion(version))
             info.markReceived();
         info.endpoints.add(endpoint);
-        info.requestQueue.add(endpoint);
-        endpointVersions.put(endpoint, version);
 
         // disassociate this endpoint from its (now) previous schema version
         removeEndpointFromVersion(endpoint, current);
@@ -355,6 +311,24 @@ public class MigrationCoordinator
             return FINISHED_FUTURE;
 
         return reportEndpointVersion(endpoint, version);
+    }
+
+    private synchronized void removeEndpointFromVersion(InetAddress endpoint, UUID version)
+    {
+        if (version == null)
+            return;
+
+        VersionInfo info = versionInfo.get(version);
+
+        if (info == null)
+            return;
+
+        info.endpoints.remove(endpoint);
+        if (info.endpoints.isEmpty())
+        {
+            info.waitQueue.signalAll();
+            versionInfo.remove(version);
+        }
     }
 
     Future<Void> scheduleSchemaPull(InetAddress endpoint, VersionInfo info)
@@ -454,9 +428,8 @@ public class MigrationCoordinator
     {
         if (wasSuccessful)
             info.markReceived();
-        info.outstandingRequests--;
-        info.requestQueue.add(endpoint);
 
+        info.outstandingRequests.remove(endpoint);
         return maybePullSchema(info);
     }
 
