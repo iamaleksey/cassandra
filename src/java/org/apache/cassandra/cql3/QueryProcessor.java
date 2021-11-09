@@ -266,15 +266,16 @@ public class QueryProcessor implements QueryHandler
         ClientRequestMetrics  levelMetrics = ClientRequestsMetricsHolder.readMetricsForLevel(ConsistencyLevel.NODE_LOCAL);
         ClientRequestMetrics globalMetrics = ClientRequestsMetricsHolder.readMetrics;
 
+        if (StorageService.instance.isBootstrapMode() && !SchemaConstants.isLocalSystemKeyspace(statement.keyspace()))
+        {
+            levelMetrics.unavailables.mark();
+            globalMetrics.unavailables.mark();
+            throw new IsBootstrappingException();
+        }
+
         long startTime = System.nanoTime();
         try
         {
-            if (StorageService.instance.isBootstrapMode() && !SchemaConstants.isLocalSystemKeyspace(statement.keyspace()))
-            {
-                 levelMetrics.unavailables.mark();
-                globalMetrics.unavailables.mark();
-                throw new IsBootstrappingException();
-            }
             return statement.executeLocally(queryState, options);
         }
         finally
