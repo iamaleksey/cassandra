@@ -15,10 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.streaming.messages;
-
-import java.io.IOException;
 
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.streaming.StreamingDataOutputPlus;
@@ -26,29 +23,33 @@ import org.apache.cassandra.streaming.StreamSession;
 
 public class KeepAliveMessage extends StreamMessage
 {
-    public static Serializer<KeepAliveMessage> serializer = new Serializer<KeepAliveMessage>()
+    public static final KeepAliveMessage INSTANCE = new KeepAliveMessage();
+
+    private KeepAliveMessage()
     {
-        public KeepAliveMessage deserialize(DataInputPlus in, int version) throws IOException
+        super(Type.KEEP_ALIVE);
+    }
+
+    @Override
+    public String toString()
+    {
+        return "keep-alive";
+    }
+
+    public static Serializer<KeepAliveMessage> serializer = new Serializer<>()
+    {
+        public KeepAliveMessage deserialize(DataInputPlus in, int version)
         {
-            return new KeepAliveMessage();
+            return INSTANCE;
         }
 
         public void serialize(KeepAliveMessage message, StreamingDataOutputPlus out, int version, StreamSession session)
-        {}
+        {
+        }
 
         public long serializedSize(KeepAliveMessage message, int version)
         {
             return 0;
         }
     };
-
-    public KeepAliveMessage()
-    {
-        super(Type.KEEP_ALIVE);
-    }
-
-    public String toString()
-    {
-        return "keep-alive";
-    }
 }

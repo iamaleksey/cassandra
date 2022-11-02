@@ -686,6 +686,7 @@ public class StreamSession implements IEndpointStateChangeSubscriber
                          "If not, maybe try increasing streaming_keep_alive_period.", planId(),
                          hostAddressAndPort(channel.peer()),
                          channel.peer().equals(channel.connectedTo()) ? "" : " through " + hostAddressAndPort(channel.connectedTo()),
+                         // FIXME this Config param does *not* represent what the log message claims it to do
                          2 * DatabaseDescriptor.getStreamingKeepAlivePeriod(),
                          e);
         }
