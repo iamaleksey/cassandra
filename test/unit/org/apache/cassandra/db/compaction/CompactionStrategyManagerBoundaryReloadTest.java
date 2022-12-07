@@ -50,7 +50,7 @@ public class CompactionStrategyManagerBoundaryReloadTest extends CQLTester
         assertTrue(isSame(strategies, cfs.getCompactionStrategyManager().getStrategies()));
         // but disk boundaries are not .equal (ring version changed)
         assertNotEquals(db, cfs.getDiskBoundaries());
-        assertTrue(db.isEquivalent(cfs.getDiskBoundaries()));
+        assertTrue(db.isEquivalentTo(cfs.getDiskBoundaries()));
 
         db = cfs.getDiskBoundaries();
         alterTable("alter table %s with comment = 'abcd'");

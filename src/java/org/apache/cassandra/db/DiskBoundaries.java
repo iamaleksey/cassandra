@@ -156,7 +156,7 @@ public class DiskBoundaries
         return -pos - 1;
     }
 
-    public boolean isEquivalent(DiskBoundaries oldBoundaries)
+    public boolean isEquivalentTo(DiskBoundaries oldBoundaries)
     {
         return oldBoundaries != null &&
                Objects.equals(positions, oldBoundaries.positions) &&
