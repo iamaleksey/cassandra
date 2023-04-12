@@ -215,12 +215,15 @@ public class SimulationTestBase
         IsolatedExecutor.transferAdhoc((IIsolatedExecutor.SerializableConsumer<ExecutorFactory>) ExecutorFactory.Global::unsafeSet, classLoader)
                         .accept(factory);
 
+        IntSupplier intSupplier = () -> {
+            if (InterceptibleThread.isDeterministic())
+                throw failWithOOM();
+            return random.uniform(Integer.MIN_VALUE, Integer.MAX_VALUE);
+        };
         IsolatedExecutor.transferAdhoc((IIsolatedExecutor.SerializableBiConsumer<InterceptorOfGlobalMethods, IntSupplier>) InterceptorOfGlobalMethods.Global::unsafeSet, classLoader)
-                        .accept(interceptorOfGlobalMethods, () -> {
-                            if (InterceptibleThread.isDeterministic())
-                                throw failWithOOM();
-                            return random.uniform(Integer.MIN_VALUE, Integer.MAX_VALUE);
-                        });
+                        .accept(interceptorOfGlobalMethods, intSupplier);
+
+        InterceptorOfGlobalMethods.Global.unsafeSet(interceptorOfGlobalMethods, intSupplier);
 
         SimulatedSystems simulated = new SimulatedSystems(random, time, null, execution, null, null, null, new FutureActionScheduler()
         {
