@@ -124,7 +124,7 @@ class AccordJournal
         return (Apply) read(storeId, txnId, Type.APPLY_REQ);
     }
 
-    private static class Key
+    static class Key
     {
         final TxnId txnId;
         final Type type;
@@ -135,6 +135,21 @@ class AccordJournal
             this.txnId = txnId;
             this.type = type;
             this.storeId = storeId;
+        }
+
+        @Override
+        public boolean equals(Object o)
+        {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            Key key = (Key) o;
+            return storeId == key.storeId && Objects.equals(txnId, key.txnId) && type == key.type;
+        }
+
+        @Override
+        public int hashCode()
+        {
+            return Objects.hash(txnId, type, storeId);
         }
 
         /**
@@ -321,7 +336,7 @@ class AccordJournal
      *  2. It's persisted in the record key, so has the additional constraint of being fixed size and
      *     shouldn't be using varint encoding
      */
-    private enum Type
+    enum Type
     {
         PREACCEPT_REQ (0, MessageType.PREACCEPT_REQ, PreacceptSerializers.request),
         ACCEPT_REQ    (1, MessageType.ACCEPT_REQ,    AcceptSerializers.request   ),
