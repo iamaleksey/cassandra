@@ -20,6 +20,7 @@ package org.apache.cassandra.journal;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -76,7 +77,7 @@ final class Descriptor implements Comparable<Descriptor>
      */
     final int userVersion;
 
-    private Descriptor(File directory, long timestamp, int generation, int journalVersion, int userVersion)
+    Descriptor(File directory, long timestamp, int generation, int journalVersion, int userVersion)
     {
         this.directory = directory;
         this.timestamp = timestamp;
@@ -90,11 +91,16 @@ final class Descriptor implements Comparable<Descriptor>
         return new Descriptor(directory, timestamp, 1, CURRENT_JOURNAL_VERSION, userVersion);
     }
 
+    static Descriptor fromFile(File file)
+    {
+        return fromName(file.parent(), file.name());
+    }
+
     static Descriptor fromName(File directory, String name)
     {
         Matcher matcher = DATA_FILE_PATTERN.matcher(name);
         if (!matcher.matches())
-            throw new IllegalArgumentException("Provided filename is not valid for a data segment file");
+            throw new IllegalArgumentException("Provided filename (" + new File(directory, name) + ") is not valid for a data segment file");
 
         long timestamp = Long.parseLong(matcher.group(1));
         int generation = Integer.parseInt(matcher.group(2));
@@ -151,7 +157,7 @@ final class Descriptor implements Comparable<Descriptor>
     @Override
     public int compareTo(Descriptor other)
     {
-        assert this.directory.equals(other.directory);
+        assert this.directory.equals(other.directory) : String.format("Expected directory %s, but found %s", this.directory, other.directory);
 
                   int cmp = Long.compare(this.timestamp, other.timestamp);
         if (cmp == 0) cmp = Integer.compare(this.generation, other.generation);
@@ -170,7 +176,7 @@ final class Descriptor implements Comparable<Descriptor>
 
     boolean equals(Descriptor other)
     {
-        assert this.directory.equals(other.directory);
+        assert this.directory.equals(other.directory) : String.format("Expected directory %s, but found %s", this.directory, other.directory);
 
         return this.timestamp == other.timestamp
             && this.generation == other.generation
@@ -179,9 +185,14 @@ final class Descriptor implements Comparable<Descriptor>
     }
 
     @Override
+    public int hashCode()
+    {
+        return Objects.hash(directory, timestamp, generation, journalVersion, userVersion);
+    }
+
+    @Override
     public String toString()
     {
-        return format("dir: %s, ts: %d, gen: %d, journal ver: %d, user ver: %d",
-                      directory, timestamp, generation, journalVersion, userVersion);
+        return formatFileName(Component.DATA);
     }
 }
