@@ -283,6 +283,13 @@ public class DatabaseDescriptor
         clientInitialization(failIfDaemonOrTool, Config::new);
     }
 
+    public static void clientWithDaemonConfig()
+    {
+        clientInitialization(true, DatabaseDescriptor::loadConfig);
+        applyAll();
+        AuthConfig.applyAuth();
+    }
+
     /**
      * Initializes this class as a client, which means that just an empty configuration will
      * be used.
@@ -2463,6 +2470,11 @@ public class DatabaseDescriptor
     public static String getAccordJournalDirectory()
     {
         return conf.accord_journal_directory;
+    }
+
+    public static void setAccordJournalDirectory(String path)
+    {
+        conf.accord_journal_directory = path;
     }
 
     public static Config.FlushCompression getFlushCompression()

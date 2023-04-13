@@ -29,6 +29,7 @@ import org.agrona.collections.IntHashSet;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.MappedBuffer;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -46,7 +47,7 @@ final class StaticSegment<K> extends Segment<K>
 
     private StaticSegment(Descriptor descriptor,
                           FileChannel channel,
-                          MappedByteBuffer buffer,
+                          MappedBuffer buffer,
                           SyncedOffsets syncedOffsets,
                           Index<K> index,
                           Metadata metadata,
@@ -115,7 +116,7 @@ final class StaticSegment<K> extends Segment<K>
         File file = descriptor.fileFor(Component.DATA);
 
         FileChannel channel = FileChannel.open(file.toPath(), StandardOpenOption.READ);
-        MappedByteBuffer buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size());
+        MappedBuffer buffer = MappedBuffer.open(channel, FileChannel.MapMode.READ_ONLY, 0, channel.size());
 
         return new StaticSegment<>(descriptor, channel, buffer, syncedOffsets, index, metadata, keySupport);
     }
@@ -142,10 +143,10 @@ final class StaticSegment<K> extends Segment<K>
     {
         private final Descriptor descriptor;
         private final FileChannel channel;
-        private final ByteBuffer buffer;
+        private final MappedBuffer buffer;
         private final Index<K> index;
 
-        Tidier(Descriptor descriptor, FileChannel channel, ByteBuffer buffer, Index<K> index)
+        Tidier(Descriptor descriptor, FileChannel channel, MappedBuffer buffer, Index<K> index)
         {
             this.descriptor = descriptor;
             this.channel = channel;
@@ -156,7 +157,7 @@ final class StaticSegment<K> extends Segment<K>
         @Override
         public void tidy()
         {
-            FileUtils.clean(buffer);
+            buffer.clean();
             FileUtils.closeQuietly(channel);
             index.close();
         }
@@ -175,11 +176,11 @@ final class StaticSegment<K> extends Segment<K>
     @Override
     boolean read(int offset, EntrySerializer.EntryHolder<K> into)
     {
-        ByteBuffer duplicate = (ByteBuffer) buffer.duplicate().position(offset);
-        DataInputBuffer in = new DataInputBuffer(duplicate, false);
+        MappedBuffer buffer = this.buffer.duplicate().position(offset);
+        DataInputBuffer in = buffer.in();
         try
         {
-            return EntrySerializer.tryRead(into, keySupport, duplicate, in, syncedOffsets.syncedOffset(), descriptor.userVersion);
+            return EntrySerializer.tryRead(into, keySupport, buffer, in, syncedOffsets.syncedOffset(), descriptor.userVersion);
         }
         catch (IOException e)
         {
@@ -226,7 +227,7 @@ final class StaticSegment<K> extends Segment<K>
 
         private final File file;
         private final FileChannel channel;
-        private final MappedByteBuffer buffer;
+        private final MappedBuffer buffer;
         private final DataInputBuffer in;
 
         private int offset = -1;
@@ -248,7 +249,7 @@ final class StaticSegment<K> extends Segment<K>
             try
             {
                 channel = file.newReadChannel();
-                buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size());
+                buffer = MappedBuffer.open(channel, FileChannel.MapMode.READ_ONLY, 0, channel.size());
             }
             catch (NoSuchFileException e)
             {
@@ -258,14 +259,14 @@ final class StaticSegment<K> extends Segment<K>
             {
                 throw new JournalReadError(descriptor, file, e);
             }
-            in = new DataInputBuffer(buffer, false);
+            in = buffer.in();
         }
 
         @Override
         public void close()
         {
             FileUtils.closeQuietly(channel);
-            FileUtils.clean(buffer);
+            buffer.clean();
         }
 
         int offset()
@@ -309,19 +310,20 @@ final class StaticSegment<K> extends Segment<K>
 
         private boolean doAdvance()
         {
-            offset = buffer.position();
-            try
-            {
-                if (!EntrySerializer.tryRead(holder, keySupport, buffer, in, fsyncedLimit, descriptor.userVersion))
-                    return eof();
-            }
-            catch (IOException e)
-            {
-                throw new JournalReadError(descriptor, file, e);
-            }
-
-            state = State.ADVANCED;
-            return true;
+            throw new UnsupportedOperationException();
+//            offset = buffer.position();
+//            try
+//            {
+//                if (!EntrySerializer.tryRead(holder, keySupport, buffer, in, fsyncedLimit, descriptor.userVersion))
+//                    return eof();
+//            }
+//            catch (IOException e)
+//            {
+//                throw new JournalReadError(descriptor, file, e);
+//            }
+//
+//            state = State.ADVANCED;
+//            return true;
         }
 
         private void reset()

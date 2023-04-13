@@ -20,6 +20,7 @@ package org.apache.cassandra.journal;
 import java.nio.ByteBuffer;
 
 import org.apache.cassandra.io.util.File;
+import org.apache.cassandra.io.util.MappedBuffer;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 
@@ -32,7 +33,7 @@ abstract class Segment<K> implements Closeable, RefCounted<Segment<K>>
     final Metadata metadata;
     final KeySupport<K> keySupport;
 
-    ByteBuffer buffer;
+    MappedBuffer buffer;
 
     Segment(Descriptor descriptor, SyncedOffsets syncedOffsets, Index<K> index, Metadata metadata, KeySupport<K> keySupport)
     {
@@ -69,7 +70,8 @@ abstract class Segment<K> implements Closeable, RefCounted<Segment<K>>
         int offset = index.lookUpFirst(id);
         if (offset == -1 || !read(offset, into))
             return false;
-        if (!id.equals(into.key)) throw new AssertionError();
+        if (!id.equals(into.key))
+            throw new AssertionError(String.format("Index read incorrect key!  Expected %s but saw %s", id, into.key));
         return true;
     }
 

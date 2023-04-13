@@ -58,26 +58,26 @@ import static org.apache.cassandra.utils.FBUtilities.updateChecksumLong;
 /*
  *  TODO: expose more journal params via Config
  */
-class AccordJournal
+public class AccordJournal
 {
     private static final Set<Integer> SENTINEL_HOSTS = Collections.singleton(0);
 
     final File directory;
     final Journal<Key, TxnRequest<?>> journal;
 
-    AccordJournal()
+    public AccordJournal()
     {
         directory = new File(DatabaseDescriptor.getAccordJournalDirectory());
         journal = new Journal<>("AccordJournal", directory, Params.DEFAULT, Key.SUPPORT, MESSAGE_SERIALIZER);
     }
 
-    AccordJournal start()
+    public AccordJournal start()
     {
         journal.start();
         return this;
     }
 
-    void shutdown()
+    public void shutdown()
     {
         journal.shutdown();
     }
@@ -92,13 +92,13 @@ class AccordJournal
         append(storeId, (TxnRequest<?>) context, executor, onDurable);
     }
 
-    void append(int storeId, TxnRequest<?> message, Executor executor, Runnable onDurable)
+    public void append(int storeId, TxnRequest<?> message, Executor executor, Runnable onDurable)
     {
         Key key = new Key(message.txnId, Type.fromMsgType(message.type()), storeId);
         journal.asyncWrite(key, message, SENTINEL_HOSTS, executor, onDurable);
     }
 
-    TxnRequest<?> read(int storeId, TxnId txnId, Type type)
+    public TxnRequest<?> read(int storeId, TxnId txnId, Type type)
     {
         Key key = new Key(txnId, type, storeId);
         return journal.read(key);
@@ -150,6 +150,16 @@ class AccordJournal
         public int hashCode()
         {
             return Objects.hash(txnId, type, storeId);
+        }
+
+        @Override
+        public String toString()
+        {
+            return "Key{" +
+                   "txnId=" + txnId +
+                   ", type=" + type +
+                   ", storeId=" + storeId +
+                   '}';
         }
 
         /**
@@ -336,7 +346,7 @@ class AccordJournal
      *  2. It's persisted in the record key, so has the additional constraint of being fixed size and
      *     shouldn't be using varint encoding
      */
-    enum Type
+    public enum Type
     {
         PREACCEPT_REQ (0, MessageType.PREACCEPT_REQ, PreacceptSerializers.request),
         ACCEPT_REQ    (1, MessageType.ACCEPT_REQ,    AcceptSerializers.request   ),

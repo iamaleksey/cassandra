@@ -68,7 +68,7 @@ final class ActiveSegment<K> extends Segment<K>
         try
         {
             channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
-            buffer = channel.map(FileChannel.MapMode.READ_WRITE, 0, params.segmentSize());
+            buffer = MappedBuffer.open(channel, FileChannel.MapMode.READ_WRITE, 0, params.segmentSize());
             endOfBuffer = buffer.capacity();
             selfRef = new Ref<>(this, new Tidier(descriptor, channel, buffer, syncedOffsets));
         }
@@ -93,7 +93,7 @@ final class ActiveSegment<K> extends Segment<K>
     @Override
     boolean read(int offset, EntrySerializer.EntryHolder<K> into)
     {
-        ByteBuffer duplicate = (ByteBuffer) buffer.duplicate().position(offset).limit(buffer.capacity());
+        MappedBuffer duplicate = buffer.duplicate().position(offset).limit(buffer.capacity());
         try
         {
             EntrySerializer.read(into, keySupport, duplicate, descriptor.userVersion);
@@ -182,10 +182,10 @@ final class ActiveSegment<K> extends Segment<K>
     {
         private final Descriptor descriptor;
         private final FileChannel channel;
-        private final ByteBuffer buffer;
+        private final MappedBuffer buffer;
         private final SyncedOffsets syncedOffsets;
 
-        Tidier(Descriptor descriptor, FileChannel channel, ByteBuffer buffer, SyncedOffsets syncedOffsets)
+        Tidier(Descriptor descriptor, FileChannel channel, MappedBuffer buffer, SyncedOffsets syncedOffsets)
         {
             this.descriptor = descriptor;
             this.channel = channel;
@@ -196,7 +196,7 @@ final class ActiveSegment<K> extends Segment<K>
         @Override
         public void tidy()
         {
-            FileUtils.clean(buffer);
+            buffer.clean();
             try
             {
                 channel.close();
@@ -260,7 +260,7 @@ final class ActiveSegment<K> extends Segment<K>
     {
         try
         {
-            SyncUtil.force((MappedByteBuffer) buffer);
+            buffer.syncForce();
         }
         catch (Exception e) // MappedByteBuffer.force() does not declare IOException but can actually throw it
         {
@@ -318,7 +318,7 @@ final class ActiveSegment<K> extends Segment<K>
                 opGroup.close();
                 return null;
             }
-            return new Allocation(opGroup, (ByteBuffer) buffer.duplicate().position(position).limit(position + totalSize));
+            return new Allocation(opGroup, buffer.duplicate().position(position).limit(position + totalSize));
         }
         catch (Throwable t)
         {
@@ -354,10 +354,10 @@ final class ActiveSegment<K> extends Segment<K>
     final class Allocation
     {
         private final OpOrder.Group appendOp;
-        private final ByteBuffer buffer;
+        private final MappedBuffer buffer;
         private final int position;
 
-        Allocation(OpOrder.Group appendOp, ByteBuffer buffer)
+        Allocation(OpOrder.Group appendOp, MappedBuffer buffer)
         {
             this.appendOp = appendOp;
             this.buffer = buffer;
@@ -366,7 +366,7 @@ final class ActiveSegment<K> extends Segment<K>
 
         void write(K id, ByteBuffer record, Set<Integer> hosts)
         {
-            try (BufferedDataOutputStreamPlus out = new DataOutputBufferFixed(buffer))
+            try (DataOutputStreamPlus out = buffer.out())
             {
                 EntrySerializer.write(id, record, hosts, keySupport, out, descriptor.userVersion);
                 index.update(id, position);

@@ -27,6 +27,7 @@ import com.google.common.primitives.Ints;
 
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.io.util.MappedBuffer;
 import org.apache.cassandra.io.util.RandomAccessReader;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.Crc;
@@ -96,7 +97,7 @@ interface SyncedOffsets extends Closeable
         private final boolean syncOnMark;
 
         private final FileChannel channel;
-        private MappedByteBuffer buffer;
+        private MappedBuffer buffer;
 
         private volatile int syncedOffset;
 
@@ -151,17 +152,17 @@ interface SyncedOffsets extends Closeable
             int capacity = buffer.capacity();
 
             if (!syncOnMark) sync();
-            FileUtils.clean(buffer);
+            buffer.clean();
 
             buffer = map(capacity * 2);
             buffer.position(position);
         }
 
-        private MappedByteBuffer map(int capacity)
+        private MappedBuffer map(int capacity)
         {
             try
             {
-                return channel.map(FileChannel.MapMode.READ_WRITE, 0, capacity);
+                return MappedBuffer.open(channel, FileChannel.MapMode.READ_WRITE, 0, capacity);
             }
             catch (IOException e)
             {
@@ -173,7 +174,7 @@ interface SyncedOffsets extends Closeable
         {
             try
             {
-                SyncUtil.force(buffer);
+                buffer.syncForce();
             }
             catch (Exception e) // MappedByteBuffer.force() does not declare IOException but can actually throw it
             {
@@ -185,7 +186,7 @@ interface SyncedOffsets extends Closeable
         public void close()
         {
             if (!syncOnMark) sync();
-            FileUtils.clean(buffer);
+            buffer.clean();
             FileUtils.closeQuietly(channel);
         }
     }
