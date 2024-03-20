@@ -262,7 +262,9 @@ final class HintsDescriptor
     {
         try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
         {
-            return Optional.of(deserialize(raf));
+            HintsDescriptor descriptor = deserialize(raf);
+            descriptor.fileSize = descriptor.file(new File(path.getParent())).length();
+            return Optional.of(descriptor);
         }
         catch (ChecksumMismatchException e)
         {
@@ -303,7 +305,9 @@ final class HintsDescriptor
     {
         try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
         {
-            return deserialize(raf);
+            HintsDescriptor descriptor = deserialize(raf);
+            descriptor.fileSize = descriptor.file(path.parent()).length();
+            return descriptor;
         }
         catch (IOException e)
         {
@@ -343,6 +347,7 @@ final class HintsDescriptor
                           .add("version", version)
                           .add("timestamp", timestamp)
                           .add("parameters", parameters)
+                          .add("fileSize", fileSize)
                           .toString();
     }
 

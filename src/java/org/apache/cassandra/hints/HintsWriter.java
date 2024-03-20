@@ -28,6 +28,9 @@ import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -164,6 +167,8 @@ class HintsWriter implements AutoCloseable
      */
     final class Session implements AutoCloseable
     {
+        private final Logger logger = LoggerFactory.getLogger(Session.class);
+
         private final ByteBuffer buffer;
 
         private final HintsDescriptor descriptor;
@@ -270,10 +275,16 @@ class HintsWriter implements AutoCloseable
          */
         public void close() throws IOException
         {
-            flushBuffer();
-            maybeFsync();
-            maybeSkipCache();
-            descriptor.fileSize = position();
+            try
+            {
+                flushBuffer();
+                maybeFsync();
+                maybeSkipCache();
+            }
+            finally
+            {
+                descriptor.fileSize = position();
+            }
         }
 
         private void flushBuffer() throws IOException

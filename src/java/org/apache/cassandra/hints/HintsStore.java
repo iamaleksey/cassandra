@@ -79,9 +79,6 @@ final class HintsStore
 
         //noinspection resource
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
-
-        for (HintsDescriptor descriptor : dispatchDequeue)
-            descriptor.fileSize = descriptor.file(hintsDirectory).length();
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
