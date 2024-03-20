@@ -224,7 +224,7 @@ class HintsWriter implements AutoCloseable
          * Serializes and appends the hint (with CRC included) to this session's aggregation buffer,
          * writes to the underlying channel when the buffer is overflown.
          *
-         * Used mainly by tests and {@link LegacyHintsMigrator}
+         * Used mainly by tests
          *
          * @param hint the unserialized hint
          * @throws IOException
@@ -259,7 +259,7 @@ class HintsWriter implements AutoCloseable
             if (hintBuffer == buffer)
                 bytesWritten += totalSize;
             else
-                append((ByteBuffer) hintBuffer.flip());
+                append(hintBuffer.flip());
         }
 
         /**

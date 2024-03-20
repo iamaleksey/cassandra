@@ -146,22 +146,19 @@ public class HintsCatalogTest
     }
 
     @Test
-    public void hintsTotalSizeTest() throws IOException
+    public void emptyHintsTotalSizeTest() throws IOException
     {
         File directory = new File(testFolder.newFolder());
         UUID hostId = UUID.randomUUID();
-        long now = Clock.Global.currentTimeMillis();
         long totalSize = 0;
         HintsCatalog catalog = HintsCatalog.load(directory, ImmutableMap.of());
         HintsStore store = catalog.get(hostId);
         assertEquals(totalSize, store.getTotalFileSize());
         for (int i = 0; i < 3; i++)
         {
-            HintsDescriptor descriptor = new HintsDescriptor(hostId, now + i);
-            writeDescriptor(directory, descriptor);
-            store.offerLast(descriptor);
-            assertTrue("Total file size should increase after writing more hints", store.getTotalFileSize() > totalSize);
-            totalSize = store.getTotalFileSize();
+            store.getOrOpenWriter();
+            store.closeWriter();
+            assertTrue("Total file size of empty hints should be 0", store.getTotalFileSize() == 0);
         }
     }
 

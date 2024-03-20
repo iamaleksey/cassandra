@@ -79,6 +79,9 @@ final class HintsStore
 
         //noinspection resource
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
+
+        for (HintsDescriptor descriptor : dispatchDequeue)
+            descriptor.size = descriptor.file(hintsDirectory).length();
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
@@ -194,8 +197,8 @@ final class HintsStore
                 if (predicate.test(descriptor))
                 {
                     cleanUp(descriptor);
-                    delete(descriptor);
                     removeSet.add(descriptor);
+                    delete(descriptor);
                 }
             }
         }
@@ -235,7 +238,6 @@ final class HintsStore
         dispatchPositions.put(descriptor, inputPosition);
     }
 
-
     /**
      * @return the total size of all files belonging to the hints store, in bytes.
      */
@@ -243,9 +245,8 @@ final class HintsStore
     {
         long total = 0;
         for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-        {
-            total += descriptor.file(hintsDirectory).length();
-        }
+            total += descriptor.size;
+
         return total;
     }
 

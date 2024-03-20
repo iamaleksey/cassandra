@@ -81,6 +81,8 @@ final class HintsDescriptor
     final UUID hostId;
     final int version;
     final long timestamp;
+    final String hintsFileName;
+    final String crc32FileName;
 
     final ImmutableMap<String, Object> parameters;
     final ParameterizedClass compressionConfig;
@@ -88,11 +90,18 @@ final class HintsDescriptor
     private final Cipher cipher;
     private final ICompressor compressor;
 
+    // size of underlying hint file (without descriptor header and crc file sizes)
+    // the value is populated in HintsWriteExecutor upon a flush, and it is not a part
+    // of the de/serialization logic on purpose
+    volatile long size = 0;
+
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
     {
         this.hostId = hostId;
         this.version = version;
         this.timestamp = timestamp;
+        this.hintsFileName = hostId + "-" + timestamp + "-" + version + ".hints";
+        this.crc32FileName = hostId + "-" + timestamp + "-" + version + ".crc32";
         compressionConfig = createCompressionConfig(parameters);
 
         EncryptionData encryption = createEncryption(parameters);
@@ -205,12 +214,12 @@ final class HintsDescriptor
 
     String fileName()
     {
-        return String.format("%s-%s-%s.hints", hostId, timestamp, version);
+        return hintsFileName;
     }
 
     String checksumFileName()
     {
-        return String.format("%s-%s-%s.crc32", hostId, timestamp, version);
+        return crc32FileName;
     }
 
     File file(File hintsDirectory)
