@@ -81,7 +81,7 @@ final class HintsStore
         lastUsedTimestamp = descriptors.stream().mapToLong(d -> d.timestamp).max().orElse(0L);
 
         for (HintsDescriptor descriptor : dispatchDequeue)
-            descriptor.size = descriptor.file(hintsDirectory).length();
+            descriptor.fileSize = descriptor.file(hintsDirectory).length();
     }
 
     static HintsStore create(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
@@ -245,7 +245,7 @@ final class HintsStore
     {
         long total = 0;
         for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-            total += descriptor.size;
+            total += descriptor.fileSize;
 
         return total;
     }

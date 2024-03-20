@@ -92,7 +92,7 @@ final class HintsDescriptor
 
     // size of underlying hint file (without descriptor header and crc file sizes)
     // the value is populated in Session's close method in HintsWriter
-    volatile long size = 0;
+    transient volatile long fileSize = 0;
 
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
     {

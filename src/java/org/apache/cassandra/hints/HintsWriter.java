@@ -273,7 +273,7 @@ class HintsWriter implements AutoCloseable
             flushBuffer();
             maybeFsync();
             maybeSkipCache();
-            descriptor.size = position();
+            descriptor.fileSize = position();
         }
 
         private void flushBuffer() throws IOException
