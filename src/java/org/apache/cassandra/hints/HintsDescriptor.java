@@ -91,8 +91,7 @@ final class HintsDescriptor
     private final ICompressor compressor;
 
     // size of underlying hint file (without descriptor header and crc file sizes)
-    // the value is populated in HintsWriteExecutor upon a flush, and it is not a part
-    // of the de/serialization logic on purpose
+    // the value is populated in Session's close method in HintsWriter
     volatile long size = 0;
 
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)

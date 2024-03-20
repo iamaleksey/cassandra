@@ -260,27 +260,19 @@ final class HintsWriteExecutor
         long maxHintsFileSize = DatabaseDescriptor.getMaxHintsFileSize();
 
         HintsWriter writer = store.getOrOpenWriter();
-        HintsDescriptor descriptor = writer.descriptor();
 
         try (HintsWriter.Session session = writer.newSession(writeBuffer))
         {
-            try
+            while (iterator.hasNext())
             {
-                while (iterator.hasNext())
-                {
-                    session.append(iterator.next());
-                    if (session.position() >= maxHintsFileSize)
-                        break;
-                }
-            }
-            finally
-            {
-                descriptor.size = session.position();
+                session.append(iterator.next());
+                if (session.position() >= maxHintsFileSize)
+                    break;
             }
         }
         catch (IOException e)
         {
-            throw new FSWriteError(e, descriptor.fileName());
+            throw new FSWriteError(e, writer.descriptor().fileName());
         }
     }
 }

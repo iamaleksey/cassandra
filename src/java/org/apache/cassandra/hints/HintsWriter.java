@@ -135,7 +135,7 @@ class HintsWriter implements AutoCloseable
     {
         try
         {
-            return new Session(buffer, channel.size());
+            return new Session(descriptor, buffer, channel.size());
         }
         catch (IOException e)
         {
@@ -166,14 +166,16 @@ class HintsWriter implements AutoCloseable
     {
         private final ByteBuffer buffer;
 
+        private final HintsDescriptor descriptor;
         private final long initialSize;
         private long bytesWritten;
 
-        Session(ByteBuffer buffer, long initialSize)
+        Session(HintsDescriptor descriptor, ByteBuffer buffer, long initialSize)
         {
             buffer.clear();
             bytesWritten = 0L;
 
+            this.descriptor = descriptor;
             this.buffer = buffer;
             this.initialSize = initialSize;
         }
@@ -271,6 +273,7 @@ class HintsWriter implements AutoCloseable
             flushBuffer();
             maybeFsync();
             maybeSkipCache();
+            descriptor.size = position();
         }
 
         private void flushBuffer() throws IOException
