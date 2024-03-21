@@ -28,9 +28,6 @@ import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.io.FSWriteError;
 import org.apache.cassandra.io.util.DataOutputBuffer;
@@ -84,6 +81,7 @@ class HintsWriter implements AutoCloseable
             ByteBuffer descriptorBytes = dob.unsafeGetBufferAndFlip();
             updateChecksum(crc, descriptorBytes);
             channel.write(descriptorBytes);
+            descriptor.hintsFileSize(channel.position());
 
             if (descriptor.isEncrypted())
                 return new EncryptedHintsWriter(directory, descriptor, file, channel, fd, crc);
@@ -116,6 +114,7 @@ class HintsWriter implements AutoCloseable
         }
     }
 
+    @Override
     public void close()
     {
         perform(file, Throwables.FileOpType.WRITE, this::doFsync, channel::close);
@@ -138,7 +137,7 @@ class HintsWriter implements AutoCloseable
     {
         try
         {
-            return new Session(descriptor, buffer, channel.size());
+            return new Session(buffer, channel.size());
         }
         catch (IOException e)
         {
@@ -167,20 +166,16 @@ class HintsWriter implements AutoCloseable
      */
     final class Session implements AutoCloseable
     {
-        private final Logger logger = LoggerFactory.getLogger(Session.class);
-
         private final ByteBuffer buffer;
 
-        private final HintsDescriptor descriptor;
         private final long initialSize;
         private long bytesWritten;
 
-        Session(HintsDescriptor descriptor, ByteBuffer buffer, long initialSize)
+        Session(ByteBuffer buffer, long initialSize)
         {
             buffer.clear();
             bytesWritten = 0L;
 
-            this.descriptor = descriptor;
             this.buffer = buffer;
             this.initialSize = initialSize;
         }
@@ -201,7 +196,6 @@ class HintsWriter implements AutoCloseable
          * writes to the underlying channel when the buffer is overflown.
          *
          * @param hint the serialized hint (with CRC included)
-         * @throws IOException
          */
         void append(ByteBuffer hint) throws IOException
         {
@@ -230,11 +224,10 @@ class HintsWriter implements AutoCloseable
         /**
          * Serializes and appends the hint (with CRC included) to this session's aggregation buffer,
          * writes to the underlying channel when the buffer is overflown.
-         *
+         * <p>
          * Used mainly by tests
          *
          * @param hint the unserialized hint
-         * @throws IOException
          */
         void append(Hint hint) throws IOException
         {
@@ -271,20 +264,14 @@ class HintsWriter implements AutoCloseable
 
         /**
          * Closes the session - flushes the aggregation buffer (if not empty), does page aligning, and potentially fsyncs.
-         * @throws IOException
          */
+        @Override
         public void close() throws IOException
         {
-            try
-            {
-                flushBuffer();
-                maybeFsync();
-                maybeSkipCache();
-            }
-            finally
-            {
-                descriptor.fileSize = position();
-            }
+            flushBuffer();
+            maybeFsync();
+            maybeSkipCache();
+            descriptor.hintsFileSize(position());
         }
 
         private void flushBuffer() throws IOException

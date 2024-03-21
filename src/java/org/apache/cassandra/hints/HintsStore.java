@@ -65,7 +65,6 @@ final class HintsStore
     // last timestamp used in a descriptor; make sure to not reuse the same timestamp for new descriptors.
     private volatile long lastUsedTimestamp;
     private volatile HintsWriter hintsWriter;
-    private volatile HintsDescriptor currentDescriptor;
 
     private HintsStore(UUID hostId, File hintsDirectory, ImmutableMap<String, Object> writerParams, List<HintsDescriptor> descriptors)
     {
@@ -243,16 +242,11 @@ final class HintsStore
     {
         long total = 0;
         for (HintsDescriptor descriptor : Iterables.concat(dispatchDequeue, corruptedFiles))
-            total += descriptor.fileSize;
+            total += descriptor.hintsFileSize(hintsDirectory);
 
-        try
-        {
-            total += currentDescriptor.fileSize;
-        }
-        catch (NullPointerException npe)
-        {
-            // ignored
-        }
+        HintsWriter currentWriter = getWriter();
+        if (null != currentWriter)
+            total += currentWriter.descriptor().hintsFileSize(hintsDirectory);
 
         return total;
     }
@@ -290,10 +284,7 @@ final class HintsStore
     HintsWriter getOrOpenWriter()
     {
         if (hintsWriter == null)
-        {
             hintsWriter = openWriter();
-            currentDescriptor = hintsWriter.descriptor();
-        }
         return hintsWriter;
     }
 
@@ -322,7 +313,6 @@ final class HintsStore
         if (hintsWriter != null)
         {
             hintsWriter.close();
-            currentDescriptor = null;
             offerLast(hintsWriter.descriptor());
             hintsWriter = null;
             SyncUtil.trySyncDir(hintsDirectory);

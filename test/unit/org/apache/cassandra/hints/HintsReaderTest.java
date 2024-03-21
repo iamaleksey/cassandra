@@ -102,7 +102,7 @@ public class HintsReaderTest
             FileUtils.clean(buffer);
         }
 
-        Assert.assertThat(descriptor.fileSize, Matchers.greaterThan(0L));
+        Assert.assertThat(descriptor.hintsFileSize(directory), Matchers.greaterThan(0L));
     }
 
     private void readHints(int num, int numTable)

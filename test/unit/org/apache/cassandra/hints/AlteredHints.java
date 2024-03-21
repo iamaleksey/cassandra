@@ -102,7 +102,7 @@ public abstract class AlteredHints
                 }
             }
 
-            Assert.assertThat(descriptor.fileSize, Matchers.greaterThan(0L));
+            Assert.assertThat(descriptor.hintsFileSize(dir), Matchers.greaterThan(0L));
         }
 
         try (HintsReader reader = HintsReader.open(descriptor.file(dir)))

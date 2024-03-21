@@ -244,6 +244,6 @@ public class HintsCatalogTest
             }
         }
 
-        assertThat(descriptor.fileSize, greaterThan(0L));
+        assertThat(descriptor.hintsFileSize(directory), greaterThan(0L));
     }
 }

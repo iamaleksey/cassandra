@@ -90,17 +90,13 @@ final class HintsDescriptor
     private final Cipher cipher;
     private final ICompressor compressor;
 
-    // size of underlying hint file (without descriptor header and crc file sizes)
-    // the value is populated in Session's close method in HintsWriter
-    transient volatile long fileSize = 0;
-
     HintsDescriptor(UUID hostId, int version, long timestamp, ImmutableMap<String, Object> parameters)
     {
         this.hostId = hostId;
         this.version = version;
         this.timestamp = timestamp;
-        this.hintsFileName = hostId + "-" + timestamp + "-" + version + ".hints";
-        this.crc32FileName = hostId + "-" + timestamp + "-" + version + ".crc32";
+        hintsFileName = hostId + "-" + timestamp + '-' + version + ".hints";
+        crc32FileName = hostId + "-" + timestamp + '-' + version + ".crc32";
         compressionConfig = createCompressionConfig(parameters);
 
         EncryptionData encryption = createEncryption(parameters);
@@ -231,6 +227,22 @@ final class HintsDescriptor
         return new File(hintsDirectory, checksumFileName());
     }
 
+    /** cached size of the represented hints file (without descriptor header and crc file sizes) */
+    private transient volatile long hintsFileSize = -1L;
+
+    long hintsFileSize(File hintsDirectory)
+    {
+        long size = hintsFileSize;
+        if (size == -1L) // we may race and duplicate lookup the first time the size is being queried, but that is fine
+            hintsFileSize = size = file(hintsDirectory).length();
+        return size;
+    }
+
+    void hintsFileSize(long value)
+    {
+        hintsFileSize = value;
+    }
+
     int messagingVersion()
     {
         return messagingVersion(version);
@@ -262,9 +274,7 @@ final class HintsDescriptor
     {
         try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
         {
-            HintsDescriptor descriptor = deserialize(raf);
-            descriptor.fileSize = descriptor.file(new File(path.getParent())).length();
-            return Optional.of(descriptor);
+            return Optional.of(deserialize(raf));
         }
         catch (ChecksumMismatchException e)
         {
@@ -305,9 +315,7 @@ final class HintsDescriptor
     {
         try (FileInputStreamPlus raf = new FileInputStreamPlus(path))
         {
-            HintsDescriptor descriptor = deserialize(raf);
-            descriptor.fileSize = descriptor.file(path.parent()).length();
-            return descriptor;
+            return deserialize(raf);
         }
         catch (IOException e)
         {
@@ -347,7 +355,6 @@ final class HintsDescriptor
                           .add("version", version)
                           .add("timestamp", timestamp)
                           .add("parameters", parameters)
-                          .add("fileSize", fileSize)
                           .toString();
     }
 

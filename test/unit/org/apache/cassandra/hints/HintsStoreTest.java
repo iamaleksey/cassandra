@@ -174,7 +174,7 @@ public class HintsStoreTest
             }
             FileUtils.clean(buffer);
         }
-        Assert.assertThat(descriptor.fileSize, Matchers.greaterThan(0L));
+        Assert.assertThat(descriptor.hintsFileSize(directory), Matchers.greaterThan(0L));
         return new File(directory, descriptor.fileName()).lastModified(); // hint file last modified time
     }
 
