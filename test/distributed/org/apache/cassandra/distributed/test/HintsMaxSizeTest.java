@@ -53,7 +53,7 @@ public class HintsMaxSizeTest extends TestBaseImpl
                                                                        .set("max_hints_delivery_threads", "1")
                                                                        .set("hints_flush_period", "1s")
                                                                        .set("max_hints_size_per_host", "2MiB")
-                                                                       .set("max_hints_file_size", "1MiB"))
+                                                                       .set("max_hints_file_size", "128MiB"))
                                            .start(), 2))
         {
             final IInvokableInstance node1 = cluster.get(1);
