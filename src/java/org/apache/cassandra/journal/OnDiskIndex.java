@@ -287,49 +287,64 @@ final class OnDiskIndex<K> extends Index<K>
         return new IndexIteratorImpl();
     }
 
+    public StaticSegment.KeyOrderReader<K> reader()
+    {
+        return new StaticSegment.KeyOrderReader<>(descriptor, keySupport, iterator());
+    }
+
     private class IndexIteratorImpl implements IndexIterator<K>
     {
-        int currentIdx;
-        K currentKey;
-        int currentOffset;
-        int currentSize;
+        int idx;
+        K key;
+        int offset;
+        int size;
 
         IndexIteratorImpl()
         {
-            currentIdx = -1;
+            idx = -1;
         }
 
         @Override
         public boolean hasNext()
         {
-            return currentIdx < (entryCount - 1);
+            return idx < (entryCount - 1);
         }
 
         @Override
-        public K currentKey()
+        public K key()
         {
-            return currentKey;
+            ensureAdvanced();
+            return key;
         }
 
         @Override
-        public int currentOffset()
+        public int offset()
         {
-            return currentOffset;
+            ensureAdvanced();
+            return offset;
         }
 
         @Override
-        public int currentSize()
+        public int size()
         {
-            return currentSize;
+            ensureAdvanced();
+            return size;
         }
 
-        public void next()
+        @Override
+        public void advance()
         {
-            currentIdx++;
-            currentKey = keyAtIndex(currentIdx);
-            long record = recordAtIndex(currentIdx);
-            currentOffset = Index.readOffset(record);
-            currentSize = Index.readSize(record);
+            idx++;
+            key = keyAtIndex(idx);
+            long record = recordAtIndex(idx);
+            offset = Index.readOffset(record);
+            size = Index.readSize(record);
+        }
+
+        private void ensureAdvanced()
+        {
+            if (size < 0)
+                throw new IllegalStateException("Must call advance() before accessing entry content");
         }
     }
     private K keyAtIndex(int index)

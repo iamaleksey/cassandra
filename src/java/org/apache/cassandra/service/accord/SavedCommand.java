@@ -118,7 +118,6 @@ public class SavedCommand
         }
     }
 
-
     public static Writer<TxnId> diffWriter(Command before, Command after)
     {
         return new DiffWriter(before, after);
@@ -246,7 +245,6 @@ public class SavedCommand
     {
         return oldFlags | (1 << field.ordinal());
     }
-
 
     public static class Builder
     {

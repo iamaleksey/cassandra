@@ -17,7 +17,10 @@
  */
 package org.apache.cassandra.journal;
 
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
+import java.util.List;
 
 import accord.utils.Invariants;
 import org.agrona.collections.Long2ObjectHashMap;
@@ -42,7 +45,7 @@ class Segments<K, V>
     {
         Long2ObjectHashMap<Segment<K, V>> newSegments = newMap(segments.size());
         for (Segment<K, V> segment : segments)
-            newSegments.put(segment.descriptor.timestamp, segment);
+            newSegments.put(segment.descriptor().timestamp, segment);
         return new Segments<>(newSegments);
     }
 
@@ -68,40 +71,37 @@ class Segments<K, V>
         return new Segments<>(newSegments);
     }
 
-    Segments<K, V> withCompactedSegment(StaticSegment<K, V> oldSegment, StaticSegment<K, V> newSegment)
+    Segments<K, V> withCompactedSegments(Collection<StaticSegment<K, V>> oldSegments, SSTableBackedSegment<K, V> newSegment)
     {
-        Invariants.checkArgument(oldSegment.descriptor.timestamp == newSegment.descriptor.timestamp);
-        Invariants.checkArgument(oldSegment.descriptor.generation < newSegment.descriptor.generation);
         Long2ObjectHashMap<Segment<K, V>> newSegments = new Long2ObjectHashMap<>(segments);
-        Segment<K, V> oldValue = newSegments.put(newSegment.descriptor.timestamp, newSegment);
-        Invariants.checkState(oldValue == oldSegment);
-        return new Segments<>(newSegments);
-    }
+        for (StaticSegment<K, V> oldSegment : oldSegments)
+        {
+            Segment<K, V> oldValue = newSegments.remove(oldSegment.descriptor.timestamp);
+            Invariants.checkState(oldValue == oldSegment);
+        }
 
-    Segments<K, V> withoutInvalidatedSegment(StaticSegment<K, V> staticSegment)
-    {
-        Long2ObjectHashMap<Segment<K, V>> newSegments = new Long2ObjectHashMap<>(segments);
-        if (!newSegments.remove(staticSegment.descriptor.timestamp, staticSegment))
-            throw new IllegalStateException();
+        newSegments.put(newSegment.descriptor().timestamp, newSegment);
         return new Segments<>(newSegments);
     }
 
     Iterable<Segment<K, V>> all()
     {
-        return segments.values();
+        List<Segment<K, V>> segments = new ArrayList(this.segments.values());
+        segments.sort(Comparator.comparing(s -> s.descriptor().timestamp));
+        return segments;
     }
 
     void selectActive(long maxTimestamp, Collection<ActiveSegment<K, V>> into)
     {
         for (Segment<K, V> segment : segments.values())
-            if (segment.isActive() && segment.descriptor.timestamp <= maxTimestamp)
+            if (segment.isActive() && segment.descriptor().timestamp <= maxTimestamp)
                 into.add(segment.asActive());
     }
 
     boolean isSwitched(ActiveSegment<K, V> active)
     {
         for (Segment<K, V> segment : segments.values())
-            if (!segment.isActive() && active.descriptor.equals(segment.descriptor))
+            if (!segment.isActive() && active.descriptor.equals(segment.descriptor()))
                 return true;
 
         return false;
@@ -111,7 +111,7 @@ class Segments<K, V>
     {
         Segment<K, V> oldest = null;
         for (Segment<K, V> segment : segments.values())
-            if (segment.isActive() && (oldest == null || segment.descriptor.timestamp <= oldest.descriptor.timestamp))
+            if (segment.isActive() && (oldest == null || segment.descriptor().timestamp <= oldest.descriptor().timestamp))
                 oldest = segment;
 
         return oldest == null ? null : oldest.asActive();
@@ -136,16 +136,16 @@ class Segments<K, V>
      * @return a subset of segments with references to them, or {@code null} if failed to grab the refs
      */
     @SuppressWarnings("resource")
-    ReferencedSegments<K, V> selectAndReference(Iterable<K> ids)
+    ReferencedSegments<K, V> selectAndReference(K id)
     {
         Long2ObjectHashMap<Segment<K, V>> selectedSegments = null;
         for (Segment<K, V> segment : segments.values())
         {
-            if (segment.index().mayContainIds(ids))
+            if (segment.mayContainId(id))
             {
                 if (null == selectedSegments)
                     selectedSegments = newMap(10);
-                selectedSegments.put(segment.descriptor.timestamp, segment);
+                selectedSegments.put(segment.descriptor().timestamp, segment);
             }
         }
 
@@ -185,7 +185,11 @@ class Segments<K, V>
         Segment<K, V> segment = segments.get(recordPointer.segment);
         if (null == segment)
             throw new IllegalArgumentException("Can not reference segment " + recordPointer.segment);
-        return segment.isFlushed(recordPointer.position);
+
+        if (!segment.isActive())
+            return true;
+
+        return segment.asActive().isFlushed(recordPointer.position);
     }
 
     ReferencedSegment<K, V> selectAndReference(long segmentTimestamp)

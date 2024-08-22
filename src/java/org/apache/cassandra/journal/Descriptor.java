@@ -18,6 +18,7 @@
 package org.apache.cassandra.journal;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
@@ -93,6 +94,15 @@ public final class Descriptor implements Comparable<Descriptor>
     static Descriptor create(File directory, long timestamp, int userVersion)
     {
         return new Descriptor(directory, timestamp, 1, CURRENT_JOURNAL_VERSION, userVersion);
+    }
+
+    public static Descriptor fromBytes(File directory, ByteBuffer bb)
+    {
+        long timestamp = bb.getLong(0);
+        int generation = bb.getInt(Long.BYTES);
+        int journalVersion = bb.getInt(Long.BYTES + Integer.BYTES);
+        int userVersion = bb.getInt(Long.BYTES + Integer.BYTES * 2);
+        return new Descriptor(directory, timestamp, generation, journalVersion, userVersion);
     }
 
     static Descriptor fromName(File directory, String name)

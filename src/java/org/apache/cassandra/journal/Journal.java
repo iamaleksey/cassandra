@@ -18,10 +18,10 @@
 package org.apache.cassandra.journal;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.FileStore;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -31,7 +31,6 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.zip.CRC32;
 
 import com.google.common.annotations.VisibleForTesting;
@@ -40,7 +39,6 @@ import org.slf4j.LoggerFactory;
 
 import accord.utils.Invariants;
 import com.codahale.metrics.Timer.Context;
-import org.agrona.collections.ObjectHashSet;
 import org.apache.cassandra.concurrent.Interruptible;
 import org.apache.cassandra.concurrent.Interruptible.TerminateException;
 import org.apache.cassandra.concurrent.SequentialExecutorPlus;
@@ -281,34 +279,6 @@ public class Journal<K, V> implements Shutdownable
     }
 
     /**
-     * Read an entry by its address (segment timestamp + offest)
-     *
-     * @return deserialized record if present, null otherwise
-     */
-    public V read(long segmentTimestamp, int offset, int size)
-    {
-        try (ReferencedSegment<K, V> referenced = selectAndReference(segmentTimestamp))
-        {
-            Segment<K, V> segment = referenced.segment();
-            if (null == segment)
-                return null;
-
-            EntrySerializer.EntryHolder<K> holder = new EntrySerializer.EntryHolder<>();
-            segment.read(offset, size, holder);
-
-            try (DataInputBuffer in = new DataInputBuffer(holder.value, false))
-            {
-                return valueSerializer.deserialize(holder.key, in, segment.descriptor.userVersion);
-            }
-            catch (IOException e)
-            {
-                // can only throw if serializer is buggy
-                throw new RuntimeException(e);
-            }
-        }
-    }
-
-    /**
      * Looks up a record by the provided id.
      * <p/>
      * Looking up an invalidated record may or may not return a record, depending on
@@ -332,7 +302,7 @@ public class Journal<K, V> implements Shutdownable
                 {
                     try (DataInputBuffer in = new DataInputBuffer(holder.value, false))
                     {
-                        return valueSerializer.deserialize(holder.key, in, segment.descriptor.userVersion);
+                        return valueSerializer.deserialize(holder.key, in, segment.descriptor().userVersion);
                     }
                     catch (IOException e)
                     {
@@ -364,7 +334,7 @@ public class Journal<K, V> implements Shutdownable
                     {
                         Invariants.checkState(Objects.equals(holder.key, id),
                                               "%s != %s", holder.key, id);
-                        reader.read(in, segment.descriptor.userVersion);
+                        reader.read(in, segment.descriptor().userVersion);
                         holder.clear();
                     }
                     catch (IOException e)
@@ -375,103 +345,6 @@ public class Journal<K, V> implements Shutdownable
                 });
             }
         }
-    }
-
-    /**
-     * Looks up a record by the provided id, if the value satisfies the provided condition.
-     * <p/>
-     * Looking up an invalidated record may or may not return a record, depending on
-     * compaction progress.
-     * <p/>
-     * In case multiple copies of the record exist in the log (e.g. because of user retries),
-     * and more than one of them satisfy the provided condition, the first one found will be returned.
-     *
-     * @param id user-provided record id, expected to roughly correlate with time and go up
-     * @param condition predicate to test the record against
-     * @return deserialized record if found, null otherwise
-     */
-    public V readFirstMatching(K id, Predicate<V> condition)
-    {
-        EntrySerializer.EntryHolder<K> holder = new EntrySerializer.EntryHolder<>();
-
-        try (ReferencedSegments<K, V> segments = selectAndReference(id))
-        {
-            for (Segment<K, V> segment : segments.all())
-            {
-                long[] offsets = segment.index().lookUp(id);
-                for (long offsetAndSize : offsets)
-                {
-                    int offset = Index.readOffset(offsetAndSize);
-                    int size = Index.readSize(offsetAndSize);
-                    holder.clear();
-                    if (segment.read(offset, size, holder))
-                    {
-                        try (DataInputBuffer in = new DataInputBuffer(holder.value, false))
-                        {
-                            V record = valueSerializer.deserialize(holder.key, in, segment.descriptor.userVersion);
-                            if (condition.test(record))
-                                return record;
-                        }
-                        catch (IOException e)
-                        {
-                            // can only throw if serializer is buggy
-                            throw new RuntimeException(e);
-                        }
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Looks up a record by the provided id.
-     * <p/>
-     * Looking up an invalidated record may or may not return a record, depending on
-     * compaction progress.
-     * <p/>
-     * In case multiple copies of the record exist in the log (e.g. because of user retries),
-     * only the first found record will be consumed.
-     *
-     * @param id user-provided record id, expected to roughly correlate with time and go up
-     * @param consumer function to consume the raw record (bytes and invalidation set) if found
-     * @return true if the record was found, false otherwise
-     */
-    public boolean readFirst(K id, RecordConsumer<K> consumer)
-    {
-        try (ReferencedSegments<K, V> segments = selectAndReference(id))
-        {
-            for (Segment<K, V> segment : segments.all())
-                if (segment.readFirst(id, consumer))
-                    return true;
-        }
-        return false;
-    }
-
-    /**
-     * Test for existence of entries with specified ids.
-     *
-     * @return subset of ids to test that have been found in the journal
-     */
-    public Set<K> test(Set<K> test)
-    {
-        Set<K> present = new ObjectHashSet<>(test.size() + 1, 0.9f);
-        try (ReferencedSegments<K, V> segments = selectAndReference(test))
-        {
-            for (Segment<K, V> segment : segments.all())
-            {
-                for (K id : test)
-                {
-                    if (segment.index().lookUpFirst(id) != -1)
-                    {
-                        present.add(id);
-                        if (test.size() == present.size())
-                            return present;
-                    }
-                }
-            }
-        }
-        return present;
     }
 
     /**
@@ -709,6 +582,17 @@ public class Journal<K, V> implements Shutdownable
         return ActiveSegment.create(descriptor, params, keySupport);
     }
 
+    private ByteBuffer createSegmentId()
+    {
+        ByteBuffer bb = ByteBuffer.allocate(Long.BYTES + Integer.BYTES * 3);
+        bb.putLong(nextSegmentId.getAndIncrement());
+        bb.putInt(1);
+        bb.putInt(Descriptor.CURRENT_JOURNAL_VERSION);
+        bb.putInt(params.userVersion());
+        bb.rewind();
+        return bb;
+    }
+
     private void closeAllSegments()
     {
         Segments<K, V> segments = swapSegments(ignore -> Segments.none());
@@ -722,25 +606,36 @@ public class Journal<K, V> implements Shutdownable
         }
     }
 
+    public void compactStaticSegments()
+    {
+        try
+        {
+            List<StaticSegment<K, V>> toCompact = new ArrayList<>();
+            segments().selectStatic(toCompact);
+            SSTableBackedSegment<K, V> merged = StaticSegment.merge(toCompact, keySupport, () -> createSegmentId());
+            swapSegments(old -> old.withCompactedSegments(toCompact, merged));
+        }
+        catch (IOException e)
+        {
+            throw new RuntimeException("Could not compact segments: " + segments);
+        }
+    }
+
+
     /**
      * Select segments that could potentially have any entry with the specified ids and
      * attempt to grab references to them all.
      *
      * @return a subset of segments with references to them
      */
-    ReferencedSegments<K, V> selectAndReference(Iterable<K> ids)
+    ReferencedSegments<K, V> selectAndReference(K id)
     {
         while (true)
         {
-            ReferencedSegments<K, V> referenced = segments().selectAndReference(ids);
+            ReferencedSegments<K, V> referenced = segments().selectAndReference(id);
             if (null != referenced)
                 return referenced;
         }
-    }
-
-    ReferencedSegments<K, V> selectAndReference(K id)
-    {
-        return selectAndReference(Collections.singleton(id));
     }
 
     ReferencedSegment<K, V> selectAndReference(long segmentTimestamp)
@@ -753,7 +648,7 @@ public class Journal<K, V> implements Shutdownable
         }
     }
 
-    private Segments<K, V> segments()
+    public Segments<K, V> segments()
     {
         return segments.get();
     }
@@ -780,9 +675,9 @@ public class Journal<K, V> implements Shutdownable
         swapSegments(current -> current.withCompletedSegment(activeSegment, staticSegment));
     }
 
-    private void replaceCompactedSegment(StaticSegment<K, V> oldSegment, StaticSegment<K, V> newSegment)
+    private void replaceCompactedSegments(Collection<StaticSegment<K, V>> oldSegments, SSTableBackedSegment<K, V> newSegment)
     {
-        swapSegments(current -> current.withCompactedSegment(oldSegment, newSegment));
+        swapSegments(current -> current.withCompactedSegments(oldSegments, newSegment));
     }
 
     void selectSegmentToFlush(Collection<ActiveSegment<K, V>> into)

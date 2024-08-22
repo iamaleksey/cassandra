@@ -88,10 +88,10 @@ abstract class Index<K> implements Closeable
     interface IndexIterator<K>
     {
         boolean hasNext();
-        K currentKey();
-        int currentOffset();
-        int currentSize();
-        void next();
+        K key();
+        int offset();
+        int size();
+        void advance();
     }
 
     /**

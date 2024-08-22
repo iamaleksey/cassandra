@@ -23,12 +23,30 @@ import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.List;
+import java.util.PriorityQueue;
+import java.util.function.Supplier;
 
 import org.agrona.collections.IntHashSet;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.db.Keyspace;
+import org.apache.cassandra.db.SerializationHeader;
+import org.apache.cassandra.db.compaction.OperationType;
+import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.db.rows.EncodingStats;
+import org.apache.cassandra.io.sstable.SSTableId;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.sstable.format.SSTableWriter;
+import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
+import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
 import org.apache.cassandra.io.util.DataInputBuffer;
 import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.io.util.FileUtils;
+import org.apache.cassandra.service.accord.AccordKeyspace;
 import org.apache.cassandra.utils.Closeable;
 import org.apache.cassandra.utils.concurrent.Ref;
 
@@ -38,7 +56,7 @@ import org.apache.cassandra.utils.concurrent.Ref;
  * Can be compacted with input from {@code PersistedInvalidations} into a new smaller segment,
  * with invalidated entries removed.
  */
-final class StaticSegment<K, V> extends Segment<K, V>
+final class StaticSegment<K, V> extends IndexedSegment<K, V>
 {
     final FileChannel channel;
 
@@ -54,13 +72,19 @@ final class StaticSegment<K, V> extends Segment<K, V>
                           Metadata metadata,
                           KeySupport<K> keySupport)
     {
-        super(descriptor, syncedOffsets, metadata, keySupport);
+        super(descriptor, syncedOffsets, metadata, keySupport, index);
         this.index = index;
 
         this.channel = channel;
         this.buffer = buffer;
 
         selfRef = new Ref<>(this, new Tidier<>(descriptor, channel, buffer, index));
+    }
+
+    @Override
+    OnDiskIndex<K> index()
+    {
+        return index;
     }
 
     /**
@@ -140,6 +164,11 @@ final class StaticSegment<K, V> extends Segment<K, V>
         return selfRef.ref();
     }
 
+    Kind kind()
+    {
+        return Kind.STATIC;
+    }
+
     private static final class Tidier<K> implements Tidy
     {
         private final Descriptor descriptor;
@@ -168,36 +197,6 @@ final class StaticSegment<K, V> extends Segment<K, V>
         {
             return descriptor.toString();
         }
-    }
-
-    @Override
-    OnDiskIndex<K> index()
-    {
-        return index;
-    }
-
-    @Override
-    boolean isActive()
-    {
-        return false;
-    }
-
-    @Override
-    boolean isFlushed(long position)
-    {
-        return true;
-    }
-
-    @Override
-    ActiveSegment<K, V> asActive()
-    {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    StaticSegment<K, V> asStatic()
-    {
-        return this;
     }
 
     /**
@@ -367,7 +366,208 @@ final class StaticSegment<K, V> extends Segment<K, V>
             state = State.EOF;
             return false;
         }
+    }
 
-        enum State { RESET, ADVANCED, EOF }
+    enum State { RESET, ADVANCED, EOF }
+
+    static final class KeyOrderReader<K> implements Index.IndexIterator<K>, Closeable
+    {
+        private final Descriptor descriptor;
+        private final KeySupport<K> keySupport;
+
+        private final File file;
+        private final FileChannel channel;
+        private final MappedByteBuffer buffer;
+        private final Index.IndexIterator<K> indexIterator;
+        private State state = State.RESET;
+
+        private final EntrySerializer.EntryHolder<K> holder = new EntrySerializer.EntryHolder<>();
+
+        KeyOrderReader(Descriptor descriptor, KeySupport<K> keySupport, Index.IndexIterator<K> indexIterator)
+        {
+            this.descriptor = descriptor;
+            this.keySupport = keySupport;
+            this.indexIterator = indexIterator;
+
+            file = descriptor.fileFor(Component.DATA);
+            try
+            {
+                channel = file.newReadChannel();
+                buffer = channel.map(FileChannel.MapMode.READ_ONLY, 0, channel.size());
+            }
+            catch (NoSuchFileException e)
+            {
+                throw new IllegalArgumentException("Data file for segment " + descriptor + " doesn't exist");
+            }
+            catch (IOException e)
+            {
+                throw new JournalReadError(descriptor, file, e);
+            }
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(channel);
+            FileUtils.clean(buffer);
+        }
+
+        @Override
+        public boolean hasNext()
+        {
+            return indexIterator.hasNext();
+        }
+
+        @Override
+        public K key()
+        {
+            return indexIterator.key();
+        }
+
+        @Override
+        public int offset()
+        {
+            return indexIterator.offset();
+        }
+
+        @Override
+        public int size()
+        {
+            return indexIterator.size();
+        }
+
+        ByteBuffer record()
+        {
+            ensureHasAdvanced();
+            return holder.value;
+        }
+
+        IntHashSet hosts()
+        {
+            ensureHasAdvanced();
+            return holder.hosts;
+        }
+
+        @Override
+        public void advance()
+        {
+            indexIterator.advance();
+            try
+            {
+                EntrySerializer.read(holder,
+                                     keySupport,
+                                     buffer.duplicate().position(indexIterator.offset()).limit(indexIterator.offset() + indexIterator.size()),
+                                     descriptor.userVersion);
+                state = State.ADVANCED;
+            }
+            catch (IOException e)
+            {
+                throw new JournalReadError(descriptor, file, e);
+            }
+        }
+
+        private void ensureHasAdvanced()
+        {
+            if (state != State.ADVANCED)
+                throw new IllegalStateException("Must call advance() before accessing entry content");
+        }
+    }
+
+    // TODO (required): add invalidation filter
+    public static <K, V> SSTableBackedSegment<K, V> merge(Collection<StaticSegment<K, V>> segments,
+                                                          KeySupport<K> keySupport,
+                                                          Supplier<ByteBuffer> idGen) throws IOException
+    {
+        ColumnFamilyStore cfs = Keyspace.open(AccordKeyspace.metadata().name).getColumnFamilyStore(AccordKeyspace.JOURNAL);
+        org.apache.cassandra.io.sstable.Descriptor desc =  new org.apache.cassandra.io.sstable.Descriptor(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion(),
+                                                                                                          cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                                                                          cfs.metadata().keyspace,
+                                                                                                          cfs.metadata().name,
+                                                                                                          new SSTableId()
+                                                                                                          {
+                                                                                                              final ByteBuffer buf = idGen.get();
+                                                                                                              public ByteBuffer asBytes()
+                                                                                                              {
+                                                                                                                  return buf;
+                                                                                                              }
+
+                                                                                                              public String toString()
+                                                                                                              {
+                                                                                                                  StringBuilder sb = new StringBuilder();
+                                                                                                                  long timestamp = buf.getLong(0);
+                                                                                                                  int generation = buf.getInt(Long.BYTES);
+                                                                                                                  int journalVersion = buf.getInt(Long.BYTES + Integer.BYTES);
+                                                                                                                  int userVersion = buf.getInt(Long.BYTES + Integer.BYTES * 2);
+                                                                                                                  sb.append(timestamp)
+                                                                                                                    .append('-')
+                                                                                                                    .append(generation)
+                                                                                                                    .append('-')
+                                                                                                                    .append(journalVersion)
+                                                                                                                    .append('-')
+                                                                                                                    .append(userVersion);
+                                                                                                                  return sb.toString();
+                                                                                                              }
+                                                                                                          });
+
+        PriorityQueue<KeyOrderReader<K>> readers = new PriorityQueue<>((r1, r2) -> {
+            int cmp = keySupport.compare(r1.key(), r2.key());
+            if (cmp != 0)
+                return cmp;
+
+            return Long.compareUnsigned(r1.descriptor.timestamp, r2.descriptor.timestamp);
+        });
+
+        for (StaticSegment<K, V> input : segments)
+        {
+            KeyOrderReader<K> reader = input.index.reader();
+            if (reader.hasNext())
+            {
+                reader.advance();
+                readers.add(reader);
+            }
+        }
+
+        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION))
+        {
+            SSTableWriter writer = new BigTableWriter.Builder(desc).setTableMetadataRef(cfs.metadata)
+                                                                   .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                                                                   .setKeyCount(10)
+                                                                   .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator).sstableLevel(0))
+                                                                   .setSerializationHeader(new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS))
+                                                                   .build(transaction, null);
+
+            K currentKey = null;
+            PartitionUpdate.SimpleBuilder currentPartition = null;
+            outer:
+            while (!readers.isEmpty())
+            {
+                KeyOrderReader<K> reader = readers.poll();
+
+                // Switch partition if we are out of keys
+                if (currentKey == null || !reader.key().equals(currentKey))
+                {
+                    if (currentPartition != null)
+                        writer.append(currentPartition.build().unfilteredIterator());
+
+                    currentKey = reader.key();
+                    currentPartition = PartitionUpdate.simpleBuilder(AccordKeyspace.Journal, keySupport.serialize(currentKey, reader.descriptor.userVersion));
+                }
+
+                while (reader.key().equals(currentKey))
+                {
+                    currentPartition.row(reader.descriptor.timestamp, reader.offset())
+                                    .add("record", reader.record());
+
+                    if (!reader.hasNext())
+                        break outer;
+                    reader.advance();
+                }
+
+                readers.add(reader);
+            }
+
+            SSTableReader reader = writer.finish(true);
+            return new SSTableBackedSegment<>(reader, keySupport);
+        }
     }
 }

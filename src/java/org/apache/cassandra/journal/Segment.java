@@ -17,84 +17,41 @@
  */
 package org.apache.cassandra.journal;
 
-import java.nio.ByteBuffer;
-
-import accord.utils.Invariants;
-import org.apache.cassandra.io.util.File;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.RefCounted;
 
-abstract class Segment<K, V> implements Closeable, RefCounted<Segment<K, V>>
+public abstract class Segment<K, V> implements Closeable, RefCounted<Segment<K, V>>
 {
-    final File file;
-    final Descriptor descriptor;
-    final SyncedOffsets syncedOffsets;
-    final Metadata metadata;
-    final KeySupport<K> keySupport;
+    abstract boolean readFirst(K id, EntrySerializer.EntryHolder<K> into);
+    abstract void readAll(K id, EntrySerializer.EntryHolder<K> into, Runnable onEntry);
+    abstract Descriptor descriptor();
 
-    ByteBuffer buffer;
+    abstract boolean mayContainId(K key);
 
-    Segment(Descriptor descriptor, SyncedOffsets syncedOffsets, Metadata metadata, KeySupport<K> keySupport)
+    abstract Kind kind();
+
+    public boolean isActive()
     {
-        this.file = descriptor.fileFor(Component.DATA);
-        this.descriptor = descriptor;
-        this.syncedOffsets = syncedOffsets;
-        this.metadata = metadata;
-        this.keySupport = keySupport;
+        return kind() == Kind.ACTIVE;
     }
 
-    abstract Index<K> index();
-
-    abstract boolean isActive();
-    abstract boolean isFlushed(long position);
-    boolean isStatic() { return !isActive(); }
-
-    abstract ActiveSegment<K, V> asActive();
-    abstract StaticSegment<K, V> asStatic();
-
-    /*
-     * Reading entries (by id, by offset, iterate)
-     */
-
-    boolean readFirst(K id, RecordConsumer<K> consumer)
+    public boolean isStatic()
     {
-        long offsetAndSize = index().lookUpFirst(id);
-        if (offsetAndSize == -1)
-            return false;
-
-        EntrySerializer.EntryHolder<K> into = new EntrySerializer.EntryHolder<>();
-        int offset = Index.readOffset(offsetAndSize);
-        int size = Index.readSize(offset);
-        if (read(offset, size, into))
-        {
-            Invariants.checkState(id.equals(into.key), "Index for %s read incorrect key: expected %s but read %s", descriptor, id, into.key);
-            consumer.accept(descriptor.timestamp, offset, id, into.value, into.hosts, descriptor.userVersion);
-            return true;
-        }
-        return false;
+        return kind() == Kind.STATIC;
     }
 
-    boolean readFirst(K id, EntrySerializer.EntryHolder<K> into)
+    public ActiveSegment<K, V> asActive()
     {
-        long offsetAndSize = index().lookUpFirst(id);
-        if (offsetAndSize == -1 || !read(Index.readOffset(offsetAndSize), Index.readSize(offsetAndSize), into))
-            return false;
-        Invariants.checkState(id.equals(into.key), "Index for %s read incorrect key: expected %s but read %s", descriptor, id, into.key);
-        return true;
+        return (ActiveSegment<K, V>) this;
     }
 
-    void readAll(K id, EntrySerializer.EntryHolder<K> into, Runnable onEntry)
+    public StaticSegment<K, V> asStatic()
     {
-        long[] all = index().lookUpAll(id);
-
-        for (int i = 0; i < all.length; i++)
-        {
-            int offset = Index.readOffset(all[i]);
-            int size = Index.readSize(all[i]);
-            Invariants.checkState(read(offset, size, into), "Read should always return true");
-            onEntry.run();
-        }
+        return (StaticSegment<K, V>) this;
     }
 
-    abstract boolean read(int offset, int size, EntrySerializer.EntryHolder<K> into);
+    enum Kind
+    {
+        ACTIVE, STATIC, SSTABLE_BACKED
+    }
 }

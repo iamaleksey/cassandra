@@ -32,12 +32,13 @@ import org.apache.cassandra.io.util.*;
 import org.apache.cassandra.utils.*;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Ref;
+import org.apache.cassandra.utils.concurrent.RefCounted;
 import org.apache.cassandra.utils.concurrent.WaitQueue;
 
 import static org.apache.cassandra.utils.Simulate.With.MONITORS;
 
 @Simulate(with=MONITORS)
-final class ActiveSegment<K, V> extends Segment<K, V>
+final class ActiveSegment<K, V> extends IndexedSegment<K, V> implements RefCounted<Segment<K, V>>
 {
     final FileChannel channel;
 
@@ -67,13 +68,10 @@ final class ActiveSegment<K, V> extends Segment<K, V>
 
     private final Ref<Segment<K, V>> selfRef;
 
-    final InMemoryIndex<K> index;
-
     private ActiveSegment(
         Descriptor descriptor, Params params, SyncedOffsets syncedOffsets, InMemoryIndex<K> index, Metadata metadata, KeySupport<K> keySupport)
     {
-        super(descriptor, syncedOffsets, metadata, keySupport);
-        this.index = index;
+        super(descriptor, syncedOffsets, metadata, keySupport, index);
         try
         {
             channel = FileChannel.open(file.toPath(), StandardOpenOption.WRITE, StandardOpenOption.READ, StandardOpenOption.CREATE);
@@ -87,6 +85,11 @@ final class ActiveSegment<K, V> extends Segment<K, V>
         }
     }
 
+    public InMemoryIndex<K> index()
+    {
+        return (InMemoryIndex<K>) super.index();
+    }
+
     @SuppressWarnings("resource")
     static <K, V> ActiveSegment<K, V> create(Descriptor descriptor, Params params, KeySupport<K> keySupport)
     {
@@ -94,30 +97,6 @@ final class ActiveSegment<K, V> extends Segment<K, V>
         InMemoryIndex<K> index = InMemoryIndex.create(keySupport);
         Metadata metadata = Metadata.create();
         return new ActiveSegment<>(descriptor, params, syncedOffsets, index, metadata, keySupport);
-    }
-
-    @Override
-    InMemoryIndex<K> index()
-    {
-        return index;
-    }
-
-    @Override
-    boolean isActive()
-    {
-        return true;
-    }
-
-    @Override
-    ActiveSegment<K, V> asActive()
-    {
-        return this;
-    }
-
-    @Override
-    StaticSegment<K, V> asStatic()
-    {
-        throw new UnsupportedOperationException();
     }
 
     /**
@@ -181,7 +160,7 @@ final class ActiveSegment<K, V> extends Segment<K, V>
 
     void persistComponents()
     {
-        index.persist(descriptor);
+        index().persist(descriptor);
         metadata.persist(descriptor);
         SyncUtil.trySyncDir(descriptor.directory);
     }
@@ -213,7 +192,13 @@ final class ActiveSegment<K, V> extends Segment<K, V>
         return selfRef.ref();
     }
 
-    private static final class Tidier implements Tidy
+    @Override
+    Kind kind()
+    {
+        return Kind.ACTIVE;
+    }
+
+    private static final class Tidier implements RefCounted.Tidy
     {
         private final Descriptor descriptor;
         private final FileChannel channel;
@@ -447,7 +432,7 @@ final class ActiveSegment<K, V> extends Segment<K, V>
             try (BufferedDataOutputStreamPlus out = new DataOutputBufferFixed(buffer))
             {
                 EntrySerializer.write(id, record, hosts, keySupport, out, descriptor.userVersion);
-                index.update(id, start, length);
+                index().update(id, start, length);
                 metadata.update(hosts);
                 return new RecordPointer(descriptor.timestamp, start);
             }
@@ -467,7 +452,7 @@ final class ActiveSegment<K, V> extends Segment<K, V>
             try (BufferedDataOutputStreamPlus out = new DataOutputBufferFixed(buffer))
             {
                 EntrySerializer.write(id, record, hosts, keySupport, out, descriptor.userVersion);
-                index.update(id, start, length);
+                index().update(id, start, length);
                 metadata.update(hosts);
             }
             catch (IOException e)

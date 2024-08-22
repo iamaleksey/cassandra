@@ -23,6 +23,7 @@ import java.util.Comparator;
 import java.util.zip.Checksum;
 
 import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputBuffer;
 import org.apache.cassandra.io.util.DataOutputPlus;
 
 /**
@@ -36,6 +37,16 @@ public interface KeySupport<K> extends Comparator<K>
     int serializedSize(int userVersion);
 
     void serialize(K key, DataOutputPlus out, int userVersion) throws IOException;
+
+    default ByteBuffer serialize(K key, int userVersion) throws IOException
+    {
+        ByteBuffer buffer = ByteBuffer.allocate(serializedSize(userVersion));
+        try (DataOutputBuffer out = new DataOutputBuffer(buffer))
+        {
+            serialize(key, out, userVersion);
+        }
+        return buffer.rewind();
+    }
 
     K deserialize(DataInputPlus in, int userVersion) throws IOException;
 

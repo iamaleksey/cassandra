@@ -228,15 +228,14 @@ public class IndexTest
             Iterator<Pair<TimeUUID, Long>> expectedIter = sortedEntries.iterator();
             while (iter.hasNext())
             {
-                iter.next();
+                iter.advance();
                 Pair<TimeUUID, Long> expected = expectedIter.next();
-                Assert.assertEquals(iter.currentKey(), expected.left);
-                Assert.assertEquals(iter.currentSize(), Index.readSize(expected.right));
-                Assert.assertEquals(iter.currentOffset(), Index.readOffset(expected.right));
+                Assert.assertEquals(iter.key(), expected.left);
+                Assert.assertEquals(iter.size(), Index.readSize(expected.right));
+                Assert.assertEquals(iter.offset(), Index.readOffset(expected.right));
             }
         }
     }
-
 
     private static void assertIndex(Map<TimeUUID, long[]> expected, Index<TimeUUID> actual)
     {

@@ -171,6 +171,7 @@ public class AccordKeyspace
 {
     private static final Logger logger = LoggerFactory.getLogger(AccordKeyspace.class);
 
+    public static final String JOURNAL = "journal";
     public static final String COMMANDS = "commands";
     public static final String TIMESTAMPS_FOR_KEY = "timestamps_for_key";
     public static final String COMMANDS_FOR_KEY = "commands_for_key";
@@ -224,6 +225,20 @@ public class AccordKeyspace
             throw new IllegalArgumentException("Unexpected token type: " + token.getClass());
         }
     }
+
+    public static final TableMetadata Journal =
+    parse(JOURNAL,
+          "accord journal",
+          "CREATE TABLE %s ("
+          + "key blob,"
+          + "descriptor bigint,"
+          + "offset int,"
+          + "record blob,"
+          + "PRIMARY KEY(key, descriptor, offset)"
+          + ')')
+    .partitioner(new LocalPartitioner(BytesType.instance))
+    .build();
+
 
     // TODO: store timestamps as blobs (confirm there are no negative numbers, or offset)
     public static final TableMetadata Commands =
@@ -694,7 +709,7 @@ public class AccordKeyspace
 
     public static Tables tables()
     {
-        return Tables.of(Commands, TimestampsForKeys, CommandsForKeys, Topologies, EpochMetadata, CommandStoreMetadata);
+        return Tables.of(Commands, TimestampsForKeys, CommandsForKeys, Topologies, EpochMetadata, CommandStoreMetadata, Journal);
     }
 
     private static <T> ByteBuffer serialize(T obj, LocalVersionedSerializer<T> serializer) throws IOException
