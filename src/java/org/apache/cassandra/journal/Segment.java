@@ -29,6 +29,7 @@ public abstract class Segment<K, V> implements Closeable, RefCounted<Segment<K, 
     abstract boolean mayContainId(K key);
 
     abstract Kind kind();
+    abstract void release();
 
     public boolean isActive()
     {
@@ -40,6 +41,11 @@ public abstract class Segment<K, V> implements Closeable, RefCounted<Segment<K, 
         return kind() == Kind.STATIC;
     }
 
+    public boolean isSSTableBacked()
+    {
+        return kind() == Kind.SSTABLE_BACKED;
+    }
+
     public ActiveSegment<K, V> asActive()
     {
         return (ActiveSegment<K, V>) this;
@@ -48,6 +54,11 @@ public abstract class Segment<K, V> implements Closeable, RefCounted<Segment<K, 
     public StaticSegment<K, V> asStatic()
     {
         return (StaticSegment<K, V>) this;
+    }
+
+    public SSTableBackedSegment<K, V> asSSTableBacked()
+    {
+        return (SSTableBackedSegment<K, V>) this;
     }
 
     enum Kind

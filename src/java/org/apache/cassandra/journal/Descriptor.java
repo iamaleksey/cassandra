@@ -24,6 +24,10 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import accord.utils.Invariants;
+import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ColumnFamilyStore;
+import org.apache.cassandra.io.sstable.SSTableId;
 import org.apache.cassandra.io.util.File;
 
 import static java.lang.String.format;
@@ -67,20 +71,20 @@ public final class Descriptor implements Comparable<Descriptor>
     static final int CURRENT_JOURNAL_VERSION = JOURNAL_VERSION_1;
 
     final File directory;
-    final long timestamp;
-    final int generation;
+    public final long timestamp;
+    public final int generation;
 
     /**
      * Serialization version for journal components; bumped as journal
      * implementation evolves over time.
      */
-    final int journalVersion;
+    public final int journalVersion;
 
     /**
      * Serialization version for user content - specifically journal keys
      * and journal values; bumped when user logic evolves.
      */
-    final int userVersion;
+    public final int userVersion;
 
     Descriptor(File directory, long timestamp, int generation, int journalVersion, int userVersion)
     {
@@ -103,6 +107,47 @@ public final class Descriptor implements Comparable<Descriptor>
         int journalVersion = bb.getInt(Long.BYTES + Integer.BYTES);
         int userVersion = bb.getInt(Long.BYTES + Integer.BYTES * 2);
         return new Descriptor(directory, timestamp, generation, journalVersion, userVersion);
+    }
+
+    public ByteBuffer toBytes()
+    {
+        ByteBuffer bb = ByteBuffer.allocate(Long.BYTES + Integer.BYTES * 3);
+        bb.putLong(timestamp);
+        bb.putInt(generation);
+        bb.putInt(journalVersion);
+        bb.putInt(userVersion);
+        bb.rewind();
+        return bb;
+    }
+
+    public org.apache.cassandra.io.sstable.Descriptor toSSTableDescriptor(ColumnFamilyStore cfs)
+    {
+        return new org.apache.cassandra.io.sstable.Descriptor(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion(),
+                                                              cfs.getDirectories().getDirectoryForNewSSTables(),
+                                                              cfs.metadata().keyspace,
+                                                              cfs.metadata().name,
+                                                              new SSTableId()
+                                                              {
+                                                                  final ByteBuffer buf = toBytes();
+
+                                                                  public ByteBuffer asBytes()
+                                                                  {
+                                                                      return buf;
+                                                                  }
+
+                                                                  public String toString()
+                                                                  {
+                                                                      StringBuilder sb = new StringBuilder();
+                                                                      sb.append(timestamp)
+                                                                        .append('-')
+                                                                        .append(generation)
+                                                                        .append('-')
+                                                                        .append(journalVersion)
+                                                                        .append('-')
+                                                                        .append(userVersion);
+                                                                      return sb.toString();
+                                                                  }
+                                                              });
     }
 
     static Descriptor fromName(File directory, String name)
@@ -191,13 +236,14 @@ public final class Descriptor implements Comparable<Descriptor>
 
     boolean equals(Descriptor other)
     {
-        assert this.directory.equals(other.directory)
-             : format("Descriptors have mismatching directories: %s and %s", this.directory, other.directory);
-
-        return this.timestamp == other.timestamp
+        boolean res = this.timestamp == other.timestamp
             && this.generation == other.generation
             && this.journalVersion == other.journalVersion
             && this.userVersion == other.userVersion;
+        Invariants.checkState(!res || this.directory.equals(other.directory),
+                              () -> format("Descriptors have mismatching directories: %s and %s", this.directory, other.directory));
+
+        return res;
     }
 
     @Override

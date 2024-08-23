@@ -25,12 +25,15 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
-import java.util.function.Supplier;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import accord.utils.Invariants;
 import org.agrona.collections.IntHashSet;
-import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.SerializationHeader;
@@ -38,8 +41,6 @@ import org.apache.cassandra.db.compaction.OperationType;
 import org.apache.cassandra.db.lifecycle.LifecycleTransaction;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.rows.EncodingStats;
-import org.apache.cassandra.io.sstable.SSTableId;
-import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.io.sstable.format.SSTableWriter;
 import org.apache.cassandra.io.sstable.format.big.BigTableWriter;
 import org.apache.cassandra.io.sstable.metadata.MetadataCollector;
@@ -58,6 +59,8 @@ import org.apache.cassandra.utils.concurrent.Ref;
  */
 final class StaticSegment<K, V> extends IndexedSegment<K, V>
 {
+    private static final Logger logger = LoggerFactory.getLogger(StaticSegment.class);
+
     final FileChannel channel;
 
     private final Ref<Segment<K, V>> selfRef;
@@ -149,7 +152,7 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
     @Override
     public void close()
     {
-        selfRef.release();
+        release();
     }
 
     @Override
@@ -164,9 +167,22 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
         return selfRef.ref();
     }
 
+    @Override
+    void release()
+    {
+        selfRef.release();
+    }
+
+    @Override
     Kind kind()
     {
         return Kind.STATIC;
+    }
+
+    @Override
+    public String toString()
+    {
+        return "StaticSegment{" + descriptor + '}';
     }
 
     private static final class Tidier<K> implements Tidy
@@ -372,6 +388,18 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
 
     static final class KeyOrderReader<K> implements Index.IndexIterator<K>, Closeable
     {
+        public static <K> Comparator<KeyOrderReader<K>> comparator(Comparator<K> keySupport)
+        {
+            // Compare keys first. If the key is present in more than one file, pick items with lower timestamp first.
+            return (r1, r2) -> {
+                int cmp = keySupport.compare(r1.key(), r2.key());
+                if (cmp != 0)
+                    return cmp;
+
+                return Long.compareUnsigned(r1.descriptor.timestamp, r2.descriptor.timestamp);
+            };
+        }
+
         private final Descriptor descriptor;
         private final KeySupport<K> keySupport;
 
@@ -475,51 +503,22 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
 
     // TODO (required): add invalidation filter
     public static <K, V> SSTableBackedSegment<K, V> merge(Collection<StaticSegment<K, V>> segments,
-                                                          KeySupport<K> keySupport,
-                                                          Supplier<ByteBuffer> idGen) throws IOException
+                                                          KeySupport<K> keySupport) throws IOException
     {
-        ColumnFamilyStore cfs = Keyspace.open(AccordKeyspace.metadata().name).getColumnFamilyStore(AccordKeyspace.JOURNAL);
-        org.apache.cassandra.io.sstable.Descriptor desc =  new org.apache.cassandra.io.sstable.Descriptor(DatabaseDescriptor.getSelectedSSTableFormat().getLatestVersion(),
-                                                                                                          cfs.getDirectories().getDirectoryForNewSSTables(),
-                                                                                                          cfs.metadata().keyspace,
-                                                                                                          cfs.metadata().name,
-                                                                                                          new SSTableId()
-                                                                                                          {
-                                                                                                              final ByteBuffer buf = idGen.get();
-                                                                                                              public ByteBuffer asBytes()
-                                                                                                              {
-                                                                                                                  return buf;
-                                                                                                              }
+        Invariants.checkState(segments.size() >= 2, () -> String.format("Can only compact 2 or more segments, but got %d", segments.size()));
 
-                                                                                                              public String toString()
-                                                                                                              {
-                                                                                                                  StringBuilder sb = new StringBuilder();
-                                                                                                                  long timestamp = buf.getLong(0);
-                                                                                                                  int generation = buf.getInt(Long.BYTES);
-                                                                                                                  int journalVersion = buf.getInt(Long.BYTES + Integer.BYTES);
-                                                                                                                  int userVersion = buf.getInt(Long.BYTES + Integer.BYTES * 2);
-                                                                                                                  sb.append(timestamp)
-                                                                                                                    .append('-')
-                                                                                                                    .append(generation)
-                                                                                                                    .append('-')
-                                                                                                                    .append(journalVersion)
-                                                                                                                    .append('-')
-                                                                                                                    .append(userVersion);
-                                                                                                                  return sb.toString();
-                                                                                                              }
-                                                                                                          });
+        PriorityQueue<KeyOrderReader<K>> readers = new PriorityQueue<>(KeyOrderReader.comparator(keySupport));
 
-        PriorityQueue<KeyOrderReader<K>> readers = new PriorityQueue<>((r1, r2) -> {
-            int cmp = keySupport.compare(r1.key(), r2.key());
-            if (cmp != 0)
-                return cmp;
+        logger.info("Merging {} static segments: {}", segments.size(), segments);
 
-            return Long.compareUnsigned(r1.descriptor.timestamp, r2.descriptor.timestamp);
-        });
-
-        for (StaticSegment<K, V> input : segments)
+        Descriptor currentDescriptor = null;
+        for (StaticSegment<K, V> segment : segments)
         {
-            KeyOrderReader<K> reader = input.index.reader();
+            // Pick a smallest descriptor for timestamp ordering
+            if (currentDescriptor == null || segment.descriptor.timestamp < currentDescriptor.timestamp)
+                currentDescriptor = segment.descriptor;
+
+            KeyOrderReader<K> reader = segment.index.reader();
             if (reader.hasNext())
             {
                 reader.advance();
@@ -527,17 +526,20 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
             }
         }
 
-        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION))
-        {
-            SSTableWriter writer = new BigTableWriter.Builder(desc).setTableMetadataRef(cfs.metadata)
-                                                                   .addDefaultComponents(cfs.indexManager.listIndexGroups())
-                                                                   .setKeyCount(10)
-                                                                   .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator).sstableLevel(0))
-                                                                   .setSerializationHeader(new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS))
-                                                                   .build(transaction, null);
+        currentDescriptor = currentDescriptor.withIncrementedGeneration();
+        ColumnFamilyStore cfs = Keyspace.open(AccordKeyspace.metadata().name).getColumnFamilyStore(AccordKeyspace.JOURNAL);
 
+        try (LifecycleTransaction transaction = LifecycleTransaction.offline(OperationType.COMPACTION);
+             SSTableWriter writer = new BigTableWriter.Builder(currentDescriptor.toSSTableDescriptor(cfs)).
+                                    setTableMetadataRef(cfs.metadata)
+                                    .addDefaultComponents(cfs.indexManager.listIndexGroups())
+                                    .setMetadataCollector(new MetadataCollector(cfs.metadata().comparator).sstableLevel(0))
+                                    .setSerializationHeader(new SerializationHeader(true, cfs.metadata(), cfs.metadata().regularAndStaticColumns(), EncodingStats.NO_STATS))
+                                    .build(transaction, null))
+        {
             K currentKey = null;
             PartitionUpdate.SimpleBuilder currentPartition = null;
+
             outer:
             while (!readers.isEmpty())
             {
@@ -547,7 +549,10 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
                 if (currentKey == null || !reader.key().equals(currentKey))
                 {
                     if (currentPartition != null)
-                        writer.append(currentPartition.build().unfilteredIterator());
+                    {
+                        PartitionUpdate update = currentPartition.build();
+                        writer.append(update.unfilteredIterator());
+                    }
 
                     currentKey = reader.key();
                     currentPartition = PartitionUpdate.simpleBuilder(AccordKeyspace.Journal, keySupport.serialize(currentKey, reader.descriptor.userVersion));
@@ -559,15 +564,19 @@ final class StaticSegment<K, V> extends IndexedSegment<K, V>
                                     .add("record", reader.record());
 
                     if (!reader.hasNext())
-                        break outer;
+                        continue outer;
                     reader.advance();
                 }
 
                 readers.add(reader);
             }
 
-            SSTableReader reader = writer.finish(true);
-            return new SSTableBackedSegment<>(reader, keySupport);
+            if (currentPartition != null)
+            {
+                PartitionUpdate update = currentPartition.build();
+                writer.append(update.unfilteredIterator());
+            }
+            return new SSTableBackedSegment<>(writer.finish(true), keySupport);
         }
     }
 }

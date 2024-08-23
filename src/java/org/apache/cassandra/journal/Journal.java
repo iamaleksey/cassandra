@@ -606,14 +606,18 @@ public class Journal<K, V> implements Shutdownable
         }
     }
 
-    public void compactStaticSegments()
+    public void mergeStaticSegments()
     {
         try
         {
-            List<StaticSegment<K, V>> toCompact = new ArrayList<>();
-            segments().selectStatic(toCompact);
-            SSTableBackedSegment<K, V> merged = StaticSegment.merge(toCompact, keySupport, () -> createSegmentId());
-            swapSegments(old -> old.withCompactedSegments(toCompact, merged));
+            List<StaticSegment<K, V>> toMerge = new ArrayList<>();
+            segments().selectStatic(toMerge);
+            if (toMerge.size() < 2)
+                return;
+            SSTableBackedSegment<K, V> merged = StaticSegment.merge(toMerge, keySupport);
+            swapSegments(old -> old.withMergedSegments(toMerge, merged));
+            for (StaticSegment<K, V> segment : toMerge)
+                segment.release();
         }
         catch (IOException e)
         {
@@ -677,7 +681,7 @@ public class Journal<K, V> implements Shutdownable
 
     private void replaceCompactedSegments(Collection<StaticSegment<K, V>> oldSegments, SSTableBackedSegment<K, V> newSegment)
     {
-        swapSegments(current -> current.withCompactedSegments(oldSegments, newSegment));
+        swapSegments(current -> current.withMergedSegments(oldSegments, newSegment));
     }
 
     void selectSegmentToFlush(Collection<ActiveSegment<K, V>> into)
@@ -727,7 +731,7 @@ public class Journal<K, V> implements Shutdownable
             if (segment == null)
                 throw new IllegalArgumentException("Request the active segment " + timestamp + " but this segment does not exist");
             if (!segment.isActive())
-                throw new IllegalArgumentException("Request the active segment " + timestamp + " but this segment is not active");
+                throw new IllegalArgumentException(String.format("Request the active segment %d but this segment is not active: %s", timestamp, segment));
             return segment.asActive();
         }
     }

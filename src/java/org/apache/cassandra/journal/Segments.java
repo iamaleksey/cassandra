@@ -71,12 +71,12 @@ class Segments<K, V>
         return new Segments<>(newSegments);
     }
 
-    Segments<K, V> withCompactedSegments(Collection<StaticSegment<K, V>> oldSegments, SSTableBackedSegment<K, V> newSegment)
+    Segments<K, V> withMergedSegments(Collection<StaticSegment<K, V>> oldSegments, SSTableBackedSegment<K, V> newSegment)
     {
         Long2ObjectHashMap<Segment<K, V>> newSegments = new Long2ObjectHashMap<>(segments);
         for (StaticSegment<K, V> oldSegment : oldSegments)
         {
-            Segment<K, V> oldValue = newSegments.remove(oldSegment.descriptor.timestamp);
+            Segment<K, V> oldValue = newSegments.remove(oldSegment.descriptor().timestamp);
             Invariants.checkState(oldValue == oldSegment);
         }
 

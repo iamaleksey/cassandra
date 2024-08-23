@@ -67,7 +67,6 @@ public class SSTableBackedSegment<K, V> extends Segment<K, V>
     boolean readFirst(K key, EntrySerializer.EntryHolder<K> into)
     {
         into.clear();
-
         try (UnfilteredRowIterator iter = StorageHook.instance.makeRowIterator(cfs,
                                                                                sstable,
                                                                                cfs.decorateKey(keySupport.serialize(key, descriptor.journalVersion)),
@@ -159,7 +158,7 @@ public class SSTableBackedSegment<K, V> extends Segment<K, V>
     @Override
     public void close()
     {
-        selfRef.release();
+        release();
     }
 
     @Override
@@ -172,6 +171,12 @@ public class SSTableBackedSegment<K, V> extends Segment<K, V>
     public Ref<Segment<K, V>> ref()
     {
         return selfRef.ref();
+    }
+
+    @Override
+    void release()
+    {
+        selfRef.release();
     }
 
     private static final class Tidier implements Tidy
@@ -197,5 +202,13 @@ public class SSTableBackedSegment<K, V> extends Segment<K, V>
         {
             return descriptor.toString();
         }
+    }
+
+    @Override
+    public String toString()
+    {
+        return "SSTableBackedSegment{" +
+               "descriptor=" + descriptor +
+               '}';
     }
 }

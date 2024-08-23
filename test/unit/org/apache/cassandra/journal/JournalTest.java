@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.junit.Assert;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -92,7 +93,7 @@ public class JournalTest
     }
 
     @Test
-    public void segmentCompactionTest() throws IOException
+    public void segmentMergeTest() throws IOException
     {
         File directory = new File(Files.createTempDirectory(null));
         directory.deleteOnExit();
@@ -108,7 +109,7 @@ public class JournalTest
         Map<TimeUUID, List<ByteBuffer>> uuids = new HashMap<>();
 
         int count = 0;
-        for (int i = 0; i < 1024; i++)
+        for (int i = 0; i < 1024 * 5; i++)
         {
             TimeUUID uuid = nextTimeUUID();
             for (long j = 0; j < 5; j++)
@@ -130,6 +131,7 @@ public class JournalTest
             {
                 List<ByteBuffer> expected = e.getValue();
                 List<ByteBuffer> actual = journal.readAll(e.getKey());
+                Assert.assertEquals(actual.size(), expected.size());
                 for (int i = 0; i < actual.size(); i++)
                 {
                     if (!actual.get(i).equals(expected.get(i)))
@@ -148,10 +150,11 @@ public class JournalTest
         };
 
         checkAll.run();
-        journal.compactStaticSegments();
+        journal.mergeStaticSegments();
         checkAll.run();
+        journal.shutdown();
     }
-
+    
     static class ByteBufferSerializer implements ValueSerializer<TimeUUID, ByteBuffer>
     {
         static final ByteBufferSerializer INSTANCE = new ByteBufferSerializer();
