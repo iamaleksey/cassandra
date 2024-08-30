@@ -19,7 +19,6 @@ package org.apache.cassandra.service.accord;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
@@ -86,7 +85,7 @@ public class AccordJournal implements IJournal, Shutdownable
 
     Node node;
 
-    enum Status { INITIALIZED, STARTING, STARTED, TERMINATING, TERMINATED }
+    public enum Status { INITIALIZED, STARTING, STARTED, TERMINATING, TERMINATED }
     private volatile Status status = Status.INITIALIZED;
 
     @VisibleForTesting
@@ -95,19 +94,19 @@ public class AccordJournal implements IJournal, Shutdownable
         File directory = new File(DatabaseDescriptor.getAccordJournalDirectory());
         this.journal = new Journal<>("AccordJournal", directory, params, JournalKey.SUPPORT,
                                      // In Accord, we are using streaming serialization, i.e. Reader/Writer interfaces instead of materializing objects
-                                     new ValueSerializer<JournalKey, Object>()
+                                     new ValueSerializer<>()
                                      {
                                          public int serializedSize(JournalKey key, Object value, int userVersion)
                                          {
                                              throw new UnsupportedOperationException();
                                          }
 
-                                         public void serialize(JournalKey key, Object value, DataOutputPlus out, int userVersion) throws IOException
+                                         public void serialize(JournalKey key, Object value, DataOutputPlus out, int userVersion)
                                          {
                                              throw new UnsupportedOperationException();
                                          }
 
-                                         public Object deserialize(JournalKey key, DataInputPlus in, int userVersion) throws IOException
+                                         public Object deserialize(JournalKey key, DataInputPlus in, int userVersion)
                                          {
                                              throw new UnsupportedOperationException();
                                          }
@@ -154,7 +153,7 @@ public class AccordJournal implements IJournal, Shutdownable
     {
         try
         {
-            ExecutorUtils.awaitTermination(timeout, units, Arrays.asList(journal));
+            ExecutorUtils.awaitTermination(timeout, units, Collections.singletonList(journal));
             return true;
         }
         catch (TimeoutException e)
@@ -254,7 +253,7 @@ public class AccordJournal implements IJournal, Shutdownable
             // We can only use strict equality if we supply result.
             Command reconstructed = diffs.construct();
             Invariants.checkState(orig.equals(reconstructed),
-                                  "\n" +
+                                  '\n' +
                                   "Original:      %s\n" +
                                   "Reconstructed: %s\n" +
                                   "Diffs:         %s", orig, reconstructed, diffs);
@@ -388,7 +387,7 @@ public class AccordJournal implements IJournal, Shutdownable
 
         public void start()
         {
-             executor = executorFactory().infiniteLoop("AccordJournal-delayed-request-processor", this::run, SAFE, InfiniteLoopExecutor.Daemon.NON_DAEMON, InfiniteLoopExecutor.Interrupts.SYNCHRONIZED);
+             executor = executorFactory().infiniteLoop("AccordJournal-delayed-request-processor", this, SAFE, InfiniteLoopExecutor.Daemon.NON_DAEMON, InfiniteLoopExecutor.Interrupts.SYNCHRONIZED);
         }
 
         private void delay(RequestContext requestContext)
@@ -496,7 +495,7 @@ public class AccordJournal implements IJournal, Shutdownable
 
     public boolean isRunnable(Status status)
     {
-        return status != Status.TERMINATING && status != status.TERMINATED;
+        return status != Status.TERMINATING && status != Status.TERMINATED;
     }
 
     @VisibleForTesting
