@@ -51,7 +51,6 @@ import org.apache.cassandra.io.util.PathUtils;
 import org.apache.cassandra.journal.Segments.ReferencedSegment;
 import org.apache.cassandra.journal.Segments.ReferencedSegments;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.service.accord.SavedCommand;
 import org.apache.cassandra.utils.Crc;
 import org.apache.cassandra.utils.JVMStabilityInspector;
 import org.apache.cassandra.utils.Simulate;
@@ -384,19 +383,7 @@ public class Journal<K, V> implements Shutdownable
      */
     public RecordPointer asyncWrite(K id, V record, Set<Integer> hosts)
     {
-        return asyncWrite(id, new SavedCommand.Writer<>()
-                          {
-                              public void write(DataOutputPlus out, int userVersion) throws IOException
-                              {
-                                  valueSerializer.serialize(id, record, out, params.userVersion());
-                              }
-
-                              public K key()
-                              {
-                                  return id;
-                              }
-                          },
-                          hosts);
+        return asyncWrite(id, (out, userVersion) -> valueSerializer.serialize(id, record, out, userVersion), hosts);
     }
 
     public RecordPointer asyncWrite(K id, Writer writer, Set<Integer> hosts)
@@ -416,7 +403,6 @@ public class Journal<K, V> implements Shutdownable
         }
         return recordPointer;
     }
-
 
     private ActiveSegment<K, V>.Allocation allocate(int entrySize, Set<Integer> hosts)
     {
