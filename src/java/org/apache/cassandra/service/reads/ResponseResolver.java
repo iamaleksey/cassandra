@@ -23,10 +23,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.db.ReadCommand;
-import org.apache.cassandra.db.ReadResponse;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.net.Message;
+import org.apache.cassandra.service.reads.legacy.DigestResolver;
+import org.apache.cassandra.service.reads.logged.LoggedResolver;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.concurrent.Accumulator;
 
@@ -56,13 +58,20 @@ public abstract class ResponseResolver<E extends Endpoints<E>, P extends Replica
 
     public abstract boolean isDataPresent();
 
-    public void preprocess(Message<IReadResponse> message)
-    {
-        ReadResponse response = ReadResponse.fromResponse(message.payload);
-        if (replicaPlan().lookup(message.from()).isTransient() &&
-            response.isDigestResponse())
-            throw new IllegalArgumentException("Digest response received from transient replica");
+    public abstract boolean responsesMatch();
 
+    public abstract PartitionIterator getData();
+
+    protected abstract void validateResponse(Message<IReadResponse> message);
+
+    public void onResponseReceived(Message<IReadResponse> message)
+    {
+
+    }
+
+    public final void preprocess(Message<IReadResponse> message)
+    {
+        validateResponse(message);
         try
         {
             responses.add(message);
@@ -73,10 +82,25 @@ public abstract class ResponseResolver<E extends Endpoints<E>, P extends Replica
                          message, command, replicaPlan);
             throw e;
         }
+        onResponseReceived(message);
     }
 
     public Accumulator<Message<IReadResponse>> getMessages()
     {
         return responses;
+    }
+
+    static <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
+    ResponseResolver<E, P> create(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime)
+    {
+        switch (command.metadata().replicationType())
+        {
+            case legacy:
+                return new DigestResolver<>(command, replicaPlan, requestTime);
+            case logged:
+                return new LoggedResolver<>(command, replicaPlan, requestTime);
+            default:
+                throw new IllegalArgumentException("Unsupported replication type: " + command.metadata().replicationType());
+        }
     }
 }
