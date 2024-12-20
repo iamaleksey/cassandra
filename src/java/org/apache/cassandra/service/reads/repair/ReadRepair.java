@@ -17,20 +17,15 @@
  */
 package org.apache.cassandra.service.reads.repair;
 
-import java.util.Map;
 import java.util.function.Consumer;
 
-import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.locator.Endpoints;
-
-import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
-import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
-import org.apache.cassandra.service.reads.legacy.DigestResolver;
+import org.apache.cassandra.service.reads.ResponseResolver;
+import org.apache.cassandra.service.reads.logged.LoggedReadReconciliation;
 import org.apache.cassandra.transport.Dispatcher;
 
 public interface ReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
@@ -44,21 +39,25 @@ public interface ReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
     static <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
     ReadRepair<E, P> create(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime)
     {
-        return command.metadata().params.readRepair.create(command, replicaPlan, requestTime);
+        switch (command.metadata().replicationType())
+        {
+            case legacy:
+                // FIXME: tighten up alter table validation so you can't adjust read repair type for logged tables
+                return command.metadata().params.readRepair.create(command, replicaPlan, requestTime);
+            case logged:
+                return LoggedReadReconciliation.create(command, replicaPlan, requestTime);
+            default:
+                throw new IllegalArgumentException("Unsupported replication type: " + command.metadata().replicationType());
+        }
     }
-
-    /**
-     * Used by DataResolver to generate corrections as the partition iterator is consumed
-     */
-    UnfilteredPartitionIterators.MergeListener getMergeListener(P replicaPlan);
 
     /**
      * Called when the digests from the initial read don't match. Reads may block on the
      * repair started by this method.
-     * @param digestResolver supplied so we can get the original data response
+     * @param resolver supplied so we can get the original data response
      * @param resultConsumer hook for the repair to set it's result on completion
      */
-    public void startRepair(DigestResolver<E, P> digestResolver, Consumer<PartitionIterator> resultConsumer);
+    public void startRepair(ResponseResolver<E, P> resolver, Consumer<PartitionIterator> resultConsumer);
 
     /**
      * Block on the reads (or timeout) sent out in {@link ReadRepair#startRepair}
@@ -88,10 +87,4 @@ public interface ReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
      * Block on any mutations (or timeout) we sent out to repair replicas in {@link ReadRepair#repairPartition}
      */
     public void awaitWrites();
-
-    /**
-     * Repairs a partition _after_ receiving data responses. This method receives replica list, since
-     * we will block repair only on the replicas that have responded.
-     */
-    void repairPartition(DecoratedKey partitionKey, Map<Replica, Mutation> mutations, ReplicaPlan.ForWrite writePlan);
 }
