@@ -22,6 +22,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 import com.google.common.base.Preconditions;
 
@@ -29,6 +31,7 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
+import org.apache.cassandra.replication.MutationSummarizer;
 import org.apache.cassandra.replication.MutationSummary;
 import org.apache.cassandra.replication.MutationTracker;
 import org.apache.cassandra.schema.TableId;
@@ -56,54 +59,111 @@ public class SimpleMutationTracker implements MutationTracker
         }
     }
 
+    private class SimpleAccumulator implements MutationSummarizer
+    {
+        private SimpleMutationSummary summary = SimpleMutationSummary.empty();
+
+        public SimpleAccumulator()
+        {
+            lock.readLock().lock();
+        }
+
+        @Override
+        public synchronized void addForKey(TableId table, DecoratedKey key)
+        {
+            Preconditions.checkNotNull(summary);
+            summary = summary.merge(summaryForKey(table, key));
+        }
+
+        @Override
+        public synchronized MutationSummary summary()
+        {
+            Preconditions.checkNotNull(summary);
+            SimpleMutationSummary result = summary;
+            summary = null;
+            return result;
+        }
+
+        @Override
+        public synchronized void close()
+        {
+            try
+            {
+                summary = null;
+            }
+            finally
+            {
+                lock.readLock().unlock();
+            }
+        }
+    }
+
+    private final ReadWriteLock lock = new ReentrantReadWriteLock();
     private final Map<MutationId, Mutation> mutations = new HashMap<>();
-
-
     private final Map<TableId, TableIds> tableIds = new HashMap<TableId, TableIds>();
 
     @Override
-    public synchronized void add(Mutation mutation)
+    public void add(Mutation mutation)
     {
-        if (mutation.id().isNone())
-            return;
-
-        if (mutations.containsKey(mutation.id()))
+        lock.writeLock().lock();
+        try
         {
-            Preconditions.checkState(mutations.get(mutation.id()).equals(mutation));
-            return;
-        }
+            if (mutation.id().isNone())
+                return;
 
-        boolean isTracked = false;
-        for (PartitionUpdate update : mutation.getPartitionUpdates())
+            if (mutations.containsKey(mutation.id()))
+                return;
+
+            boolean isTracked = false;
+            for (PartitionUpdate update : mutation.getPartitionUpdates())
+            {
+                // TODO: should we also track ids for tables that don't have logged replication? In case of TCM races?
+                TableMetadata metadata = update.metadata();
+                if (!metadata.hasLoggedReplication())
+                    continue;
+
+                tableIds.computeIfAbsent(metadata.id, k -> new TableIds()).add(mutation.key(), mutation.id());
+                isTracked = true;
+            }
+
+            // TODO: would this being false make any sense? Need to work out what to do if we had a mutation tagged with
+            //    an id and it didn't apply to any tables with logged replication. This is likely a case migration will have
+            //    to deal with since we'll have a mixed mode
+            if (isTracked)
+                mutations.put(mutation.id(), mutation);
+        }
+        finally
         {
-            // TODO: should we also track ids for tables that don't have logged replication? In case of TCM races?
-            TableMetadata metadata = update.metadata();
-            if (!metadata.hasLoggedReplication())
-                continue;
-
-            tableIds.computeIfAbsent(metadata.id, k -> new TableIds()).add(mutation.key(), mutation.id());
-            isTracked = true;
+            lock.writeLock().unlock();
         }
-
-        // TODO: would this being false make any sense? Need to work out what to do if we had a mutation tagged with
-        //    an id and it didn't apply to any tables with logged replication. This is likely a case migration will have
-        //    to deal with since we'll have a mixed mode
-        if (isTracked)
-            mutations.put(mutation.id(), mutation);
     }
 
     @Override
-    public MutationSummary summaryForKey(TableId table, DecoratedKey key)
+    public synchronized SimpleMutationSummary summaryForKey(TableId table, DecoratedKey key)
     {
-        TableIds ids = tableIds.get(table);
+        lock.readLock().lock();
+        try
+        {
+            TableIds ids = tableIds.get(table);
 
-        if (ids == null)
-            return SimpleMutationSummary.empty();
+            if (ids == null)
+                return SimpleMutationSummary.empty();
 
-        KeyIds keyIds = ids.tableIds.get(key);
-        if (keyIds == null || keyIds.mutationIds.isEmpty())
-            return SimpleMutationSummary.empty();
+            KeyIds keyIds = ids.tableIds.get(key);
+            if (keyIds == null || keyIds.mutationIds.isEmpty())
+                return SimpleMutationSummary.empty();
 
-        return SimpleMutationSummary.of(key, keyIds.mutationIds);
+            return SimpleMutationSummary.of(key, keyIds.mutationIds);
+        }
+        finally
+        {
+            lock.readLock().unlock();
+        }
+    }
+
+    @Override
+    public MutationSummarizer summarizer()
+    {
+        return new SimpleAccumulator();
     }
 }
