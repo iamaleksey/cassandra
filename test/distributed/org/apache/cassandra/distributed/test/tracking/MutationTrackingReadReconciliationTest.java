@@ -46,6 +46,16 @@ public class MutationTrackingReadReconciliationTest extends TestBaseImpl
 {
     private static final Logger logger = LoggerFactory.getLogger(MutationTrackingReadReconciliationTest.class);
 
+    private static Object[] row(Object... objs)
+    {
+        return objs;
+    }
+
+    private static Object[][] rows(Object[][]... objs)
+    {
+        return objs;
+    }
+
     /**
      * Test a read reconciliation where the coordinator doesn't have a read response it needs to apply
      * additional mutations to
@@ -108,6 +118,7 @@ public class MutationTrackingReadReconciliationTest extends TestBaseImpl
 
             Assert.assertEquals(0, numLogReconciliations(cluster.get(1)));
             Object[][] result = cluster.coordinator(1).execute(format("SELECT * FROM %s.%s WHERE k=1", keyspaceName, tableName), ConsistencyLevel.QUORUM);
+            Assert.assertEquals(row(row(1, 0, 0), row(1, 1, 1)), result);
 
             // check that node3 has the new ids
             assertIdsForKey(cluster.get(3), keyspaceName, tableName, 1, allIds);
@@ -122,5 +133,22 @@ public class MutationTrackingReadReconciliationTest extends TestBaseImpl
     public void testUpdatedReadReconciliation()
     {
 
+            // second node should have the new id, third should not
+            assertIdsForKey(cluster.get(2), keyspaceName, tableName, 1, allIds);
+            assertIdsForKey(cluster.get(3), keyspaceName, tableName, 1, firstIds);
+
+            // reverse the partition and do a read
+            cluster.filters().reset();
+            cluster.filters().allVerbs().to(2).drop();
+            cluster.filters().allVerbs().from(2).drop();
+
+
+            Assert.assertEquals(0, numLogReconciliations(cluster.get(1)));
+            Object[][] result = cluster.coordinator(3).execute(format("SELECT * FROM %s.%s WHERE k=1", keyspaceName, tableName), ConsistencyLevel.QUORUM);
+            Assert.assertEquals(row(row(1, 0, 0), row(1, 1, 1)), result);
+
+            // check that node3 has the new ids
+            assertIdsForKey(cluster.get(3), keyspaceName, tableName, 1, allIds);
+        }
     }
 }
