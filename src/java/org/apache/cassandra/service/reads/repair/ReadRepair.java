@@ -25,7 +25,7 @@ import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.locator.Endpoints;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.service.reads.ResponseResolver;
-import org.apache.cassandra.service.reads.logged.LoggedReadReconciliation;
+import org.apache.cassandra.service.reads.legacy.LegacyReadRepair;
 import org.apache.cassandra.transport.Dispatcher;
 
 public interface ReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
@@ -33,22 +33,7 @@ public interface ReadRepair<E extends Endpoints<E>, P extends ReplicaPlan.ForRea
     public interface Factory
     {
         <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
-        ReadRepair<E, P> create(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime);
-    }
-
-    static <E extends Endpoints<E>, P extends ReplicaPlan.ForRead<E, P>>
-    ReadRepair<E, P> create(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime)
-    {
-        switch (command.metadata().replicationType())
-        {
-            case legacy:
-                // FIXME: tighten up alter table validation so you can't adjust read repair type for logged tables
-                return command.metadata().params.readRepair.create(command, replicaPlan, requestTime);
-            case logged:
-                return LoggedReadReconciliation.create(command, replicaPlan, requestTime);
-            default:
-                throw new IllegalArgumentException("Unsupported replication type: " + command.metadata().replicationType());
-        }
+        LegacyReadRepair<E, P> create(ReadCommand command, ReplicaPlan.Shared<E, P> replicaPlan, Dispatcher.RequestTime requestTime);
     }
 
     /**
