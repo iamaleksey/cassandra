@@ -423,7 +423,7 @@ public class LoggedReadReconciliation<E extends Endpoints<E>, P extends ReplicaP
         Data data = null;
         synchronized (this)
         {
-            if (state.isComplete())
+            if (!state.isPending())
                 return;
             data = state.asPending().data;
         }
@@ -456,7 +456,7 @@ public class LoggedReadReconciliation<E extends Endpoints<E>, P extends ReplicaP
 
         synchronized (this)
         {
-            if (state.isComplete())
+            if (!state.isPending())
                 return;
 
             pending = state.asPending();
