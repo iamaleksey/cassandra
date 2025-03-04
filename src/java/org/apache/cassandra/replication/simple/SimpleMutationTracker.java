@@ -43,6 +43,9 @@ import org.apache.cassandra.replication.ReconciliationPlan;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.tracking.MutationId;
+import org.apache.cassandra.service.tracking.MutationJournal;
+import org.apache.cassandra.service.tracking.Shard;
+import org.apache.cassandra.service.tracking.Shards;
 
 public class SimpleMutationTracker implements MutationTracker
 {
@@ -58,7 +61,7 @@ public class SimpleMutationTracker implements MutationTracker
 
     public static class TableIds
     {
-        private final Map<DecoratedKey, KeyIds> tableIds = new HashMap<DecoratedKey, KeyIds>();
+        private final Map<DecoratedKey, KeyIds> tableIds = new HashMap<>();
 
         public void add(DecoratedKey key, MutationId mutationId)
         {
@@ -114,38 +117,32 @@ public class SimpleMutationTracker implements MutationTracker
     }
 
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
-    private final Map<MutationId, Mutation> mutations = new HashMap<>();
-    private final Map<TableId, TableIds> tableIds = new HashMap<TableId, TableIds>();
+    private final Map<TableId, TableIds> tableIds = new HashMap<>();
 
     @Override
     public void add(Mutation mutation)
     {
+        if (mutation.id().isNone())
+            return;
+
+        // TODO (expected): remove writes to the commit log, leave only journal
+        MutationJournal.instance.write(mutation.id(), mutation);
+
+        Shard shard = Shards.insance.lookUp(mutation.getKeyspaceName(), mutation.key().getToken());
+        shard.witnessedMutationLocal(mutation.id(), mutation);
+
         lock.writeLock().lock();
         try
         {
-            if (mutation.id().isNone())
-                return;
-
-            if (mutations.containsKey(mutation.id()))
-                return;
-
-            boolean isTracked = false;
             for (PartitionUpdate update : mutation.getPartitionUpdates())
             {
                 // TODO: should we also track ids for tables that don't have logged replication? In case of TCM races?
+                // FIXME: should be purely per-keyspace as agreed for now?
+                // FIXME: shouldn't be tracking ids per table
                 TableMetadata metadata = update.metadata();
-                if (!metadata.hasLoggedReplication())
-                    continue;
-
-                tableIds.computeIfAbsent(metadata.id, k -> new TableIds()).add(mutation.key(), mutation.id());
-                isTracked = true;
+                if (metadata.hasLoggedReplication())
+                    tableIds.computeIfAbsent(metadata.id, k -> new TableIds()).add(mutation.key(), mutation.id());
             }
-
-            // TODO: would this being false make any sense? Need to work out what to do if we had a mutation tagged with
-            //    an id and it didn't apply to any tables with logged replication. This is likely a case migration will have
-            //    to deal with since we'll have a mixed mode
-            if (isTracked)
-                mutations.put(mutation.id(), mutation);
         }
         finally
         {
@@ -218,12 +215,8 @@ public class SimpleMutationTracker implements MutationTracker
     @Override
     public List<Mutation> mutations(Collection<MutationId> ids)
     {
-        List<Mutation> result = new ArrayList<Mutation>(ids.size());
-        ids.forEach(id -> {
-            Mutation mutation = mutations.get(id);
-            Preconditions.checkArgument(mutation != null);
-            result.add(mutation);
-        });
+        List<Mutation> result = new ArrayList<>(ids.size());
+        MutationJournal.instance.readAll(ids, result);
         return result;
     }
 }

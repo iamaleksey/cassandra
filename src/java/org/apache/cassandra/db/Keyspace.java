@@ -546,6 +546,7 @@ public class Keyspace
         }
         try (WriteContext ctx = getWriteHandler().beginWrite(mutation, makeDurable))
         {
+            // TODO (expected): factor out all write logic into a new write handler
             MutationTrackingService.instance().add(mutation);
 
             for (PartitionUpdate upd : mutation.getPartitionUpdates())

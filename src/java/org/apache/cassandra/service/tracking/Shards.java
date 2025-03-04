@@ -47,12 +47,12 @@ public class Shards
                 shards.put(keyspace.name, KeyspaceShards.make(keyspace, metadata, this::nextHostLogId));
     }
 
-    Shard lookUp(String keyspace, Range<Token> range)
+    public Shard lookUp(String keyspace, Range<Token> range)
     {
         return getOrCreate(keyspace).lookUp(range);
     }
 
-    Shard lookUp(String keyspace, Token token)
+    public Shard lookUp(String keyspace, Token token)
     {
         return getOrCreate(keyspace).lookUp(token);
     }
