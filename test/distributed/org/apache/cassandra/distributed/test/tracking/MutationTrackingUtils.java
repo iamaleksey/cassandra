@@ -29,7 +29,6 @@ import com.google.common.primitives.Ints;
 import org.junit.Assert;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.dht.Murmur3Partitioner;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
@@ -42,6 +41,7 @@ import org.apache.cassandra.replication.MutationTrackingService;
 import org.apache.cassandra.replication.simple.SimpleMutationSummary;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class MutationTrackingUtils

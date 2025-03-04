@@ -32,7 +32,6 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -43,12 +42,13 @@ import org.apache.cassandra.replication.MutationTracker;
 import org.apache.cassandra.replication.ReconciliationPlan;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 
 public class SimpleMutationTracker implements MutationTracker
 {
     public static class KeyIds
     {
-        private final SortedSet<MutationId> mutationIds = new TreeSet<MutationId>();
+        private final SortedSet<MutationId> mutationIds = new TreeSet<>();
 
         private void add(MutationId id)
         {

@@ -33,7 +33,6 @@ import com.google.common.collect.Maps;
 import com.google.common.collect.Sets;
 
 import org.apache.cassandra.db.DecoratedKey;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.io.IVersionedSerializer;
@@ -43,6 +42,7 @@ import org.apache.cassandra.replication.MutationSummary;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 import org.apache.cassandra.utils.ByteBufferUtil;
 
 public class SimpleMutationSummary implements MutationSummary

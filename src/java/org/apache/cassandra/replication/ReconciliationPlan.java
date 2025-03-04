@@ -20,8 +20,8 @@ package org.apache.cassandra.replication;
 
 import java.util.Set;
 
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.service.tracking.MutationId;
 
 public interface ReconciliationPlan
 {

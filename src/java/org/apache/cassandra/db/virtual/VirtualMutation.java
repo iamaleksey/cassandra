@@ -28,10 +28,10 @@ import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.IMutation;
 import org.apache.cassandra.db.Mutation;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.tracking.MutationId;
 
 /**
  * A specialised IMutation implementation for virtual keyspaces.

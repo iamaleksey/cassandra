@@ -35,6 +35,7 @@ import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 
 import static org.apache.cassandra.db.SystemKeyspace.*;
 import static org.apache.cassandra.service.paxos.Commit.CompareResult.AFTER;

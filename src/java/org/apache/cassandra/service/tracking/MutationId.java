@@ -17,8 +17,18 @@
  */
 package org.apache.cassandra.service.tracking;
 
-public class MutationId
+import java.io.IOException;
+
+import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.io.IVersionedSerializer;
+import org.apache.cassandra.io.util.DataInputPlus;
+import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.schema.TableMetadata;
+
+public class MutationId implements Comparable<MutationId>
 {
+    private static final MutationId NONE = new MutationId(Long.MIN_VALUE, Long.MIN_VALUE);
+
     /**
      * 4 byte TCM host id + 4 byte host log id packed into a long.
      * Host log ID is unique within the host, allocated
@@ -39,6 +49,34 @@ public class MutationId
     {
         this.logId = logId;
         this.sequenceId = sequenceId;
+    }
+
+    // FIXME: used in place of figuring out if we should use a mutation id or not
+    public static MutationId fixme()
+    {
+        return none();
+    }
+
+    public static MutationId none()
+    {
+        return NONE;
+    }
+
+    public static MutationId createNext()
+    {
+        // TODO FIXME
+        throw new UnsupportedOperationException();
+    }
+
+    public static MutationId createFor(TableMetadata metadata)
+    {
+        // TODO FIXME
+        return metadata.hasLoggedReplication() ? createNext() : none();
+    }
+
+    public boolean isNone()
+    {
+        return logId == Long.MIN_VALUE && sequenceId == Long.MIN_VALUE;
     }
 
     public long logId()
@@ -106,4 +144,43 @@ public class MutationId
     {
         return "MutationId{" + logId + ", " + sequenceId + '}';
     }
+
+    @Override
+    public int compareTo(MutationId other)
+    {
+        int cmp = Long.compare(logId, other.logId);
+        return (cmp != 0) ? cmp : Long.compare(sequenceId, other.sequenceId);
+    }
+
+    public static MutationId minNotNone(MutationId l, MutationId r)
+    {
+        if (l.isNone() || r.isNone())
+            return l.isNone() ? r : l;
+
+        return l.compareTo(r) < 0 ? l : r;
+    }
+
+    public static final IVersionedSerializer<MutationId> serializer = new IVersionedSerializer<>()
+    {
+        @Override
+        public void serialize(MutationId id, DataOutputPlus out, int version) throws IOException
+        {
+            out.writeLong(id.logId);
+            out.writeLong(id.sequenceId);
+        }
+
+        @Override
+        public MutationId deserialize(DataInputPlus in, int version) throws IOException
+        {
+            long logId = in.readLong();
+            long sequenceId = in.readLong();
+            return new MutationId(logId, sequenceId);
+        }
+
+        @Override
+        public long serializedSize(MutationId id, int version)
+        {
+            return TypeSizes.sizeof(id.logId) + TypeSizes.sizeof(id.sequenceId());
+        }
+    };
 }

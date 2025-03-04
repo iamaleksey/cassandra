@@ -26,12 +26,12 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationExceededMaxSizeException;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.ReadTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 import org.apache.cassandra.tracing.Tracing;
 
 import static org.apache.cassandra.config.CassandraRelevantProperties.DROP_OVERSIZED_READ_REPAIR_MUTATIONS;

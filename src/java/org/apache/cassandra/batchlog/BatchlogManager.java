@@ -36,8 +36,8 @@ import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.RateLimiter;
 import org.apache.cassandra.concurrent.ScheduledExecutorPlus;
-import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.service.tracking.MutationId;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.TimeUUID;
@@ -128,9 +128,9 @@ public class BatchlogManager implements BatchlogManagerMBean
     public static void remove(TimeUUID id)
     {
         new Mutation(MutationId.none(), PartitionUpdate.fullPartitionDelete(SystemKeyspace.Batches,
-                                                                             id.toBytes(),
-                                                                             FBUtilities.timestampMicros(),
-                                                                             FBUtilities.nowInSeconds()))
+                                                                            id.toBytes(),
+                                                                            FBUtilities.timestampMicros(),
+                                                                            FBUtilities.nowInSeconds()))
             .apply();
     }
 
