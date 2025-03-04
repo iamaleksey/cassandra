@@ -28,6 +28,7 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.schema.KeyspaceMetadata;
+import org.apache.cassandra.schema.ReplicationType;
 import org.apache.cassandra.tcm.ClusterMetadata;
 
 // TODO (expected): persistence (handle restarts)
@@ -40,10 +41,10 @@ public class Shards
 
     public void load(ClusterMetadata metadata)
     {
-        // TODO (expected): if tracking enabled (schema integration), replicated only
         // TODO (expected): implement a TCM ChangeListener
         for (KeyspaceMetadata keyspace : metadata.schema.getKeyspaces())
-            shards.put(keyspace.name, KeyspaceShards.make(keyspace, metadata, this::nextHostLogId));
+            if (keyspace.params.replicationType == ReplicationType.logged)
+                shards.put(keyspace.name, KeyspaceShards.make(keyspace, metadata, this::nextHostLogId));
     }
 
     Shard lookUp(String keyspace, Range<Token> range)
