@@ -51,21 +51,21 @@ public final class TableParams
 {
     public static final Serializer serializer = new Serializer();
 
-    public static enum TableReplicationType
+    public enum TableReplicationType
     {
         keyspace, legacy, logged;
 
         public static TableReplicationType fromString(String value)
         {
-            return valueOf(value.toLowerCase());
+            return valueOf(toLowerCaseLocalized(value));
         }
 
-        private static MetadataSerializer<TableReplicationType> serializer = new MetadataSerializer<TableReplicationType>()
+        private static final MetadataSerializer<TableReplicationType> serializer = new MetadataSerializer<>()
         {
             @Override
             public void serialize(TableReplicationType t, DataOutputPlus out, Version version) throws IOException
             {
-                if (!version.isAtLeast(Version.V6))
+                if (!version.isAtLeast(Version.V7))
                     return;
 
                 switch (t)
@@ -87,7 +87,7 @@ public final class TableParams
             @Override
             public TableReplicationType deserialize(DataInputPlus in, Version version) throws IOException
             {
-                if (!version.isAtLeast(Version.V6))
+                if (!version.isAtLeast(Version.V7))
                     return keyspace;
 
                 byte t = in.readByte();

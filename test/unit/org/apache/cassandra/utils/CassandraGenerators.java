@@ -99,6 +99,7 @@ import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
 import org.apache.cassandra.schema.MemtableParams;
 import org.apache.cassandra.schema.ReplicationParams;
+import org.apache.cassandra.schema.ReplicationType;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.schema.TableParams;
@@ -403,7 +404,7 @@ public final class CassandraGenerators
                 AbstractReplicationStrategy replication = replicationGen.generate(rs).withKeyspace(nameGen).build().generate(rs);
                 ReplicationParams replicationParams = ReplicationParams.fromStrategy(replication);
                 boolean durableWrites = durableWritesGen.generate(rs);
-                KeyspaceParams params = new KeyspaceParams(durableWrites, replicationParams);
+                KeyspaceParams params = new KeyspaceParams(durableWrites, replicationParams, ReplicationType.legacy);
                 Tables tables = Tables.none();
                 Views views = Views.none();
                 Types types = Types.none();

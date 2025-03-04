@@ -59,7 +59,7 @@ public enum Version
     /**
      * - MutationTracking
      */
-    V6(6),
+    V7(7),
 
     UNKNOWN(Integer.MAX_VALUE);
 
