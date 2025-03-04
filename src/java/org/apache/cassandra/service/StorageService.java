@@ -175,6 +175,7 @@ import org.apache.cassandra.service.paxos.PaxosState;
 import org.apache.cassandra.service.paxos.cleanup.PaxosCleanupLocalCoordinator;
 import org.apache.cassandra.service.paxos.cleanup.PaxosRepairState;
 import org.apache.cassandra.service.snapshot.SnapshotManager;
+import org.apache.cassandra.service.tracking.MutationJournal;
 import org.apache.cassandra.streaming.StreamManager;
 import org.apache.cassandra.streaming.StreamResultFuture;
 import org.apache.cassandra.streaming.StreamState;
@@ -3824,6 +3825,8 @@ public class StorageService extends NotificationBroadcasterSupport implements IE
             CommitLog.instance.forceRecycleAllSegments();
 
             CommitLog.instance.shutdownBlocking();
+
+            MutationJournal.instance.shutdownBlocking();
 
             // wait for miscellaneous tasks like sstable and commitlog segment deletion
             ColumnFamilyStore.shutdownPostFlushExecutor();

@@ -46,6 +46,8 @@ import org.apache.cassandra.utils.FBUtilities;
 
 public class MutationJournal
 {
+    public static final MutationJournal instance = new MutationJournal();
+
     private final Journal<MutationId, Mutation> journal;
 
     private MutationJournal()
