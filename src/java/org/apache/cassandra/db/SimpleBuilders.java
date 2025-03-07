@@ -149,7 +149,7 @@ public abstract class SimpleBuilders
             if (updateBuilders.size() == 1)
             {
                 PartitionUpdate update = updateBuilders.values().iterator().next().build();
-                return new Mutation(MutationId.createFor(update.metadata()), update);
+                return new Mutation(MutationId.none(), update);
             }
 
             Mutation.PartitionUpdateCollector mutationBuilder = new Mutation.PartitionUpdateCollector(mutationId, keyspaceName, key);

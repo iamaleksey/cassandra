@@ -98,7 +98,7 @@ public class WriteForwarding
         public void serialize(WriteForwarding forwarding, DataOutputPlus out, int version) throws IOException
         {
             ClusterMetadata metadata = ClusterMetadata.current();
-            Version vers = Version.fromInt(version);
+            Version vers = Version.minCommonSerializationVersion();
 
             Mutation.serializer.serialize(forwarding.mutation, out, version);
             NodeId coordinator = metadata.directory.peerId(forwarding.coordinator);
@@ -115,7 +115,7 @@ public class WriteForwarding
         public WriteForwarding deserialize(DataInputPlus in, int version) throws IOException
         {
             ClusterMetadata metadata = ClusterMetadata.current();
-            Version vers = Version.fromInt(version);
+            Version vers = Version.minCommonSerializationVersion();
 
             Mutation mutation = Mutation.serializer.deserialize(in, version);
             NodeId coordinator = NodeId.serializer.deserialize(in, vers);
@@ -135,7 +135,7 @@ public class WriteForwarding
         {
             long size = 0;
             ClusterMetadata metadata = ClusterMetadata.current();
-            Version vers = Version.fromInt(version);
+            Version vers = Version.minCommonSerializationVersion();
 
             size += Mutation.serializer.serializedSize(forwarding.mutation, version);
             NodeId coordinator = metadata.directory.peerId(forwarding.coordinator);
@@ -216,7 +216,7 @@ public class WriteForwarding
             public void serialize(Param param, DataOutputPlus out, int version) throws IOException
             {
                 ClusterMetadata metadata = ClusterMetadata.current();
-                Version vers = Version.fromInt(version);
+                Version vers = Version.minCommonSerializationVersion();
 
                 NodeId coordinatorId = metadata.directory.peerId(param.clientCoordinator);
                 NodeId.serializer.serialize(coordinatorId, out, vers);
@@ -226,7 +226,7 @@ public class WriteForwarding
             public Param deserialize(DataInputPlus in, int version) throws IOException
             {
                 ClusterMetadata metadata = ClusterMetadata.current();
-                Version vers = Version.fromInt(version);
+                Version vers = Version.minCommonSerializationVersion();
 
                 NodeId coordinatorId = NodeId.serializer.deserialize(in, vers);
                 return new Param(metadata.directory.endpoint(coordinatorId));
@@ -237,7 +237,7 @@ public class WriteForwarding
             {
                 long size = 0;
                 ClusterMetadata metadata = ClusterMetadata.current();
-                Version vers = Version.fromInt(version);
+                Version vers = Version.minCommonSerializationVersion();
 
                 NodeId coordinatorId = metadata.directory.peerId(param.clientCoordinator);
                 size += NodeId.serializer.serializedSize(coordinatorId, vers);

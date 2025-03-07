@@ -105,9 +105,9 @@ final class SingleTableUpdatesCollector implements UpdatesCollector
             if (metadata.isVirtual())
                 mutation = new VirtualMutation(builder.build());
             else if (metadata.isCounter())
-                mutation = new CounterMutation(new Mutation(MutationId.createFor(metadata), builder.build()), counterConsistencyLevel);
+                mutation = new CounterMutation(new Mutation(MutationId.none(), builder.build()), counterConsistencyLevel);
             else
-                mutation = new Mutation(MutationId.createFor(metadata), builder.build());
+                mutation = new Mutation(MutationId.none(), builder.build());
 
             mutation.validateIndexedColumns(state);
             mutation.validateSize(MessagingService.current_version, CommitLogSegment.ENTRY_OVERHEAD_SIZE);
