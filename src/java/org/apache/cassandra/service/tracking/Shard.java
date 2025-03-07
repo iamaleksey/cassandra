@@ -54,6 +54,12 @@ public class Shard
         return currentLocalLog.nextId();
     }
 
+    public void witnessedMutationLocal(Mutation mutation)
+    {
+        MutationId nextId = nextId();
+        get(nextId).witnessedMutationLocal(nextId, mutation);
+    }
+
     public void witnessedMutationLocal(MutationId id, Mutation mutation)
     {
         get(id).witnessedMutationLocal(id, mutation);

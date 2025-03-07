@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.service.tracking.WriteForwarding;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -70,7 +71,18 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 
     protected void applyMutation(Message<Mutation> message, InetAddressAndPort respondToAddress)
     {
-        message.payload.applyFuture().addCallback(o -> respond(message, respondToAddress), wto -> failed());
+        WriteForwarding.Param forwarding = (WriteForwarding.Param) message.header.params().get(ParamType.WRITE_FORWARDING);
+
+        message.payload.applyFuture().addCallback(o -> {
+            respond(message, respondToAddress);
+            if (forwarding != null)
+            {
+                // If we have separate client-coordinator and replica-coordinator, send normal responses to
+                // client-coordinator and acks to replica-coordinator. This is different from ParamType.RESPOND_TO
+                // because we want to respond to both.
+                respond(message, forwarding.clientCoordinator);
+            }
+        }, wto -> failed());
     }
 
     private static void forwardToLocalNodes(Message<Mutation> originalMessage, ForwardingInfo forwardTo)

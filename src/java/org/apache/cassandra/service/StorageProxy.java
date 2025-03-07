@@ -133,6 +133,8 @@ import org.apache.cassandra.service.reads.IReadResponse;
 import org.apache.cassandra.service.reads.ReadCallback;
 import org.apache.cassandra.service.reads.range.RangeCommands;
 import org.apache.cassandra.service.reads.repair.ReadRepair;
+import org.apache.cassandra.service.tracking.Shards;
+import org.apache.cassandra.service.tracking.WriteForwarding;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.membership.NodeState;
 import org.apache.cassandra.tcm.ownership.VersionedEndpoints;
@@ -193,6 +195,7 @@ public class StorageProxy implements StorageProxyMBean
     private static final int FAILURE_LOGGING_INTERVAL_SECONDS = CassandraRelevantProperties.FAILURE_LOGGING_INTERVAL_SECONDS.getInt();
 
     private static final WritePerformer standardWritePerformer;
+    private static final WritePerformer forwardingWritePerformer;
     private static final WritePerformer counterWritePerformer;
     private static final WritePerformer counterWriteOnCoordinatorPerformer;
 
@@ -226,6 +229,12 @@ public class StorageProxy implements StorageProxyMBean
         {
             assert mutation instanceof Mutation;
             sendToHintedReplicas((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION, requestTime);
+        };
+
+        forwardingWritePerformer = (mutation, targets, responseHandler, localDataCenter, requestTime) ->
+        {
+            assert mutation instanceof Mutation;
+            maybeForwardToReplicaCoordinator((Mutation) mutation, targets, responseHandler, localDataCenter, Stage.MUTATION, requestTime);
         };
 
         /*
@@ -887,8 +896,13 @@ public class StorageProxy implements StorageProxyMBean
         {
             for (IMutation mutation : mutations)
             {
-                // TODO: should the mutataion id be created here??
-                if (mutation instanceof CounterMutation)
+                if (WriteForwarding.isLogged(mutation))
+                {
+                    // TODO: Support counters
+                    assert mutation instanceof Mutation;
+                    responseHandlers.add(performWrite(mutation, consistencyLevel, localDataCenter, forwardingWritePerformer, null, plainWriteType, requestTime));
+                }
+                else if (mutation instanceof CounterMutation)
                     responseHandlers.add(mutateCounter((CounterMutation)mutation, localDataCenter, requestTime));
                 else
                     responseHandlers.add(performWrite(mutation, consistencyLevel, localDataCenter, standardWritePerformer, null, plainWriteType, requestTime));
@@ -1460,6 +1474,114 @@ public class StorageProxy implements StorageProxyMBean
         {
             this.handler = handler;
             this.mutation = mutation;
+        }
+    }
+
+    /**
+     * Main write path for tracked mutations.
+     *
+     * Borrows heavily from sendToHintedReplicas, but without hints.
+     */
+    public static void maybeForwardToReplicaCoordinator(final Mutation mutation,
+                                                        ReplicaPlan.ForWrite plan,
+                                                        AbstractWriteResponseHandler<IMutation> responseHandler,
+                                                        String localDataCenter,
+                                                        Stage stage,
+                                                        Dispatcher.RequestTime requestTime)
+    {
+        // this dc replicas:
+        Collection<Replica> localDc = null;
+        // extra-datacenter replicas, grouped by dc
+        Map<String, Collection<Replica>> dcGroups = null;
+        // only need to create a Message for non-local writes
+        Message<Mutation> message = null;
+
+        boolean insertLocal = false;
+        Replica localReplica = null;
+
+        // For performance, Mutation caches serialized buffers that are computed lazily in serializedBuffer(). That
+        // computation is not synchronized however and we will potentially call that method concurrently for each
+        // dispatched message (not that concurrent calls to serializedBuffer() are "unsafe" per se, just that they
+        // may result in multiple computations, making the caching optimization moot). So forcing the serialization
+        // here to make sure it's already cached/computed when it's concurrently used later.
+        // Side note: we have one cached buffers for each used EncodingVersion and this only pre-compute the one for
+        // the current version, but it's just an optimization and we're ok not optimizing for mixed-version clusters.
+        Mutation.serializer.prepareSerializedBuffer(mutation, MessagingService.current_version);
+
+        for (Replica destination : plan.contacts())
+        {
+            if (plan.isAlive(destination))
+            {
+                if (destination.isSelf())
+                {
+                    insertLocal = true;
+                    localReplica = destination;
+                }
+                else
+                {
+                    // belongs on a different server
+                    if (message == null)
+                    {
+                        message = Message.outWithFlags(MUTATION_REQ,
+                                                       mutation,
+                                                       requestTime,
+                                                       Collections.singletonList(MessageFlag.CALL_BACK_ON_FAILURE));
+                    }
+
+                    String dc = DatabaseDescriptor.getLocator().location(destination.endpoint()).datacenter;
+
+                    // direct writes to local DC or old Cassandra versions
+                    // (1.1 knows how to forward old-style String message IDs; updated to int in 2.0)
+                    if (localDataCenter.equals(dc))
+                    {
+                        if (localDc == null)
+                            localDc = new ArrayList<>(plan.contacts().size());
+
+                        localDc.add(destination);
+                    }
+                    else
+                    {
+                        if (dcGroups == null)
+                            dcGroups = new HashMap<>();
+
+                        Collection<Replica> messages = dcGroups.get(dc);
+                        if (messages == null)
+                            messages = dcGroups.computeIfAbsent(dc, (v) -> new ArrayList<>(3)); // most DCs will have <= 3 replicas
+
+                        messages.add(destination);
+                    }
+                }
+            }
+            else
+                responseHandler.expired();
+        }
+
+        if (insertLocal)
+        {
+            assert mutation.id().isNone();
+            Mutation assignedId = Shards.instance.assignId(mutation);
+
+            Preconditions.checkNotNull(localReplica);
+            performLocally(stage, localReplica, assignedId::apply, responseHandler, mutation, requestTime);
+
+            if (localDc != null)
+            {
+                for (Replica destination : localDc)
+                    MessagingService.instance().sendWriteWithCallback(message, destination, responseHandler);
+            }
+            if (dcGroups != null)
+            {
+                // for each datacenter, send the message to one node to relay the write to other replicas
+                for (Collection<Replica> dcTargets : dcGroups.values())
+                    sendMessagesToNonlocalDC(message, EndpointsForToken.copyOf(assignedId.key().getToken(), dcTargets), responseHandler);
+            }
+        }
+        else
+        {
+            // Forward to replica-coordinator
+            Replica coordinator = WriteForwarding.selectReplicaCoordinator(plan);
+            WriteForwarding forwarding = new WriteForwarding(mutation, plan, coordinator.endpoint());
+            forwarding.start(requestTime, responseHandler);
         }
     }
 

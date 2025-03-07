@@ -1550,5 +1550,12 @@ public class ClusterUtils
                 .describedAs("Unexpected StorageService operation mode")
                 .isEqualTo(StorageService.Mode.NORMAL);
     }
+
+    public static Integer currentInstance()
+    {
+        if (Thread.currentThread().getContextClassLoader() instanceof InstanceClassLoader instanceClassLoader)
+            return instanceClassLoader.getInstanceId();
+        return null;
+    }
 }
 
