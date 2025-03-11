@@ -1499,15 +1499,6 @@ public class StorageProxy implements StorageProxyMBean
         boolean insertLocal = false;
         Replica localReplica = null;
 
-        // For performance, Mutation caches serialized buffers that are computed lazily in serializedBuffer(). That
-        // computation is not synchronized however and we will potentially call that method concurrently for each
-        // dispatched message (not that concurrent calls to serializedBuffer() are "unsafe" per se, just that they
-        // may result in multiple computations, making the caching optimization moot). So forcing the serialization
-        // here to make sure it's already cached/computed when it's concurrently used later.
-        // Side note: we have one cached buffers for each used EncodingVersion and this only pre-compute the one for
-        // the current version, but it's just an optimization and we're ok not optimizing for mixed-version clusters.
-        Mutation.serializer.prepareSerializedBuffer(mutation, MessagingService.current_version);
-
         for (Replica destination : plan.contacts())
         {
             if (plan.isAlive(destination))
@@ -1562,6 +1553,9 @@ public class StorageProxy implements StorageProxyMBean
             assert mutation.id().isNone();
             Mutation assignedId = Shards.instance.assignId(mutation);
 
+            // See StorageProxy.sendToHintedReplicas
+            Mutation.serializer.prepareSerializedBuffer(mutation, MessagingService.current_version);
+
             message = Message.outWithFlags(MUTATION_REQ,
                                            assignedId,
                                            requestTime,
@@ -1585,6 +1579,7 @@ public class StorageProxy implements StorageProxyMBean
         else
         {
             // Forward to replica-coordinator
+            // Don't prepare the serialization buffer here because we'll only need it once for the replica-coordinator anyway
             Replica replicaCoordinator = WriteForwarding.selectReplicaCoordinator(plan);
             logger.debug("[Mutation {}] Forwarding tracked mutation with key {} using replica-coordinator {}", mutation.id(), mutation.key(), replicaCoordinator);
             WriteForwarding forwarding = new WriteForwarding(mutation, plan, replicaCoordinator.endpoint(), FBUtilities.getBroadcastAddressAndPort());
