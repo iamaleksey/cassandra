@@ -85,7 +85,11 @@ public class WriteForwardingTest extends TestBaseImpl
 
             for (int i = 0; i < ROWS; i++)
             {
-                ICoordinator coordinator = cluster.get(instance(i)).coordinator();
+                int coordinatorIdx = instance(i);
+                IInvokableInstance instance = cluster.get(coordinatorIdx);
+                ICoordinator coordinator = instance.coordinator();
+                int coordinatorNodeId = instance.callOnInstance(() -> ClusterMetadata.current().myNodeId().id());
+                logger.debug("Test query: coordinated by host {} for key {}", coordinatorNodeId, i);
                 coordinator.execute(format("INSERT INTO %s.%s (pk, ck, v) VALUES (?, ?, ?)", KEYSPACE, TABLE), ConsistencyLevel.ALL, i, i, i);
                 Object[][] rows = coordinator.execute(format("SELECT pk, ck, v FROM %s.%s WHERE pk = ? AND ck = ?", KEYSPACE, TABLE), ConsistencyLevel.ALL, i, i);
                 Assertions.assertThat(rows).hasNumberOfRows(1);
@@ -158,7 +162,7 @@ public class WriteForwardingTest extends TestBaseImpl
 
             try
             {
-                Assertions.assertThat(!mutation.id().isNone()).isTrue();
+                Assertions.assertThat(mutation.id().isNone()).isFalse();
                 trackMutationId(mutation.id());
 
                 // The issuer of a mutation ID must be a replica
@@ -170,7 +174,7 @@ public class WriteForwardingTest extends TestBaseImpl
             }
             catch (AssertionError e)
             {
-                logger.error("CHECKPOINT", e);
+                logger.error("CHECKPOINT: beginWrite mutation {}", mutation, e);
                 throw e;
             }
             return zuper.call();

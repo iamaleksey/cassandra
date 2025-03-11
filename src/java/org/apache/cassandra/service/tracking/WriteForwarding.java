@@ -30,6 +30,7 @@ import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.MutationId;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.exceptions.RequestFailureReason;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -42,6 +43,7 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.RequestCallback;
+import org.apache.cassandra.net.RequestCallbackWithFailure;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.serialization.Version;
@@ -59,28 +61,29 @@ public class WriteForwarding
 
     final Mutation mutation;
     final ImmutableSet<InetAddressAndPort> replicas;
-    final InetAddressAndPort coordinator;
+    final InetAddressAndPort replicaCoordinator;
+    final InetAddressAndPort clientCoordinator;
 
-    public WriteForwarding(Mutation mutation, ImmutableSet<InetAddressAndPort> replicas, InetAddressAndPort coordinator)
+    public WriteForwarding(Mutation mutation, ImmutableSet<InetAddressAndPort> replicas, InetAddressAndPort replicaCoordinator, InetAddressAndPort clientCoordinator)
     {
         this.mutation = mutation;
         this.replicas = replicas;
-        this.coordinator = coordinator;
+        this.replicaCoordinator = replicaCoordinator;
+        this.clientCoordinator = clientCoordinator;
     }
 
-    public WriteForwarding(Mutation mutation, ReplicaPlan.ForWrite plan, InetAddressAndPort coordinator)
+    public WriteForwarding(Mutation mutation, ReplicaPlan.ForWrite plan, InetAddressAndPort replicaCoordinator, InetAddressAndPort clientCoordinator)
     {
         this.mutation = mutation;
         ImmutableSet.Builder<InetAddressAndPort> replicasBuilder = ImmutableSet.builder();
         plan.liveAndDown().forEach(endpoint -> replicasBuilder.add(endpoint.endpoint()));
         this.replicas = replicasBuilder.build();
-        this.coordinator = coordinator;
+        this.replicaCoordinator = replicaCoordinator;
+        this.clientCoordinator = clientCoordinator;
     }
 
     public void start(Dispatcher.RequestTime requestTime, RequestCallback<IMutation> responseHandler)
     {
-        logger.debug("Forwarding mutation with key {} via coordinator {} to replicas {}", mutation.key(), coordinator, replicas);
-
         Message<WriteForwarding> message = Message.outWithFlags(WRITE_FORWARDING, this, requestTime, Collections.emptyList());
 
         // Replicas will respond directly to the client-coordinator
@@ -89,7 +92,7 @@ public class WriteForwarding
 
         // Replica-coordinator does not reply to client-coordinator
         // Would be worth adding a separate callback to handle replica-coordinator failures before timeout
-        MessagingService.instance().send(message, coordinator);
+        MessagingService.instance().send(message, replicaCoordinator);
     }
 
     public static final IVersionedSerializer<WriteForwarding> serializer = new IVersionedSerializer<>()
@@ -101,14 +104,16 @@ public class WriteForwarding
             Version vers = Version.minCommonSerializationVersion();
 
             Mutation.serializer.serialize(forwarding.mutation, out, version);
-            NodeId coordinator = metadata.directory.peerId(forwarding.coordinator);
-            NodeId.serializer.serialize(coordinator, out, vers);
             out.writeInt(forwarding.replicas.size());
             for (InetAddressAndPort replica : forwarding.replicas)
             {
                 NodeId node = metadata.directory.peerId(replica);
                 NodeId.serializer.serialize(node, out, vers);
             }
+            NodeId replicaCoordinator = metadata.directory.peerId(forwarding.replicaCoordinator);
+            NodeId.serializer.serialize(replicaCoordinator, out, vers);
+            NodeId clientCoordinator = metadata.directory.peerId(forwarding.clientCoordinator);
+            NodeId.serializer.serialize(clientCoordinator, out, vers);
         }
 
         @Override
@@ -118,7 +123,6 @@ public class WriteForwarding
             Version vers = Version.minCommonSerializationVersion();
 
             Mutation mutation = Mutation.serializer.deserialize(in, version);
-            NodeId coordinator = NodeId.serializer.deserialize(in, vers);
             int numReplicas = in.readInt();
             ImmutableSet.Builder<InetAddressAndPort> replicasBuilder = ImmutableSet.builderWithExpectedSize(numReplicas);
             for (int i = 0; i < numReplicas; i++)
@@ -126,8 +130,10 @@ public class WriteForwarding
                 NodeId node = NodeId.serializer.deserialize(in, vers);
                 replicasBuilder.add(metadata.directory.endpoint(node));
             }
+            NodeId replicaCoordinator = NodeId.serializer.deserialize(in, vers);
+            NodeId clientCoordinator = NodeId.serializer.deserialize(in, vers);
 
-            return new WriteForwarding(mutation, replicasBuilder.build(), metadata.directory.endpoint(coordinator));
+            return new WriteForwarding(mutation, replicasBuilder.build(), metadata.directory.endpoint(replicaCoordinator), metadata.directory.endpoint(clientCoordinator));
         }
 
         @Override
@@ -138,14 +144,16 @@ public class WriteForwarding
             Version vers = Version.minCommonSerializationVersion();
 
             size += Mutation.serializer.serializedSize(forwarding.mutation, version);
-            NodeId coordinator = metadata.directory.peerId(forwarding.coordinator);
-            size += NodeId.serializer.serializedSize(coordinator, vers);
             size += TypeSizes.INT_SIZE;
             for (InetAddressAndPort replica : forwarding.replicas)
             {
                 NodeId node = metadata.directory.peerId(replica);
                 size += NodeId.serializer.serializedSize(node, vers);
             }
+            NodeId replicaCoordinator = metadata.directory.peerId(forwarding.replicaCoordinator);
+            size += NodeId.serializer.serializedSize(replicaCoordinator, vers);
+            NodeId clientCoordinator = metadata.directory.peerId(forwarding.clientCoordinator);
+            size += NodeId.serializer.serializedSize(clientCoordinator, vers);
             return size;
         }
     };
@@ -163,40 +171,60 @@ public class WriteForwarding
             // would need to catch up epoch, see AbstractMutationVerbHandler.checkTokenOwnership
 
             WriteForwarding forwarding = incoming.payload;
-            logger.debug("Replica-coordinator received incoming forwarding request from {} for mutation with key {}", incoming.from(), forwarding.mutation.key());
+            assert incoming.from().equals(forwarding.clientCoordinator);
+            logger.debug("Replica-coordinator received incoming forwarding request from {} (clientCoordinator {}) for mutation with key {}", incoming.from(), forwarding.clientCoordinator, forwarding.mutation.key());
 
             Shard shard = Shards.instance.lookUp(forwarding.mutation.getKeyspaceName(), forwarding.mutation.key().getToken());
 
             assert forwarding.mutation.id().isNone();
             MutationId id = shard.nextId();
+            logger.debug("Assigned ID {} for mutation with key {}", id, forwarding.mutation.key());
             Mutation assignedId = forwarding.mutation.withMutationId(id);
 
             // TODO: Add expiration
             // TODO: Ensure local error responses go to Param.clientCoordinator
             Message<Mutation> message = Message.builder(MUTATION_REQ, assignedId)
-                                            .withParam(ParamType.WRITE_FORWARDING, new Param(forwarding.coordinator))
+                                            .withId(incoming.id())
+                                            .withParam(ParamType.WRITE_FORWARDING, new Param(forwarding.clientCoordinator))
                                             .build();
 
-            RequestCallback<NoPayload> callback = new RequestCallback<NoPayload>()
-            {
-                @Override
-                public void onResponse(Message<NoPayload> response)
-                {
-                    logger.debug("Replica-coordinator got response from replica {} for mutation with id {} key {}", forwarding.mutation.key(), id, response.from());
-                    ClusterMetadata metadata = ClusterMetadata.current();
-                    NodeId peerId = metadata.directory.peerId(response.from());
-                    shard.witnessedMutationRemote(id, peerId.id());
-                }
-            };
+            Acknowledge acknowledge = new Acknowledge(id, shard);
 
             for (InetAddressAndPort replica : forwarding.replicas)
             {
                 logger.debug("Replica-coordinator forwarding mutation with ID {} to replica {}", id, replica);
                 // Even though this sends a mutation, don't use sendWriteWithCallback
-                MessagingService.instance().sendWithCallback(message, replica, callback);
+                MessagingService.instance().sendWithCallback(message, replica, acknowledge);
             }
         }
     };
+
+    public static class Acknowledge implements RequestCallbackWithFailure<NoPayload>
+    {
+        MutationId id;
+        Shard shard;
+
+        public Acknowledge(MutationId id, Shard shard)
+        {
+            this.id = id;
+            this.shard = shard;
+        }
+
+        @Override
+        public void onResponse(Message<NoPayload> response)
+        {
+            logger.debug("Replica-coordinator got response from replica {} for mutation with id {}", response.from(), id);
+            ClusterMetadata metadata = ClusterMetadata.current();
+            NodeId peerId = metadata.directory.peerId(response.from());
+            shard.witnessedMutationRemote(id, peerId.id());
+        }
+
+        @Override
+        public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+        {
+            logger.debug("Got failure from {} with reason {}", from, failureReason);
+        }
+    }
 
     /**
      *

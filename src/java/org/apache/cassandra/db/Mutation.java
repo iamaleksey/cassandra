@@ -326,7 +326,8 @@ public class Mutation implements IMutation, Supplier<Mutation>
     public String toString(boolean shallow)
     {
         StringBuilder buff = new StringBuilder("Mutation(");
-        buff.append("keyspace='").append(keyspaceName).append('\'');
+        buff.append("id='").append(id).append('\'');
+        buff.append(", keyspace='").append(keyspaceName).append('\'');
         buff.append(", key='").append(ByteBufferUtil.bytesToHex(key.getKey())).append('\'');
         buff.append(", modifications=[");
         if (shallow)

@@ -1558,11 +1558,17 @@ public class StorageProxy implements StorageProxyMBean
 
         if (insertLocal)
         {
+            logger.debug("[Mutation {}] Executing tracked mutation with key {} locally", mutation.id(), mutation.key());
             assert mutation.id().isNone();
             Mutation assignedId = Shards.instance.assignId(mutation);
 
+            message = Message.outWithFlags(MUTATION_REQ,
+                                           assignedId,
+                                           requestTime,
+                                           Collections.singletonList(MessageFlag.CALL_BACK_ON_FAILURE));
+
             Preconditions.checkNotNull(localReplica);
-            performLocally(stage, localReplica, assignedId::apply, responseHandler, mutation, requestTime);
+            performLocally(stage, localReplica, assignedId::apply, responseHandler, assignedId, requestTime);
 
             if (localDc != null)
             {
@@ -1579,8 +1585,9 @@ public class StorageProxy implements StorageProxyMBean
         else
         {
             // Forward to replica-coordinator
-            Replica coordinator = WriteForwarding.selectReplicaCoordinator(plan);
-            WriteForwarding forwarding = new WriteForwarding(mutation, plan, coordinator.endpoint());
+            Replica replicaCoordinator = WriteForwarding.selectReplicaCoordinator(plan);
+            logger.debug("[Mutation {}] Forwarding tracked mutation with key {} using replica-coordinator {}", mutation.id(), mutation.key(), replicaCoordinator);
+            WriteForwarding forwarding = new WriteForwarding(mutation, plan, replicaCoordinator.endpoint(), FBUtilities.getBroadcastAddressAndPort());
             forwarding.start(requestTime, responseHandler);
         }
     }

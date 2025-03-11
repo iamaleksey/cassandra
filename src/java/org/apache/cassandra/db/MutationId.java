@@ -110,7 +110,7 @@ public class MutationId implements Comparable<MutationId>
 
     public boolean isNone()
     {
-        return logId == Long.MIN_VALUE && sequenceId == Long.MIN_VALUE;
+        return logId == Integer.MIN_VALUE && sequenceId == Long.MIN_VALUE;
     }
 
     public static MutationId createNext()
@@ -157,7 +157,7 @@ public class MutationId implements Comparable<MutationId>
     @Override
     public String toString()
     {
-        return "MutationId{" + logId + ", " + sequenceId + '}';
+        return "MutationId{" + (isNone() ? "NONE" : logId + ", " + sequenceId) + '}';
     }
 
     @Override

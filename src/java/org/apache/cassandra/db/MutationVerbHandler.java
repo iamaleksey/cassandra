@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
@@ -29,6 +32,8 @@ import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 {
+    private static final Logger logger = LoggerFactory.getLogger(MutationVerbHandler.class);
+
     public static final MutationVerbHandler instance = new MutationVerbHandler();
 
     private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
@@ -74,12 +79,15 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
         WriteForwarding.Param forwarding = (WriteForwarding.Param) message.header.params().get(ParamType.WRITE_FORWARDING);
 
         message.payload.applyFuture().addCallback(o -> {
+            logger.debug("[Mutation {}] Responding with message ID {} to originator {}", message.payload.id(), message.id(), respondToAddress);
             respond(message, respondToAddress);
             if (forwarding != null)
             {
                 // If we have separate client-coordinator and replica-coordinator, send normal responses to
                 // client-coordinator and acks to replica-coordinator. This is different from ParamType.RESPOND_TO
                 // because we want to respond to both.
+                assert !forwarding.clientCoordinator.equals(respondToAddress);
+                logger.debug("[Mutation {}] Responding with message ID {} to client-coordinator {}", message.payload.id(), message.id(), forwarding.clientCoordinator);
                 respond(message, forwarding.clientCoordinator);
             }
         }, wto -> failed());
