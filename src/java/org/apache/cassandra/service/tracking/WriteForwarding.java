@@ -44,6 +44,7 @@ import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.RequestCallbackWithFailure;
+import org.apache.cassandra.service.paxos.PaxosCommit;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.serialization.Version;
@@ -52,9 +53,23 @@ import org.apache.cassandra.transport.Dispatcher;
 import static org.apache.cassandra.net.Verb.MUTATION_REQ;
 import static org.apache.cassandra.net.Verb.WRITE_FORWARDING;
 
-/**
- *
- */
+/// In order to reduce the cost of read reconciliation on coordinators, tracked mutations have their Mutation IDs
+/// assigned by replicas at write time. This means that the former write coordination path now includes a forwarding
+/// step: if a non-replica is coordinating a write for a given token, instead of sending MUTATION_REQ to replicas
+/// directly, it sends MUTATION_REQ to a single replica, who assigns a mutation ID and forwards to other replicas.
+/// Replicas acknowledge the write to the client-coordinator and replica-coordinator directly: the client-coordinator
+/// collects acknowledgements to determine when the consistency level is satisfied, and the replica-coordinator collects
+/// acknowledgements to mark mutations propagated in its CoordinatorLogPrimary.
+///
+/// This has no impact on clients that use token-aware routing, and is not a hard requirement for correctness.
+/// Theoretically, we could separate the concepts of token ownership for coordination and persistence, where a group of
+/// instances can coordinate a given write but might not be replicas, but for now keeping these concepts linked is
+/// simpler.
+///
+/// Currently, only plain Mutations are supported, not Counters or the range of LWT write paths (PaxosCommit,
+/// Paxos2CommitRemote, Paxos2CommitAndPrepare). Counters already work similarly to tracked mutations, since they
+/// forward to a replica to continue execution. PaxosCommit is more interesting because it may send the same mutation
+/// via PAXOS_COMMIT_REQ or MUTATION_REQ depending on the query serial consistency level (see {@link PaxosCommit#isSelfOrSend}).
 public class WriteForwarding
 {
     private static final Logger logger = LoggerFactory.getLogger(WriteForwarding.class);
@@ -227,7 +242,10 @@ public class WriteForwarding
     }
 
     /**
-     *
+     * Include the client-coordinator in forwarded requests, so replicas can respond directly to both the
+     * replica-coordinator for marking the mutation propagation to a given replica, and the client-coordinator for
+     * meeting the client's consistency level. This is different from ParamType.RESPOND_TO because we want to respond to
+     * both.
      */
     public static class Param
     {
