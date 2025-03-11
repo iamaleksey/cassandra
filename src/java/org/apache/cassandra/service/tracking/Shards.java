@@ -42,9 +42,10 @@ public class Shards
     public void load(ClusterMetadata metadata)
     {
         // TODO (expected): if tracking enabled (schema integration), replicated only
-        // TODO (expected): implement a TCM ChangeListener
+        // TODO (expected): implement a TCM ChangeListener to support migration to logged replication
         for (KeyspaceMetadata keyspace : metadata.schema.getKeyspaces())
-            shards.put(keyspace.name, KeyspaceShards.make(keyspace, metadata, this::nextHostLogId));
+            if (keyspace.hasLoggedReplication())
+                shards.put(keyspace.name, KeyspaceShards.make(keyspace, metadata, this::nextHostLogId));
     }
 
     Shard lookUp(String keyspace, Range<Token> range)
