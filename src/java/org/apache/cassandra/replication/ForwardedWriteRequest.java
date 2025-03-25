@@ -19,15 +19,16 @@
 package org.apache.cassandra.replication;
 
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Set;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.TypeSizes;
+import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -36,13 +37,14 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.NodeProximity;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.locator.ReplicaPlan;
+import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ForwardedWriteResponseHandler;
-import org.apache.cassandra.utils.CollectionSerializer;
+import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class ForwardedWriteRequest
@@ -53,23 +55,15 @@ public class ForwardedWriteRequest
     // kinds of mutations that each go to different recipients (see PaxosCommit).
     final Verb verb;
     final Mutation mutation;
-    final Set<InetAddressAndPort> recipients;
+    final ConsistencyLevel consistencyLevel;
+    final Dispatcher.RequestTime requestTime;
 
-    private ForwardedWriteRequest(Verb verb, Mutation mutation, Set<InetAddressAndPort> recipients)
+    public ForwardedWriteRequest(Verb verb, Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime)
     {
         this.verb = verb;
         this.mutation = mutation;
-        this.recipients = recipients;
-    }
-
-    private ForwardedWriteRequest(Verb verb, Mutation mutation)
-    {
-        this(verb, mutation, new HashSet<>());
-    }
-
-    public static Builder builder(Verb verb, Mutation mutation)
-    {
-        return new Builder(verb, mutation);
+        this.consistencyLevel = consistencyLevel;
+        this.requestTime = requestTime;
     }
 
     private Replica getLeader(ReplicaPlan.ForWrite plan)
@@ -82,41 +76,23 @@ public class ForwardedWriteRequest
         return replicas.get(0);
     }
 
-    public void sendViaLeader(ReplicaPlan.ForWrite plan, ForwardedWriteResponseHandler handler)
+    public void send(ForwardedWriteResponseHandler handler)
     {
+        String keyspaceName = mutation.getKeyspaceName();
+        Keyspace keyspace = Keyspace.open(keyspaceName);
+        Token token = mutation.key().getToken();
+        ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(keyspace, consistencyLevel, token, ReplicaPlans.writeNormal);
+
         Replica leader = getLeader(plan);
 
         // Add callbacks for replicas to respond directly to coordinator
         Message<ForwardedWriteRequest> toLeader = Message.out(Verb.FORWARDING_WRITE, this);
-        for (InetAddressAndPort recipient : recipients)
+        for (Replica replica : plan.contacts())
         {
-            logger.debug("Adding forwarding callback for response from {} id {}", recipient, toLeader.id());
-            MessagingService.instance().callbacks.addWithExpiration(handler, toLeader, recipient);
+            logger.debug("Adding forwarding callback for response from {} id {}", replica.endpoint(), toLeader.id());
+            MessagingService.instance().callbacks.addWithExpiration(handler, toLeader, replica.endpoint());
         }
         MessagingService.instance().send(toLeader, leader.endpoint());
-    }
-
-    public static class Builder
-    {
-        final Verb verb;
-        final Mutation mutation;
-        final Set<InetAddressAndPort> recipients = new HashSet<>();
-
-        public Builder(Verb verb, Mutation mutation)
-        {
-            this.verb = verb;
-            this.mutation = mutation;
-        }
-
-        public ForwardedWriteRequest build()
-        {
-            return new ForwardedWriteRequest(verb, mutation, recipients);
-        }
-
-        public void addRecipient(InetAddressAndPort endpoint)
-        {
-            recipients.add(endpoint);
-        }
     }
 
     public static final Serializer serializer = new Serializer();
@@ -128,7 +104,7 @@ public class ForwardedWriteRequest
         {
             out.writeInt(request.verb.id);
             Mutation.serializer.serialize(request.mutation, out, version);
-            CollectionSerializer.serializeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, request.recipients, out, version);
+            out.writeInt(request.consistencyLevel.code);
         }
 
         @Override
@@ -136,8 +112,8 @@ public class ForwardedWriteRequest
         {
             Verb verb = Verb.fromId(in.readInt());
             Mutation mutation = Mutation.serializer.deserialize(in, version);
-            Set<InetAddressAndPort> recipients = CollectionSerializer.deserializeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, CollectionSerializer.newHashSet(), in, version);
-            return new ForwardedWriteRequest(verb, mutation, recipients);
+            ConsistencyLevel consistencyLevel = ConsistencyLevel.fromCode(in.readInt());
+            return new ForwardedWriteRequest(verb, mutation, consistencyLevel, Dispatcher.RequestTime.forImmediateExecution());
         }
 
         @Override
@@ -146,7 +122,7 @@ public class ForwardedWriteRequest
             long size = 0;
             size += TypeSizes.INT_SIZE;
             size += Mutation.serializer.serializedSize(request.mutation, version);
-            size += CollectionSerializer.serializedSizeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, request.recipients, version);
+            size += TypeSizes.INT_SIZE;
             return size;
         }
     }
@@ -161,8 +137,15 @@ public class ForwardedWriteRequest
             logger.debug("Received incoming ForwardedWriteRequest {} id {}", incoming, incoming.id());
             Verb verb = incoming.payload.verb;
             Mutation mutation = incoming.payload.mutation;
+            ConsistencyLevel consistencyLevel = incoming.payload.consistencyLevel;
             InetAddressAndPort clientCoordinator = incoming.from();
-            for (InetAddressAndPort recipient : incoming.payload.recipients)
+
+            String keyspaceName = mutation.getKeyspaceName();
+            Keyspace keyspace = Keyspace.open(keyspaceName);
+            Token token = mutation.key().getToken();
+            ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(keyspace, consistencyLevel, token, ReplicaPlans.writeNormal);
+
+            for (Replica replica : plan.contacts())
             {
                 Message.Builder<?> outgoing = Message.builder(verb, mutation);
 
@@ -178,8 +161,8 @@ public class ForwardedWriteRequest
                 // TrackedWriteRequest.perform
 
                 Message<?> out = outgoing.build();
-                logger.debug("Forwarding outgoing message {} id {}", out, out.id());
-                MessagingService.instance().send(out, recipient);
+                logger.debug("Forwarding outgoing message {} id {} to {}", out, out.id(), replica.endpoint());
+                MessagingService.instance().send(out, replica.endpoint());
             }
         }
     }

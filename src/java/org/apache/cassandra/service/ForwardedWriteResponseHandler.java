@@ -94,7 +94,7 @@ public class ForwardedWriteResponseHandler extends AbstractWriteResponseHandler<
     @Override
     public void onResponse(Message<NoPayload> msg)
     {
-        logger.debug("Got response {}", msg);
+        logger.debug("Got direct response from replica {}", msg);
         delegate.onResponse(msg);
     }
 

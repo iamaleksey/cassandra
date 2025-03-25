@@ -91,7 +91,7 @@ public class TrackedWriteRequest
             logger.debug("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
             ForwardedWriteResponseHandler handler = ForwardedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime));
-            return forwardToReplicaCoordinator(mutation, plan, handler);
+            return forwardToReplicaCoordinator(mutation, consistencyLevel, requestTime, handler);
         }
 
         writeMetrics.localRequests.mark();
@@ -105,26 +105,11 @@ public class TrackedWriteRequest
         return handler;
     }
 
-    private static ForwardedWriteResponseHandler forwardToReplicaCoordinator(Mutation mutation, ReplicaPlan.ForWrite plan, ForwardedWriteResponseHandler handler)
+    private static ForwardedWriteResponseHandler forwardToReplicaCoordinator(Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime, ForwardedWriteResponseHandler handler)
     {
         assert mutation.id().isNone();
-
-        // Build a forwarding message to send to a replica-coordinator
-        ForwardedWriteRequest.Builder builder = ForwardedWriteRequest.builder(MUTATION_REQ, mutation);
-        for (Replica destination : plan.contacts())
-        {
-            assert !destination.isSelf();
-
-            if (!plan.isAlive(destination))
-            {
-                handler.expired(); // immediately mark the response as expired since the request will not be sent
-                continue;
-            }
-
-            builder.addRecipient(destination.endpoint());
-        }
-        ForwardedWriteRequest request = builder.build();
-        request.sendViaLeader(plan, handler);
+        ForwardedWriteRequest request = new ForwardedWriteRequest(Verb.MUTATION_REQ, mutation, consistencyLevel, requestTime);
+        request.send(handler);
         return handler;
     }
 
