@@ -17,6 +17,9 @@
  */
 package org.apache.cassandra.db;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
@@ -29,21 +32,25 @@ import static org.apache.cassandra.utils.MonotonicClock.Global.approxTime;
 
 public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 {
+    private static final Logger logger = LoggerFactory.getLogger(MutationVerbHandler.class);
+
     public static final MutationVerbHandler instance = new MutationVerbHandler();
 
     private void respond(Message<?> incoming, InetAddressAndPort respondToAddress)
     {
         ForwardedWriteRequest.RespondTo respondTo = (ForwardedWriteRequest.RespondTo) incoming.header.params().get(ParamType.TRACKED_MUTATION_FORWARDING);
+        Message<NoPayload> ack = incoming.emptyResponse();
         if (respondTo == null)
         {
             Tracing.trace("Enqueuing response to {}", respondToAddress);
-            MessagingService.instance().send(incoming.emptyResponse(), respondToAddress);
+            logger.debug("Enqueuing response to {}", respondToAddress);
+            MessagingService.instance().send(ack, respondToAddress);
         }
         else
         {
-            Tracing.trace("Enqueuing response for tracked mutation to client-coordinator {} leader {}", respondTo.coordinator, respondTo.leader);
-            MessagingService.instance().send(incoming.emptyResponse(), respondTo.coordinator);
-            MessagingService.instance().send(incoming.emptyResponse(), respondTo.leader);
+            logger.debug("Enqueuing response for tracked mutation to client-coordinator {} leader {}", respondTo.coordinator, respondTo.leader);
+            MessagingService.instance().send(ack, respondTo.coordinator);
+            MessagingService.instance().send(ack, respondTo.leader);
         }
     }
 

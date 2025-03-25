@@ -18,12 +18,24 @@
 
 package org.apache.cassandra.service;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.IMutation;
+import org.apache.cassandra.exceptions.RequestFailureReason;
+import org.apache.cassandra.exceptions.WriteFailureException;
+import org.apache.cassandra.exceptions.WriteTimeoutException;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
+import org.apache.cassandra.transport.Dispatcher;
 
 // idk if this is really necessary
 public class ForwardedWriteResponseHandler extends AbstractWriteResponseHandler<NoPayload>
 {
+    private static final Logger logger = LoggerFactory.getLogger(ForwardedWriteResponseHandler.class);
+
     private final AbstractWriteResponseHandler<NoPayload> delegate;
 
     private ForwardedWriteResponseHandler(AbstractWriteResponseHandler<NoPayload> delegate)
@@ -38,14 +50,81 @@ public class ForwardedWriteResponseHandler extends AbstractWriteResponseHandler<
     }
 
     @Override
-    protected int ackCount()
+    public void get() throws WriteTimeoutException, WriteFailureException
     {
-        return delegate.ackCount();
+        delegate.get();
+    }
+
+    @Override
+    protected int blockFor()
+    {
+        return delegate.blockFor();
+    }
+
+    @Override
+    protected int candidateReplicaCount()
+    {
+        return delegate.candidateReplicaCount();
+    }
+
+    @Override
+    public ConsistencyLevel consistencyLevel()
+    {
+        return delegate.consistencyLevel();
+    }
+
+    @Override
+    protected boolean waitingFor(InetAddressAndPort from)
+    {
+        return delegate.waitingFor(from);
+    }
+
+    @Override
+    public Dispatcher.RequestTime getRequestTime()
+    {
+        return delegate.getRequestTime();
+    }
+
+    @Override
+    protected void signal()
+    {
+        delegate.signal();
     }
 
     @Override
     public void onResponse(Message<NoPayload> msg)
     {
+        logger.debug("Got response {}", msg);
         delegate.onResponse(msg);
+    }
+
+    @Override
+    public void onFailure(InetAddressAndPort from, RequestFailureReason failureReason)
+    {
+        delegate.onFailure(from, failureReason);
+    }
+
+    @Override
+    public boolean invokeOnFailure()
+    {
+        return delegate.invokeOnFailure();
+    }
+
+    @Override
+    public void maybeTryAdditionalReplicas(IMutation mutation, StorageProxy.WritePerformer writePerformer, String localDC)
+    {
+        delegate.maybeTryAdditionalReplicas(mutation, writePerformer, localDC);
+    }
+
+    @Override
+    public boolean trackLatencyForSnitch()
+    {
+        return true;
+    }
+
+    @Override
+    protected int ackCount()
+    {
+        return delegate.ackCount();
     }
 }

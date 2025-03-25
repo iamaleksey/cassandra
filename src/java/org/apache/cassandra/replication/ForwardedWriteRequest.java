@@ -19,10 +19,15 @@
 package org.apache.cassandra.replication;
 
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
+import org.apache.cassandra.db.Mutation;
+import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.io.IVersionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
@@ -37,22 +42,42 @@ import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ForwardedWriteResponseHandler;
+import org.apache.cassandra.utils.CollectionSerializer;
 import org.apache.cassandra.utils.FBUtilities;
 
 public class ForwardedWriteRequest
 {
-    final Map<InetAddressAndPort, Message<?>> receipents = new HashMap<>();
+    private static final Logger logger = LoggerFactory.getLogger(ForwardedWriteRequest.class);
 
-    public static Builder builder()
+    // For now, just supporting a single mutation to multiple recipients. This will develop in the future for different
+    // kinds of mutations that each go to different recipients (see PaxosCommit).
+    final Verb verb;
+    final Mutation mutation;
+    final Set<InetAddressAndPort> recipients;
+
+    private ForwardedWriteRequest(Verb verb, Mutation mutation, Set<InetAddressAndPort> recipients)
     {
-        return new Builder();
+        this.verb = verb;
+        this.mutation = mutation;
+        this.recipients = recipients;
+    }
+
+    private ForwardedWriteRequest(Verb verb, Mutation mutation)
+    {
+        this(verb, mutation, new HashSet<>());
+    }
+
+    public static Builder builder(Verb verb, Mutation mutation)
+    {
+        return new Builder(verb, mutation);
     }
 
     private Replica getLeader(ReplicaPlan.ForWrite plan)
     {
         // TODO: Should match ReplicaPlans.findCounterLeaderReplica, including DC-local priority
         NodeProximity proximity = DatabaseDescriptor.getNodeProximity();
-        EndpointsForToken replicas = plan.liveUncontacted();
+        EndpointsForToken replicas = plan.live();
+        logger.debug("Finding best leader from replicas {}", replicas);
         replicas = proximity.sortedByProximity(FBUtilities.getBroadcastAddressAndPort(), replicas);
         return replicas.get(0);
     }
@@ -62,31 +87,35 @@ public class ForwardedWriteRequest
         Replica leader = getLeader(plan);
 
         // Add callbacks for replicas to respond directly to coordinator
-        for (Map.Entry<InetAddressAndPort, Message<?>> receipient : receipents.entrySet())
+        Message<ForwardedWriteRequest> toLeader = Message.out(Verb.FORWARDING_WRITE, this);
+        for (InetAddressAndPort recipient : recipients)
         {
-            InetAddressAndPort peer = receipient.getKey();
-            Message<?> forwarding = receipient.getValue();
-            MessagingService.instance().callbacks.addWithExpiration(handler, forwarding, peer);
+            logger.debug("Adding forwarding callback for response from {} id {}", recipient, toLeader.id());
+            MessagingService.instance().callbacks.addWithExpiration(handler, toLeader, recipient);
         }
-
-        Message<ForwardedWriteRequest> message = Message.out(Verb.FORWARDING_WRITE, this);
-        MessagingService.instance().send(message, leader.endpoint());
+        MessagingService.instance().send(toLeader, leader.endpoint());
     }
 
     public static class Builder
     {
-        final Map<InetAddressAndPort, Message<?>> receipents = new HashMap<>();
+        final Verb verb;
+        final Mutation mutation;
+        final Set<InetAddressAndPort> recipients = new HashSet<>();
+
+        public Builder(Verb verb, Mutation mutation)
+        {
+            this.verb = verb;
+            this.mutation = mutation;
+        }
 
         public ForwardedWriteRequest build()
         {
-            return new ForwardedWriteRequest();
+            return new ForwardedWriteRequest(verb, mutation, recipients);
         }
 
-        public void addRecipient(InetAddressAndPort endpoint, Message<?> message)
+        public void addRecipient(InetAddressAndPort endpoint)
         {
-            // String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
-            // String dc = DatabaseDescriptor.getLocator().location(endpoint).datacenter;
-            receipents.put(endpoint, message);
+            recipients.add(endpoint);
         }
     }
 
@@ -95,21 +124,30 @@ public class ForwardedWriteRequest
     public static class Serializer implements IVersionedSerializer<ForwardedWriteRequest>
     {
         @Override
-        public void serialize(ForwardedWriteRequest t, DataOutputPlus out, int version) throws IOException
+        public void serialize(ForwardedWriteRequest request, DataOutputPlus out, int version) throws IOException
         {
-
+            out.writeInt(request.verb.id);
+            Mutation.serializer.serialize(request.mutation, out, version);
+            CollectionSerializer.serializeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, request.recipients, out, version);
         }
 
         @Override
         public ForwardedWriteRequest deserialize(DataInputPlus in, int version) throws IOException
         {
-            return null;
+            Verb verb = Verb.fromId(in.readInt());
+            Mutation mutation = Mutation.serializer.deserialize(in, version);
+            Set<InetAddressAndPort> recipients = CollectionSerializer.deserializeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, CollectionSerializer.newHashSet(), in, version);
+            return new ForwardedWriteRequest(verb, mutation, recipients);
         }
 
         @Override
-        public long serializedSize(ForwardedWriteRequest t, int version)
+        public long serializedSize(ForwardedWriteRequest request, int version)
         {
-            return 0;
+            long size = 0;
+            size += TypeSizes.INT_SIZE;
+            size += Mutation.serializer.serializedSize(request.mutation, version);
+            size += CollectionSerializer.serializedSizeCollection(InetAddressAndPort.Serializer.inetAddressAndPortSerializer, request.recipients, version);
+            return size;
         }
     }
 
@@ -120,19 +158,28 @@ public class ForwardedWriteRequest
         @Override
         public void doVerb(Message<ForwardedWriteRequest> incoming)
         {
-            ForwardedWriteRequest request = incoming.payload;
+            logger.debug("Received incoming ForwardedWriteRequest {} id {}", incoming, incoming.id());
+            Verb verb = incoming.payload.verb;
+            Mutation mutation = incoming.payload.mutation;
             InetAddressAndPort clientCoordinator = incoming.from();
-            for (Map.Entry<InetAddressAndPort, Message<?>> entry : request.receipents.entrySet())
+            for (InetAddressAndPort recipient : incoming.payload.recipients)
             {
-                InetAddressAndPort peer = entry.getKey();
-                Message<?> forwarding = entry.getValue();
-                Message.Builder<?> outgoing = Message.builder(forwarding);
+                Message.Builder<?> outgoing = Message.builder(verb, mutation);
 
                 // Need to match to incoming ID so client-coordinator callback is invoked
                 outgoing.withId(incoming.id());
-                outgoing.withParam(ParamType.RESPOND_TO, new RespondTo(clientCoordinator, FBUtilities.getBroadcastAddressAndPort()));
+                outgoing.withParam(ParamType.TRACKED_MUTATION_FORWARDING, new RespondTo(clientCoordinator, FBUtilities.getBroadcastAddressAndPort()));
 
-                MessagingService.instance().send(outgoing.build(), peer);
+                // TODO: Separate remote-DC handling
+                // String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
+                // String dc = DatabaseDescriptor.getLocator().location(endpoint).datacenter;
+
+                // Also need to acknowledge leader response callback for the journal, which is duplicative with
+                // TrackedWriteRequest.perform
+
+                Message<?> out = outgoing.build();
+                logger.debug("Forwarding outgoing message {} id {}", out, out.id());
+                MessagingService.instance().send(out, recipient);
             }
         }
     }
@@ -145,19 +192,25 @@ public class ForwardedWriteRequest
             @Override
             public void serialize(RespondTo respondTo, DataOutputPlus out, int version) throws IOException
             {
-
+                InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.coordinator, out, version);
+                InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.leader, out, version);
             }
 
             @Override
             public RespondTo deserialize(DataInputPlus in, int version) throws IOException
             {
-                return null;
+                InetAddressAndPort coordinator = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
+                InetAddressAndPort leader = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
+                return new RespondTo(coordinator, leader);
             }
 
             @Override
             public long serializedSize(RespondTo respondTo, int version)
             {
-                return 0;
+                long size = 0;
+                size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.coordinator, version);
+                size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.leader, version);
+                return size;
             }
         };
 

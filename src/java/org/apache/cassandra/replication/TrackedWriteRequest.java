@@ -88,6 +88,7 @@ public class TrackedWriteRequest
 
         if (plan.lookup(FBUtilities.getBroadcastAddressAndPort()) == null)
         {
+            logger.debug("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
             ForwardedWriteResponseHandler handler = ForwardedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime));
             return forwardToReplicaCoordinator(mutation, plan, handler);
@@ -108,10 +109,8 @@ public class TrackedWriteRequest
     {
         assert mutation.id().isNone();
 
-        Message<?> message = Message.outWithFlags(MUTATION_REQ, mutation, handler.getRequestTime(), singletonList(MessageFlag.CALL_BACK_ON_FAILURE));
-
         // Build a forwarding message to send to a replica-coordinator
-        ForwardedWriteRequest.Builder builder = ForwardedWriteRequest.builder();
+        ForwardedWriteRequest.Builder builder = ForwardedWriteRequest.builder(MUTATION_REQ, mutation);
         for (Replica destination : plan.contacts())
         {
             assert !destination.isSelf();
@@ -122,7 +121,7 @@ public class TrackedWriteRequest
                 continue;
             }
 
-            builder.addRecipient(destination.endpoint(), message);
+            builder.addRecipient(destination.endpoint());
         }
         ForwardedWriteRequest request = builder.build();
         request.sendViaLeader(plan, handler);

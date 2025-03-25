@@ -56,6 +56,7 @@ public enum ParamType
     CUSTOM_MAP                       (14, CustomParamsSerializer.serializer),
     TOO_MANY_REFERENCED_INDEXES_WARN (16, Int32Serializer.serializer),
     TOO_MANY_REFERENCED_INDEXES_FAIL (17, Int32Serializer.serializer),
+    // Different from RESPOND_TO because it's additional respondents
     TRACKED_MUTATION_FORWARDING      (18, ForwardedWriteRequest.RespondTo.serializer);
 
     final int id;
