@@ -50,6 +50,8 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.service.AbstractWriteResponseHandler;
+import org.apache.cassandra.service.ForwardedWriteResponseHandler;
 import org.apache.cassandra.service.TrackedWriteResponseHandler;
 import org.apache.cassandra.tracing.Tracing;
 import org.apache.cassandra.transport.Dispatcher;
@@ -72,7 +74,7 @@ public class TrackedWriteRequest
      * @param consistencyLevel the consistency level for the write operation
      * @param requestTime object holding times when request got enqueued and started execution
      */
-    public static TrackedWriteResponseHandler perform(
+    public static AbstractWriteResponseHandler<?> perform(
         Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime)
     {
         Tracing.trace("Determining replicas for mutation");
@@ -81,25 +83,49 @@ public class TrackedWriteRequest
         Keyspace keyspace = Keyspace.open(keyspaceName);
         Token token = mutation.key().getToken();
 
-        MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
-        mutation = mutation.withMutationId(id);
-
         ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(keyspace, consistencyLevel, token, ReplicaPlans.writeNormal);
-
-        if (plan.lookup(FBUtilities.getBroadcastAddressAndPort()) != null)
-            writeMetrics.localRequests.mark();
-        else
-            writeMetrics.remoteRequests.mark();
-
         AbstractReplicationStrategy rs = plan.replicationStrategy();
 
-        TrackedWriteResponseHandler handler =
-            TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime),
-                                             keyspaceName,
-                                             mutation.key().getToken(),
-                                             id);
-        applyLocallyAndSendToReplicas(mutation, plan, handler);
+        if (plan.lookup(FBUtilities.getBroadcastAddressAndPort()) == null)
+        {
+            writeMetrics.remoteRequests.mark();
+            ForwardedWriteResponseHandler handler = ForwardedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime));
+            return forwardToReplicaCoordinator(mutation, plan, handler);
+        }
 
+        writeMetrics.localRequests.mark();
+        MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
+        mutation = mutation.withMutationId(id);
+        TrackedWriteResponseHandler handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime),
+                                         keyspaceName,
+                                         mutation.key().getToken(),
+                                         id);
+        applyLocallyAndSendToReplicas(mutation, plan, handler);
+        return handler;
+    }
+
+    private static ForwardedWriteResponseHandler forwardToReplicaCoordinator(Mutation mutation, ReplicaPlan.ForWrite plan, ForwardedWriteResponseHandler handler)
+    {
+        assert mutation.id().isNone();
+
+        Message<?> message = Message.outWithFlags(MUTATION_REQ, mutation, handler.getRequestTime(), singletonList(MessageFlag.CALL_BACK_ON_FAILURE));
+
+        // Build a forwarding message to send to a replica-coordinator
+        ForwardedWriteRequest.Builder builder = ForwardedWriteRequest.builder();
+        for (Replica destination : plan.contacts())
+        {
+            assert !destination.isSelf();
+
+            if (!plan.isAlive(destination))
+            {
+                handler.expired(); // immediately mark the response as expired since the request will not be sent
+                continue;
+            }
+
+            builder.addRecipient(destination.endpoint(), message);
+        }
+        ForwardedWriteRequest request = builder.build();
+        request.sendViaLeader(plan, handler);
         return handler;
     }
 

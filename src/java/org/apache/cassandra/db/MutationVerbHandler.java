@@ -20,6 +20,7 @@ package org.apache.cassandra.db;
 import org.apache.cassandra.exceptions.WriteTimeoutException;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.net.*;
+import org.apache.cassandra.replication.ForwardedWriteRequest;
 import org.apache.cassandra.tracing.Tracing;
 
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
@@ -30,10 +31,20 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 {
     public static final MutationVerbHandler instance = new MutationVerbHandler();
 
-    private void respond(Message<?> respondTo, InetAddressAndPort respondToAddress)
+    private void respond(Message<?> incoming, InetAddressAndPort respondToAddress)
     {
-        Tracing.trace("Enqueuing response to {}", respondToAddress);
-        MessagingService.instance().send(respondTo.emptyResponse(), respondToAddress);
+        ForwardedWriteRequest.RespondTo respondTo = (ForwardedWriteRequest.RespondTo) incoming.header.params().get(ParamType.TRACKED_MUTATION_FORWARDING);
+        if (respondTo == null)
+        {
+            Tracing.trace("Enqueuing response to {}", respondToAddress);
+            MessagingService.instance().send(incoming.emptyResponse(), respondToAddress);
+        }
+        else
+        {
+            Tracing.trace("Enqueuing response for tracked mutation to client-coordinator {} leader {}", respondTo.coordinator, respondTo.leader);
+            MessagingService.instance().send(incoming.emptyResponse(), respondTo.coordinator);
+            MessagingService.instance().send(incoming.emptyResponse(), respondTo.leader);
+        }
     }
 
     private void failed()
