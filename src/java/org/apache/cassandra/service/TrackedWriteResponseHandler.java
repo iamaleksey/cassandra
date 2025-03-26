@@ -38,23 +38,23 @@ public class TrackedWriteResponseHandler extends AbstractWriteResponseHandler<No
     private final String keyspace;
     private final Token token;
     private final MutationId mutationId;
-    private final ForwardedWriteRequest.RespondTo respondTo;
+    private final ForwardedWriteRequest.DirectAcknowledge ackTo;
 
     private TrackedWriteResponseHandler(
-    AbstractWriteResponseHandler<NoPayload> wrapped, String keyspace, Token token, MutationId mutationId, ForwardedWriteRequest.RespondTo respondTo)
+    AbstractWriteResponseHandler<NoPayload> wrapped, String keyspace, Token token, MutationId mutationId, ForwardedWriteRequest.DirectAcknowledge ackTo)
     {
         super(wrapped.replicaPlan, wrapped.callback, wrapped.writeType, null, wrapped.getRequestTime());
         this.wrapped = wrapped;
         this.keyspace = keyspace;
         this.token = token;
         this.mutationId = mutationId;
-        this.respondTo = respondTo;
+        this.ackTo = ackTo;
     }
 
     public static TrackedWriteResponseHandler wrap(
-        AbstractWriteResponseHandler<NoPayload> handler, String keyspace, Token token, MutationId mutationId, ForwardedWriteRequest.RespondTo respondTo)
+        AbstractWriteResponseHandler<NoPayload> handler, String keyspace, Token token, MutationId mutationId, ForwardedWriteRequest.DirectAcknowledge ackTo)
     {
-        return new TrackedWriteResponseHandler(handler, keyspace, token, mutationId, respondTo);
+        return new TrackedWriteResponseHandler(handler, keyspace, token, mutationId, ackTo);
     }
 
     @Override
@@ -62,19 +62,16 @@ public class TrackedWriteResponseHandler extends AbstractWriteResponseHandler<No
     {
         /* local mutations are witnessed from Keyspace.applyInternalTracked */
         if (msg != null)
-        {
-            logger.debug("Got response {} {}", msg.from(), msg.id());
             MutationTrackingService.instance.witnessedRemoteMutation(keyspace, token, mutationId, msg.from());
-        }
-        else if (respondTo != null)
+
+        // Local write needs to be ack'd to client-coordinator
+        if (ackTo != null)
         {
-            // Response from local write needs to be ack'd to client-coordinator
-            logger.debug("Got response from local write");
             Message<NoPayload> message = Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
                                          .from(FBUtilities.getBroadcastAddressAndPort())
-                                         .withId(respondTo.id)
+                                         .withId(ackTo.id)
                                          .build();
-            MessagingService.instance().send(message, respondTo.coordinator);
+            MessagingService.instance().send(message, ackTo.coordinator);
         }
 
         wrapped.onResponse(msg);

@@ -67,16 +67,17 @@ public class TrackedWriteRequest
 {
     private static final Logger logger = LoggerFactory.getLogger(TrackedWriteRequest.class);
 
-    private final ForwardedWriteRequest.RespondTo respondTo;
+    private final ForwardedWriteRequest.DirectAcknowledge ackTo;
 
-    public TrackedWriteRequest(ForwardedWriteRequest.RespondTo respondTo)
+    public TrackedWriteRequest(ForwardedWriteRequest.DirectAcknowledge ackTo)
     {
-        this.respondTo = respondTo;
+        this.ackTo = ackTo;
     }
 
     public TrackedWriteRequest()
     {
-        this.respondTo = null;
+        // Coordinator is a replica, so no need to acknowledge elsewhere
+        this.ackTo = null;
     }
 
     /**
@@ -114,7 +115,7 @@ public class TrackedWriteRequest
                                          keyspaceName,
                                          mutation.key().getToken(),
                                          id,
-                                         respondTo);
+                                         ackTo);
         applyLocallyAndSendToReplicas(mutation, plan, handler);
         return handler;
     }
@@ -170,10 +171,10 @@ public class TrackedWriteRequest
                 Message.Builder<Mutation> builder = Message.builder(MUTATION_REQ, mutation)
                                  .withRequestTime(handler.getRequestTime())
                                  .withFlag(MessageFlag.CALL_BACK_ON_FAILURE);
-                if (respondTo != null)
+                if (ackTo != null)
                     builder
-                        .withParam(ParamType.TRACKED_MUTATION_FORWARDING, respondTo)
-                        .withId(respondTo.id);
+                        .withParam(ParamType.TRACKED_MUTATION_FORWARDING, ackTo)
+                        .withId(ackTo.id);
 
                 message = builder.build();
             }

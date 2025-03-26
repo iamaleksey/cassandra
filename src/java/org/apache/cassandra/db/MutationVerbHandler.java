@@ -39,20 +39,16 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
     private void respond(Message<?> incoming, InetAddressAndPort respondToAddress)
     {
         // Local tracked writes respond in TrackedWriteResponseHandler
-        logger.debug("Done with write {}, figuring out response", incoming);
-        ForwardedWriteRequest.RespondTo respondTo = (ForwardedWriteRequest.RespondTo) incoming.header.params().get(ParamType.TRACKED_MUTATION_FORWARDING);
-        Message<NoPayload> ack = incoming.emptyResponse();
-        if (respondTo == null)
+        Message<NoPayload> response = incoming.emptyResponse();
+        Tracing.trace("Enqueuing response to {}", respondToAddress);
+        logger.debug("Enqueuing response to {}", respondToAddress);
+        MessagingService.instance().send(response, respondToAddress);
+
+        ForwardedWriteRequest.DirectAcknowledge ackTo = (ForwardedWriteRequest.DirectAcknowledge) incoming.header.params().get(ParamType.TRACKED_MUTATION_FORWARDING);
+        if (ackTo != null)
         {
-            Tracing.trace("Enqueuing response to {}", respondToAddress);
-            logger.debug("Enqueuing response to {}", respondToAddress);
-            MessagingService.instance().send(ack, respondToAddress);
-        }
-        else
-        {
-            logger.debug("Enqueuing response for tracked mutation to client-coordinator {} leader {}", respondTo.coordinator, respondTo.leader);
-            MessagingService.instance().send(ack, respondTo.coordinator);
-            MessagingService.instance().send(ack, respondTo.leader);
+            logger.debug("Enqueuing response for direct acknowledgement of forwarded tracked mutation to coordinator {}", ackTo.coordinator);
+            MessagingService.instance().send(response, ackTo.coordinator);
         }
     }
 

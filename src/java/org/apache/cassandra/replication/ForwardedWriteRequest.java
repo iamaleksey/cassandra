@@ -92,6 +92,7 @@ public class ForwardedWriteRequest
             logger.debug("Adding forwarding callback for response from {} id {}", replica.endpoint(), toLeader.id());
             MessagingService.instance().callbacks.addWithExpiration(handler, toLeader, replica.endpoint());
         }
+
         MessagingService.instance().send(toLeader, leader.endpoint());
     }
 
@@ -138,88 +139,55 @@ public class ForwardedWriteRequest
             Mutation mutation = incoming.payload.mutation;
             assert mutation.id().isNone();
             ConsistencyLevel consistencyLevel = incoming.payload.consistencyLevel;
-            InetAddressAndPort clientCoordinator = incoming.from();
 
             Stage.MUTATION.submit(() -> {
-                new TrackedWriteRequest(RespondTo.coordinator(clientCoordinator, incoming.id()))
-                        .perform(mutation, consistencyLevel, Dispatcher.RequestTime.forImmediateExecution())
-                        .get();
+                new TrackedWriteRequest(DirectAcknowledge.toCoordinator(incoming.from(), incoming.id()))
+                        .perform(mutation, consistencyLevel, Dispatcher.RequestTime.forImmediateExecution());
             });
-
-            /*
-            for (Replica replica : plan.contacts())
-            {
-                Message.Builder<?> outgoing = Message.builder(verb, mutation);
-
-                // Need to match to incoming ID so client-coordinator callback is invoked
-                outgoing.withId(incoming.id());
-                outgoing.withParam(ParamType.TRACKED_MUTATION_FORWARDING, new RespondTo(clientCoordinator, FBUtilities.getBroadcastAddressAndPort()));
-
-                // TODO: Separate remote-DC handling
-                // String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
-                // String dc = DatabaseDescriptor.getLocator().location(endpoint).datacenter;
-
-                // TODO
-                // Also need to acknowledge leader response callback for the journal, which is duplicative with
-                // TrackedWriteRequest.perform
-                // This will be a replica
-
-                Message<?> out = outgoing.build();
-                logger.debug("Forwarding outgoing message {} id {} to {}", out, out.id(), replica.endpoint());
-                MessagingService.instance().send(out, replica.endpoint());
-            }
-            */
         }
     }
 
-    // this is really "additional response", rename to ForwardingResponses
-    public static class RespondTo
+    public static class DirectAcknowledge
     {
-        public static IVersionedSerializer<RespondTo> serializer = new IVersionedSerializer<>()
+        public static IVersionedSerializer<DirectAcknowledge> serializer = new IVersionedSerializer<>()
         {
             @Override
-            public void serialize(RespondTo respondTo, DataOutputPlus out, int version) throws IOException
+            public void serialize(DirectAcknowledge ackTo, DataOutputPlus out, int version) throws IOException
             {
-                InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.coordinator, out, version);
-                InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.leader, out, version);
-                out.writeLong(respondTo.id);
+                InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(ackTo.coordinator, out, version);
+                out.writeLong(ackTo.id);
             }
 
             @Override
-            public RespondTo deserialize(DataInputPlus in, int version) throws IOException
+            public DirectAcknowledge deserialize(DataInputPlus in, int version) throws IOException
             {
                 InetAddressAndPort coordinator = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
-                InetAddressAndPort leader = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
                 long id = in.readLong();
-                return new RespondTo(coordinator, leader, id);
+                return new DirectAcknowledge(coordinator, id);
             }
 
             @Override
-            public long serializedSize(RespondTo respondTo, int version)
+            public long serializedSize(DirectAcknowledge ackTo, int version)
             {
                 long size = 0;
-                size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.coordinator, version);
-                size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.leader, version);
+                size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(ackTo.coordinator, version);
                 size += TypeSizes.LONG_SIZE;
                 return size;
             }
         };
 
-        public final InetAddressAndPort coordinator; // rm
-        public final InetAddressAndPort leader;
+        public final InetAddressAndPort coordinator;
         public final long id;
 
-        public RespondTo(InetAddressAndPort coordinator, InetAddressAndPort leader, long id)
+        public DirectAcknowledge(InetAddressAndPort coordinator, long id)
         {
-            assert !coordinator.equals(leader);
             this.coordinator = coordinator;
-            this.leader = leader;
             this.id = id;
         }
 
-        static RespondTo coordinator(InetAddressAndPort coordinator, long id)
+        static DirectAcknowledge toCoordinator(InetAddressAndPort coordinator, long messageId)
         {
-            return new RespondTo(coordinator, FBUtilities.getBroadcastAddressAndPort(), id);
+            return new DirectAcknowledge(coordinator, messageId);
         }
     }
 }

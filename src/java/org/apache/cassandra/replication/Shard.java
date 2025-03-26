@@ -53,8 +53,8 @@ public class Shard
         this.logs = new NonBlockingHashMapLong<>();
         this.currentLocalLog = startNewLog(localHostId, logIdProvider.getAsInt(), participants);
         long logId = currentLocalLog.logId.asLong();
-        // Should never create a Shard for MutationId.none()
-        assert logId > 0;
+        // We should never create a Shard for MutationId.none(), right?
+        assert logId != MutationId.none().logId();
         logs.put(logId, currentLocalLog);
     }
 

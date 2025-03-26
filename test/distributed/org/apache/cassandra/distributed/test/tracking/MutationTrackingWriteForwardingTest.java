@@ -65,6 +65,7 @@ public class MutationTrackingWriteForwardingTest extends TestBaseImpl
             for (int i = 0; i < 1000; i++)
             {
                 int instance = inst(i);
+
                 // Writes should be completed for the client, regardless of whether they are forwarded or not
                 cluster.coordinator(instance).execute(format("INSERT INTO %s.%s (k, c, v) VALUES (?, ?, ?)", keyspaceName, tableName), ConsistencyLevel.ALL, i, i, i);
 
