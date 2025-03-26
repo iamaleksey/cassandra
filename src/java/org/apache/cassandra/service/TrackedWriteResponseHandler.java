@@ -65,7 +65,7 @@ public class TrackedWriteResponseHandler extends AbstractWriteResponseHandler<No
             MutationTrackingService.instance.witnessedRemoteMutation(keyspace, token, mutationId, msg.from());
 
         // Local write needs to be ack'd to client-coordinator
-        if (ackTo != null)
+        if (msg == null && ackTo != null)
         {
             Message<NoPayload> message = Message.builder(Verb.MUTATION_RSP, NoPayload.noPayload)
                                          .from(FBUtilities.getBroadcastAddressAndPort())

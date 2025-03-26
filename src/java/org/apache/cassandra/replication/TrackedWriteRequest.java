@@ -87,11 +87,12 @@ public class TrackedWriteRequest
      * @param consistencyLevel the consistency level for the write operation
      * @param requestTime object holding times when request got enqueued and started execution
      */
-    public static AbstractWriteResponseHandler<?> perform(
+    public AbstractWriteResponseHandler<?> perform(
         Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime)
     {
         Tracing.trace("Determining replicas for mutation");
 
+        assert mutation.id().isNone();
         String keyspaceName = mutation.getKeyspaceName();
         Keyspace keyspace = Keyspace.open(keyspaceName);
         Token token = mutation.key().getToken();
@@ -104,7 +105,8 @@ public class TrackedWriteRequest
             logger.debug("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
             ForwardedWriteResponseHandler handler = ForwardedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime));
-            return forwardToReplicaCoordinator(mutation, consistencyLevel, requestTime, handler);
+            forwardToReplicaCoordinator(mutation, consistencyLevel, requestTime, handler);
+            return handler;
         }
 
         logger.debug("Local tracked request {} {}", mutation, plan);
@@ -120,15 +122,14 @@ public class TrackedWriteRequest
         return handler;
     }
 
-    private static ForwardedWriteResponseHandler forwardToReplicaCoordinator(Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime, ForwardedWriteResponseHandler handler)
+    private void forwardToReplicaCoordinator(Mutation mutation, ConsistencyLevel consistencyLevel, Dispatcher.RequestTime requestTime, ForwardedWriteResponseHandler handler)
     {
         assert mutation.id().isNone();
         ForwardedWriteRequest request = new ForwardedWriteRequest(Verb.MUTATION_REQ, mutation, consistencyLevel, requestTime);
         request.send(handler);
-        return handler;
     }
 
-    public static void applyLocallyAndSendToReplicas(Mutation mutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
+    public void applyLocallyAndSendToReplicas(Mutation mutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
     {
         String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
 
@@ -280,7 +281,7 @@ public class TrackedWriteRequest
     /*
      * Send the message to the first replica of targets, and have it forward the message to others in its DC
      */
-    private static void sendMessagesToRemoteDC(Message<? extends IMutation> message,
+    private void sendMessagesToRemoteDC(Message<? extends IMutation> message,
                                                EndpointsForToken targets,
                                                TrackedWriteResponseHandler handler)
     {
@@ -307,6 +308,8 @@ public class TrackedWriteRequest
         {
             target = targets.get(0);
         }
+        if (ackTo != null)
+            message = message.withParam(ParamType.TRACKED_MUTATION_FORWARDING, ackTo);
 
         Tracing.trace("Sending mutation to remote replica {}", target);
         MessagingService.instance().sendWriteWithCallback(message, target, handler);

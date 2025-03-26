@@ -31,7 +31,6 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.NoPayload;
 import org.apache.cassandra.transport.Dispatcher;
 
-// idk if this is really necessary
 public class ForwardedWriteResponseHandler extends AbstractWriteResponseHandler<NoPayload>
 {
     private static final Logger logger = LoggerFactory.getLogger(ForwardedWriteResponseHandler.class);

@@ -512,9 +512,9 @@ public class MessagingService extends MessagingServiceMBeanImpl implements Messa
             return;
         }
 
-        if (logger.isTraceEnabled())
+        if (logger.isDebugEnabled())
         {
-            logger.trace("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
+            logger.debug("{} sending {} to {}@{}", FBUtilities.getBroadcastAddressAndPort(), message.verb(), message.id(), to);
 
             if (to.equals(FBUtilities.getBroadcastAddressAndPort()))
                 logger.trace("Message-to-self {} going over MessagingService", message);
