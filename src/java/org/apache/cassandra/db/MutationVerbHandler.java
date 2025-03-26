@@ -38,6 +38,8 @@ public class MutationVerbHandler extends AbstractMutationVerbHandler<Mutation>
 
     private void respond(Message<?> incoming, InetAddressAndPort respondToAddress)
     {
+        // Local tracked writes respond in TrackedWriteResponseHandler
+        logger.debug("Done with write {}, figuring out response", incoming);
         ForwardedWriteRequest.RespondTo respondTo = (ForwardedWriteRequest.RespondTo) incoming.header.params().get(ParamType.TRACKED_MUTATION_FORWARDING);
         Message<NoPayload> ack = incoming.emptyResponse();
         if (respondTo == null)

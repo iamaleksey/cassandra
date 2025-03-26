@@ -171,6 +171,11 @@ public class MutationTrackingService
             return lookUp(token).nextId();
         }
 
+        void witnessedLocalMutation(Token token, MutationId mutationId)
+        {
+            lookUp(token).witnessedLocalMutation(mutationId, token);
+        }
+
         void witnessedRemoteMutation(Token token, MutationId mutationId, InetAddressAndPort onHost)
         {
             lookUp(token).witnessedRemoteMutation(mutationId, onHost);

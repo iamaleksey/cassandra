@@ -610,6 +610,8 @@ public class Keyspace
         if (TEST_FAIL_WRITES && getMetadata().name.equals(TEST_FAIL_WRITES_KS))
             throw new RuntimeException("Testing write failures");
 
+        logger.debug("applyInternalTracked {} {}", mutation, future);
+
         try (WriteContext ctx = trackedWriteHandler.beginWrite(mutation, true))
         {
             MutationTrackingService.instance.startWriting(mutation);

@@ -23,6 +23,7 @@ import java.io.IOException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Keyspace;
@@ -41,7 +42,6 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
-import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.ForwardedWriteResponseHandler;
 import org.apache.cassandra.transport.Dispatcher;
@@ -135,16 +135,18 @@ public class ForwardedWriteRequest
         public void doVerb(Message<ForwardedWriteRequest> incoming)
         {
             logger.debug("Received incoming ForwardedWriteRequest {} id {}", incoming, incoming.id());
-            Verb verb = incoming.payload.verb;
             Mutation mutation = incoming.payload.mutation;
+            assert mutation.id().isNone();
             ConsistencyLevel consistencyLevel = incoming.payload.consistencyLevel;
             InetAddressAndPort clientCoordinator = incoming.from();
 
-            String keyspaceName = mutation.getKeyspaceName();
-            Keyspace keyspace = Keyspace.open(keyspaceName);
-            Token token = mutation.key().getToken();
-            ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(keyspace, consistencyLevel, token, ReplicaPlans.writeNormal);
+            Stage.MUTATION.submit(() -> {
+                new TrackedWriteRequest(RespondTo.coordinator(clientCoordinator, incoming.id()))
+                        .perform(mutation, consistencyLevel, Dispatcher.RequestTime.forImmediateExecution())
+                        .get();
+            });
 
+            /*
             for (Replica replica : plan.contacts())
             {
                 Message.Builder<?> outgoing = Message.builder(verb, mutation);
@@ -157,17 +159,20 @@ public class ForwardedWriteRequest
                 // String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
                 // String dc = DatabaseDescriptor.getLocator().location(endpoint).datacenter;
 
+                // TODO
                 // Also need to acknowledge leader response callback for the journal, which is duplicative with
                 // TrackedWriteRequest.perform
+                // This will be a replica
 
                 Message<?> out = outgoing.build();
                 logger.debug("Forwarding outgoing message {} id {} to {}", out, out.id(), replica.endpoint());
                 MessagingService.instance().send(out, replica.endpoint());
             }
+            */
         }
     }
 
-    // this is really "additional response"
+    // this is really "additional response", rename to ForwardingResponses
     public static class RespondTo
     {
         public static IVersionedSerializer<RespondTo> serializer = new IVersionedSerializer<>()
@@ -177,6 +182,7 @@ public class ForwardedWriteRequest
             {
                 InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.coordinator, out, version);
                 InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serialize(respondTo.leader, out, version);
+                out.writeLong(respondTo.id);
             }
 
             @Override
@@ -184,7 +190,8 @@ public class ForwardedWriteRequest
             {
                 InetAddressAndPort coordinator = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
                 InetAddressAndPort leader = InetAddressAndPort.Serializer.inetAddressAndPortSerializer.deserialize(in, version);
-                return new RespondTo(coordinator, leader);
+                long id = in.readLong();
+                return new RespondTo(coordinator, leader, id);
             }
 
             @Override
@@ -193,18 +200,26 @@ public class ForwardedWriteRequest
                 long size = 0;
                 size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.coordinator, version);
                 size += InetAddressAndPort.Serializer.inetAddressAndPortSerializer.serializedSize(respondTo.leader, version);
+                size += TypeSizes.LONG_SIZE;
                 return size;
             }
         };
 
-        public final InetAddressAndPort coordinator;
+        public final InetAddressAndPort coordinator; // rm
         public final InetAddressAndPort leader;
+        public final long id;
 
-        public RespondTo(InetAddressAndPort coordinator, InetAddressAndPort leader)
+        public RespondTo(InetAddressAndPort coordinator, InetAddressAndPort leader, long id)
         {
             assert !coordinator.equals(leader);
             this.coordinator = coordinator;
             this.leader = leader;
+            this.id = id;
+        }
+
+        static RespondTo coordinator(InetAddressAndPort coordinator, long id)
+        {
+            return new RespondTo(coordinator, FBUtilities.getBroadcastAddressAndPort(), id);
         }
     }
 }

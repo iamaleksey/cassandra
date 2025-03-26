@@ -49,6 +49,7 @@ import org.apache.cassandra.net.ForwardingInfo;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessageFlag;
 import org.apache.cassandra.net.MessagingService;
+import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
 import org.apache.cassandra.service.ForwardedWriteResponseHandler;
@@ -58,7 +59,6 @@ import org.apache.cassandra.transport.Dispatcher;
 import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.MonotonicClock;
 
-import static java.util.Collections.singletonList;
 import static java.util.concurrent.TimeUnit.NANOSECONDS;
 import static org.apache.cassandra.metrics.ClientRequestsMetricsHolder.writeMetrics;
 import static org.apache.cassandra.net.Verb.MUTATION_REQ;
@@ -66,6 +66,18 @@ import static org.apache.cassandra.net.Verb.MUTATION_REQ;
 public class TrackedWriteRequest
 {
     private static final Logger logger = LoggerFactory.getLogger(TrackedWriteRequest.class);
+
+    private final ForwardedWriteRequest.RespondTo respondTo;
+
+    public TrackedWriteRequest(ForwardedWriteRequest.RespondTo respondTo)
+    {
+        this.respondTo = respondTo;
+    }
+
+    public TrackedWriteRequest()
+    {
+        this.respondTo = null;
+    }
 
     /**
      * Coordinate write of a tracked mutation. Assumes the replica is a coordinator.
@@ -94,13 +106,15 @@ public class TrackedWriteRequest
             return forwardToReplicaCoordinator(mutation, consistencyLevel, requestTime, handler);
         }
 
+        logger.debug("Local tracked request {} {}", mutation, plan);
         writeMetrics.localRequests.mark();
         MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
         mutation = mutation.withMutationId(id);
         TrackedWriteResponseHandler handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime),
                                          keyspaceName,
                                          mutation.key().getToken(),
-                                         id);
+                                         id,
+                                         respondTo);
         applyLocallyAndSendToReplicas(mutation, plan, handler);
         return handler;
     }
@@ -152,7 +166,17 @@ public class TrackedWriteRequest
             }
 
             if (message == null)
-                message = Message.outWithFlags(MUTATION_REQ, mutation, handler.getRequestTime(), singletonList(MessageFlag.CALL_BACK_ON_FAILURE));
+            {
+                Message.Builder<Mutation> builder = Message.builder(MUTATION_REQ, mutation)
+                                 .withRequestTime(handler.getRequestTime())
+                                 .withFlag(MessageFlag.CALL_BACK_ON_FAILURE);
+                if (respondTo != null)
+                    builder
+                        .withParam(ParamType.TRACKED_MUTATION_FORWARDING, respondTo)
+                        .withId(respondTo.id);
+
+                message = builder.build();
+            }
 
             String dc = DatabaseDescriptor.getLocator().location(destination.endpoint()).datacenter;
 
