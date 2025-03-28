@@ -276,8 +276,6 @@ public class Dispatcher implements CQLMessageHandler.MessageConsumer<Message.Req
         {
             return startedAtNanos - enqueuedAtNanos;
         }
-
-        // Add IVersionedSerializer? Clocks will be slightly different across hosts, so there's some risk of inconsistent timeouts.
     }
 
     /**
