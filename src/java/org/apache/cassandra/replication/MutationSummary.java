@@ -20,7 +20,9 @@ package org.apache.cassandra.replication;
 import java.io.IOException;
 import java.util.*;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
+
 import org.agrona.collections.Long2ObjectHashMap;
 import org.apache.cassandra.db.Digest;
 import org.apache.cassandra.db.TypeSizes;
