@@ -263,6 +263,11 @@ public class MutationSummary
         return coordinatorSummaryMap.get(logId.asLong());
     }
 
+    public void diff(MutationSummary other, Collection<ShortMutationId> into)
+    {
+        // TODO (expected): implement
+    }
+
     public static final IVersionedSerializer<MutationSummary> serializer = new IVersionedSerializer<>()
     {
         @Override
