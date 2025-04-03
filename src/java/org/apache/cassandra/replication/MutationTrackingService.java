@@ -173,6 +173,7 @@ public class MutationTrackingService
 
         void witnessedRemoteMutation(Token token, MutationId mutationId, InetAddressAndPort onHost)
         {
+            assert !mutationId.isNone();
             lookUp(token).witnessedRemoteMutation(mutationId, onHost);
         }
 
