@@ -92,7 +92,7 @@ public class MutationTrackingWriteForwardingTest extends TestBaseImpl
                         Token token = DatabaseDescriptor.getPartitioner().getMinimumToken();
                         Range<Token> fullRange = new Range<>(token, token);
                         TableId tableId = Schema.instance.getTableMetadata(keyspaceName, tableName).id;
-                        MutationSummary summary = MutationTrackingService.instance.summaryForRange(tableId, fullRange);
+                        MutationSummary summary = MutationTrackingService.instance.createSummaryForRange(fullRange, tableId, true);
                         return summary.unreconciledIds();
                     });
                     int lastUnreconciled = instanceUnreconciled.getOrDefault(instance, 0);

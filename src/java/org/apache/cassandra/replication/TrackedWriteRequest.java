@@ -128,7 +128,7 @@ public class TrackedWriteRequest
         return handler;
     }
 
-    private void performForwarding(ForwardedWriteRequest request)
+    public void performForwarding(ForwardedWriteRequest request)
     {
         Mutation mutation = request.message.mutation;
         assert mutation.id().isNone();
