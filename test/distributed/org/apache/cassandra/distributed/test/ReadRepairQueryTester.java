@@ -137,23 +137,17 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
         return new Tester(restriction, cluster, strategy, coordinator, flush, paging, replicationType);
     }
 
-    protected static class Tester extends ReadRepairTester<Tester>
+    static abstract class AbstractTester<T extends AbstractTester<T>> extends ReadRepairTester<T>
     {
         private final String restriction; // the tested CQL query WHERE restriction
         private final String allColumnsQuery; // a SELECT * query for the table using the tested restriction
 
-        Tester(String restriction, Cluster cluster, ReadRepairStrategy strategy, int coordinator, boolean flush, boolean paging, ReplicationType replicationType)
+        AbstractTester(String restriction, Cluster cluster, ReadRepairStrategy strategy, int coordinator, boolean flush, boolean paging, ReplicationType replicationType)
         {
             super(cluster, strategy, coordinator, flush, paging, false, replicationType);
             this.restriction = restriction;
 
             allColumnsQuery = String.format("SELECT * FROM %s %s", qualifiedTableName, restriction);
-        }
-
-        @Override
-        Tester self()
-        {
-            return this;
         }
 
         /**
@@ -168,12 +162,12 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
          * @param node1Rows                the rows in the first node, which is the one with the most updated data
          * @param node2Rows                the rows in the second node, which is the one meant to receive the RR writes
          */
-        Tester queryColumns(String columns,
-                            long columnsQueryRepairedRows,
-                            long rowsQueryRepairedRows,
-                            Object[][] columnsQueryResults,
-                            Object[][] node1Rows,
-                            Object[][] node2Rows)
+        T queryColumns(String columns,
+                       long columnsQueryRepairedRows,
+                       long rowsQueryRepairedRows,
+                       Object[][] columnsQueryResults,
+                       Object[][] node1Rows,
+                       Object[][] node2Rows)
         {
             // query only the selected columns with CL=ALL to trigger partial read repair on that column
             String columnsQuery = String.format("SELECT %s FROM %s %s", columns, qualifiedTableName, restriction);
@@ -223,13 +217,13 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
          * @param node1Rows                the rows in the first node, which is the one with the most updated data
          * @param node2Rows                the rows in the second node, which is the one meant to receive the RR writes
          */
-        Tester deleteColumn(String columnDeletion,
-                            String columns,
-                            long columnsQueryRepairedRows,
-                            long rowsQueryRepairedRows,
-                            Object[][] columnsQueryResults,
-                            Object[][] node1Rows,
-                            Object[][] node2Rows)
+        T deleteColumn(String columnDeletion,
+                       String columns,
+                       long columnsQueryRepairedRows,
+                       long rowsQueryRepairedRows,
+                       Object[][] columnsQueryResults,
+                       Object[][] node1Rows,
+                       Object[][] node2Rows)
         {
             assert restriction != null;
 
@@ -250,7 +244,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
          * Executes the specified row deletion on just one node and verifies the tested query, to ensure that the tested
          * query propagates the row deletion.
          */
-        Tester deleteRows(String rowDeletion, long repairedRows, Object[][] node1Rows, Object[][] node2Rows)
+        T deleteRows(String rowDeletion, long repairedRows, Object[][] node1Rows, Object[][] node2Rows)
         {
             mutate(1, rowDeletion);
 
@@ -262,12 +256,12 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
             return verifyQuery(allColumnsQuery, repairedRows, node1Rows, node2Rows);
         }
 
-        Tester mutate(String... queries)
+        T mutate(String... queries)
         {
             return mutate(1, queries);
         }
 
-        private Tester verifyQuery(String query, long expectedRepairedRows, Object[][] node1Rows, Object[][] node2Rows)
+        private T verifyQuery(String query, long expectedRepairedRows, Object[][] node1Rows, Object[][] node2Rows)
         {
             // verify the per-replica status before running the query distributedly
             assertRows(cluster.get(1).executeInternal(query), node1Rows);
@@ -280,7 +274,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
             assertRows(cluster.get(1).executeInternal(query), node1Rows);
             assertRows(cluster.get(2).executeInternal(query), strategy == NONE ? EMPTY_ROWS : node1Rows);
 
-            return this;
+            return self();
         }
 
         /**
@@ -295,7 +289,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
          * Verifies the final status of the nodes with an unrestricted query, to ensure that the main tested query
          * hasn't triggered any unexpected repairs. Then, it verifies that the node that hasn't been used as coordinator
          * hasn't triggered any unexpected repairs. Finally, it drops the table.
-         *
+         * <p>
          * The expectUnrepaired flag is meant for range query tests where logged replication table special casing
          * doesn't apply since we do expect the final query to find and repair missing mutations
          */
@@ -338,6 +332,20 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
         void tearDown(long repairedRows, Object[][] node1Rows, Object[][] node2Rows)
         {
             tearDown(repairedRows, node1Rows, node2Rows, false);
+        }
+    }
+
+    protected static class Tester extends AbstractTester<Tester>
+    {
+        public Tester(String restriction, Cluster cluster, ReadRepairStrategy strategy, int coordinator, boolean flush, boolean paging, ReplicationType replicationType)
+        {
+            super(restriction, cluster, strategy, coordinator, flush, paging, replicationType);
+        }
+
+        @Override
+        Tester self()
+        {
+            return this;
         }
     }
 }
