@@ -67,6 +67,7 @@ import org.apache.cassandra.schema.ColumnMetadata;
 import org.apache.cassandra.schema.IndexMetadata;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.ClientState;
+import org.apache.cassandra.service.reads.tracked.PartialTrackedRead;
 
 /**
  * Consisting of a top level Index interface and two sub-interfaces which handle read and write operations,
@@ -700,6 +701,41 @@ public interface Index
         default PartitionIterator filterReplicaFilteringProtection(PartitionIterator fullResponse)
         {
             return command().rowFilter().filter(fullResponse, command().metadata(), command().nowInSec());
+        }
+
+        default boolean isMultiStep()
+        {
+            return false;
+        }
+
+        default MultiStepSearcher asMultiStep()
+        {
+            throw new IllegalStateException(getClass().getSimpleName() + " is not a multi-step searcher");
+        }
+    }
+
+    default boolean supportsMutationTracking()
+    {
+        return false;
+    }
+
+    /**
+     * Extended searcher capable of participating in tracked reads
+     */
+    public interface MultiStepSearcher extends Searcher
+    {
+        PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
+
+        @Override
+        default boolean isMultiStep()
+        {
+            return true;
+        }
+
+        @Override
+        default MultiStepSearcher asMultiStep()
+        {
+            return this;
         }
     }
 
