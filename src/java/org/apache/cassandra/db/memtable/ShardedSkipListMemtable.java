@@ -264,6 +264,12 @@ public class ShardedSkipListMemtable extends AbstractShardedMemtable
         return p != null ? p.unfilteredIterator() : null;
     }
 
+    @Override
+    public Partition snapshotPartition(DecoratedKey partitionKey)
+    {
+        return getPartition(partitionKey);
+    }
+
     public FlushablePartitionSet<AtomicBTreePartition> getFlushSet(PartitionPosition from, PartitionPosition to)
     {
         long keySize = 0;

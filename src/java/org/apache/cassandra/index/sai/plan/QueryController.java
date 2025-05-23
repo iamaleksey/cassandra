@@ -42,6 +42,7 @@ import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.ReadableView;
 import org.apache.cassandra.db.SinglePartitionReadCommand;
 import org.apache.cassandra.db.filter.ClusteringIndexFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
@@ -157,7 +158,7 @@ public class QueryController
         return index != null && index.hasAnalyzer();
     }
 
-    public UnfilteredRowIterator queryStorage(List<PrimaryKey> keys, ReadExecutionController executionController)
+    public UnfilteredRowIterator queryStorage(ReadableView view, List<PrimaryKey> keys, ReadExecutionController executionController)
     {
         if (keys.isEmpty())
             throw new IllegalArgumentException("At least one primary key is required!");
@@ -170,7 +171,7 @@ public class QueryController
                                                                                  keys.get(0).partitionKey(),
                                                                                  makeFilter(keys));
 
-        return partition.queryMemtableAndDisk(cfs, executionController);
+        return partition.queryMemtableAndDisk(view, cfs, executionController);
     }
 
     private static Runnable getIndexReleaser(Set<SSTableIndex> referencedIndexes)
@@ -260,7 +261,10 @@ public class QueryController
                     if (unrepairedIterator.getMaxKeys() > 0)
                     {
                         builder.add(unrepairedIterator);
-                        queryContext.hasUnrepairedMatches = true;
+
+                        // mutation tracking internally repairs all partitions ranges/keys as part of a read
+                        if (!command.metadata().replicationType().isTracked())
+                            queryContext.hasUnrepairedMatches = true;
                     }
                     else
                     {
