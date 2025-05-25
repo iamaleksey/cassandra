@@ -96,7 +96,7 @@ public class PartialTrackedSinglePartitionRead extends AbstractPartialTrackedRea
         }
     }
 
-    private class SinglePartitionCompleted extends Completed
+    private class SinglePartitionCompleted extends AbstractCompleted
     {
         private final UnfilteredPartitionIterator initialData;
         private final SimpleBTreePartition augmentedData;

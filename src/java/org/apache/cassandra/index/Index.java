@@ -44,6 +44,7 @@ import org.apache.cassandra.db.DeletionTime;
 import org.apache.cassandra.db.RangeTombstone;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
+import org.apache.cassandra.db.ReadableView;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.WriteContext;
 import org.apache.cassandra.db.filter.RowFilter;
@@ -708,7 +709,7 @@ public interface Index
             return false;
         }
 
-        default MultiStepSearcher asMultiStep()
+        default MultiStepSearcher<?> asMultiStep()
         {
             throw new IllegalStateException(getClass().getSimpleName() + " is not a multi-step searcher");
         }
@@ -722,9 +723,29 @@ public interface Index
     /**
      * Extended searcher capable of participating in tracked reads
      */
-    public interface MultiStepSearcher extends Searcher
+    interface MultiStepSearcher<Match extends MultiStepSearcher.IndexMatch> extends Searcher
     {
+        interface IndexMatch extends Comparable<IndexMatch>
+        {
+            DecoratedKey key();
+
+            UnfilteredPartitionIterator query(ReadableView view);
+        }
+
         PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
+
+        /**
+         * Returns true if the given update could cause one or more of the rows it touches to match the index query.
+         * Since we may not have a full view of the effects this has on index matching, the tracked read assumes
+         * it will return false positives.
+         */
+        boolean isPossibleHit(PartitionUpdate update);
+
+        /**
+         * Since partition updates may not contain all the info the index query needs to know if it will create a hit
+         * it may return false positives. This filter is meant to catch and remove them from the augmented result
+         */
+        UnfilteredPartitionIterator filterCompletedRead(UnfilteredPartitionIterator iterator);
 
         @Override
         default boolean isMultiStep()
@@ -733,7 +754,7 @@ public interface Index
         }
 
         @Override
-        default MultiStepSearcher asMultiStep()
+        default MultiStepSearcher<?> asMultiStep()
         {
             return this;
         }

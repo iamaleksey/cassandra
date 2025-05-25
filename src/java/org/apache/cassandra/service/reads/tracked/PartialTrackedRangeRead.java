@@ -259,7 +259,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
         }
     }
 
-    protected abstract class RangeCompleted extends Completed
+    protected abstract class RangeCompleted extends AbstractCompleted
     {
         protected final SortedMap<DecoratedKey, SimpleBTreePartition> data;
         protected final ShortReadSupport shortReadSupport;

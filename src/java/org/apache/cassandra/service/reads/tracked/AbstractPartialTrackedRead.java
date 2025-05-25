@@ -196,9 +196,15 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
             return NAME;
         }
 
+        protected abstract CompletedRead getResult();
+    }
+
+    protected abstract class AbstractCompleted extends Completed
+    {
         protected abstract UnfilteredPartitionIterator iterator();
         protected abstract CompletedRead createResult(UnfilteredPartitionIterator iterator);
 
+        @Override
         protected CompletedRead getResult()
         {
             UnfilteredPartitionIterator result = command().completeTrackedRead(iterator(), AbstractPartialTrackedRead.this);
@@ -253,12 +259,17 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
         state = state.asInitialized().prepare(initialData);
     }
 
+    void augment(PartitionUpdate update)
+    {
+        state = state.asAugmentable().augment(update);
+    }
+
     @Override
     public synchronized void augment(Mutation mutation)
     {
         PartitionUpdate update = mutation.getPartitionUpdate(command().metadata());
         if (update != null)
-            state = state.asAugmentable().augment(update);
+            augment(update);
     }
 
     private UnfilteredPartitionIterator complete(UnfilteredPartitionIterator iterator)
