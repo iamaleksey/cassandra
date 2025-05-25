@@ -1150,7 +1150,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         return toCQLString();
     }
 
-    InputCollector<UnfilteredRowIterator> iteratorsForPartition(ColumnFamilyStore.ViewFragment view, ReadExecutionController controller)
+    InputCollector<UnfilteredRowIterator> iteratorsForPartition(ReadableView view, ReadExecutionController controller)
     {
         final BiFunction<List<UnfilteredRowIterator>, RepairedDataInfo, UnfilteredRowIterator> merge =
             (unfilteredRowIterators, repairedDataInfo) -> {
@@ -1200,7 +1200,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         List<T> repairedIters;
         List<T> unrepairedIters;
 
-        InputCollector(ColumnFamilyStore.ViewFragment view,
+        InputCollector(ReadableView view,
                        ReadExecutionController controller,
                        BiFunction<List<T>, RepairedDataInfo, T> repairedMerger,
                        Function<T, UnfilteredPartitionIterator> postLimitAdditionalPartitions)
@@ -1210,12 +1210,12 @@ public abstract class ReadCommand extends AbstractReadQuery
             
             if (isTrackingRepairedStatus)
             {
-                for (SSTableReader sstable : view.sstables)
+                for (SSTableReader sstable : view.sstables())
                 {
                     if (considerRepairedForTracking(sstable))
                     {
                         if (repairedSSTables == null)
-                            repairedSSTables = Sets.newHashSetWithExpectedSize(view.sstables.size());
+                            repairedSSTables = Sets.newHashSetWithExpectedSize(view.sstables().size());
                         repairedSSTables.add(sstable);
                     }
                 }
@@ -1223,14 +1223,14 @@ public abstract class ReadCommand extends AbstractReadQuery
             if (repairedSSTables == null)
             {
                 repairedIters = Collections.emptyList();
-                unrepairedIters = new ArrayList<>(view.sstables.size());
+                unrepairedIters = new ArrayList<>(view.sstables().size());
             }
             else
             {
                 repairedIters = new ArrayList<>(repairedSSTables.size());
                 // when we're done collating, we'll merge the repaired iters and add the
                 // result to the unrepaired list, so size that list accordingly
-                unrepairedIters = new ArrayList<>((view.sstables.size() - repairedSSTables.size()) + Iterables.size(view.memtables) + 1);
+                unrepairedIters = new ArrayList<>((view.sstables().size() - repairedSSTables.size()) + Iterables.size(view.memtables()) + 1);
             }
             this.repairedMerger = repairedMerger;
             this.postLimitAdditionalPartitions = postLimitAdditionalPartitions;
