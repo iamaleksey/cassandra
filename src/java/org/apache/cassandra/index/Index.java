@@ -727,9 +727,7 @@ public interface Index
     {
         interface IndexMatch extends Comparable<IndexMatch>
         {
-            DecoratedKey key();
-
-            UnfilteredPartitionIterator query(ReadableView view);
+            DecoratedKey baseKey();
         }
 
         PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
@@ -741,6 +739,7 @@ public interface Index
          */
         boolean isPossibleHit(PartitionUpdate update);
 
+        UnfilteredPartitionIterator queryMatch(ReadableView view, Match match);
         /**
          * Since partition updates may not contain all the info the index query needs to know if it will create a hit
          * it may return false positives. This filter is meant to catch and remove them from the augmented result

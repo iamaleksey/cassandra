@@ -98,9 +98,9 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
             augmentedData.update(update);
         }
 
-        UnfilteredPartitionIterator readHit(IndexMatch match)
+        UnfilteredPartitionIterator readHit(Match match)
         {
-            return match.query(view);
+            return searcher.queryMatch(view, match);
         }
     }
 
@@ -122,10 +122,10 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
         {
             Match match = iterator.next();
             matches.add(match);
-            if (!reads.containsKey(match.key()))
+            if (!reads.containsKey(match.baseKey()))
             {
-                IndexPartitionRead partitionRead = createRead(match.key(), cfs);
-                reads.put(match.key(), partitionRead);
+                IndexPartitionRead partitionRead = createRead(match.baseKey(), cfs);
+                reads.put(match.baseKey(), partitionRead);
             }
         }
         return new IndexPrepared(matches, reads);
@@ -247,7 +247,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
 
                         Match match = matchIter.next();
 
-                        IndexPartitionRead read = reads.get(match.key());
+                        IndexPartitionRead read = reads.get(match.baseKey());
                         if (read == null)
                             throw new IllegalStateException("Handle short reads");
 
