@@ -24,13 +24,14 @@ import java.nio.ByteBuffer;
 
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.index.Index;
 
 /**
  * Entries in indexes on non-compact tables (tables with composite comparators)
  * can be encapsulated as IndexedEntry instances. These are not used when dealing
  * with indexes on static/compact tables (i.e. KEYS indexes).
  */
-public final class IndexEntry
+public final class IndexEntry implements Index.IndexMatch
 {
     public final DecoratedKey indexValue;
     public final Clustering<?> indexClustering;
@@ -50,5 +51,11 @@ public final class IndexEntry
         this.timestamp = timestamp;
         this.indexedKey = indexedKey;
         this.indexedEntryClustering = indexedEntryClustering;
+    }
+
+    @Override
+    public ByteBuffer baseKey()
+    {
+        return indexedKey;
     }
 }

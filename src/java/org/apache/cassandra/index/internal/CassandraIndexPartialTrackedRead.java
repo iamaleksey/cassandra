@@ -24,12 +24,11 @@ import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
-import org.apache.cassandra.index.internal.CassandraIndexSearcher.CassandraMatch;
 import org.apache.cassandra.service.reads.tracked.AbstractPartialTrackedIndexRead;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
 
-public class CassandraIndexPartialTrackedRead extends AbstractPartialTrackedIndexRead<CassandraMatch, CassandraIndexSearcher>
+public class CassandraIndexPartialTrackedRead extends AbstractPartialTrackedIndexRead<IndexEntry, CassandraIndexSearcher>
 {
     public CassandraIndexPartialTrackedRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, CassandraIndexSearcher searcher)
     {
@@ -37,22 +36,20 @@ public class CassandraIndexPartialTrackedRead extends AbstractPartialTrackedInde
     }
 
     @Override
-    protected CloseableIterator<CassandraMatch> queryIndex()
+    protected CloseableIterator<IndexEntry> queryIndex()
     {
         DecoratedKey indexKey = searcher().indexKey();
         RowIterator indexIter = searcher().queryIndex(indexKey, executionController());
         return new AbstractIterator<>()
         {
             @Override
-            protected CassandraMatch computeNext()
+            protected IndexEntry computeNext()
             {
                 if (!indexIter.hasNext())
                     return endOfData();
 
                 Row row = indexIter.next();
-                IndexEntry entry = searcher().index.decodeEntry(indexKey, row);
-
-                return new CassandraMatch(entry.indexValue, entry.indexClustering, indexKey, entry.indexedEntryClustering);
+                return searcher().index.decodeEntry(indexKey, row);
             }
 
             @Override

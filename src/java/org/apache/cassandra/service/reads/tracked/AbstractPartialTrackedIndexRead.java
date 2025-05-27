@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.tracked;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -41,7 +42,7 @@ import org.apache.cassandra.db.partitions.SimpleBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.Index;
-import org.apache.cassandra.index.Index.MultiStepSearcher.IndexMatch;
+import org.apache.cassandra.index.Index.IndexMatch;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -106,8 +107,9 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
         }
     }
 
-    IndexPartitionRead createRead(DecoratedKey partitionKey, ColumnFamilyStore cfs)
+    IndexPartitionRead createRead(ByteBuffer key, ColumnFamilyStore cfs)
     {
+        DecoratedKey partitionKey = command.metadata().partitioner.decorateKey(key);
         ReadableView view = freezeView(cfs.select(View.select(SSTableSet.LIVE, partitionKey)));
         return new IndexPartitionRead(partitionKey, view);
     }
@@ -120,7 +122,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
         try (CloseableIterator<Match> iterator = queryIndex())
         {
             Set<Match> matches = new HashSet<>();
-            SortedMap<DecoratedKey, IndexPartitionRead> reads = new TreeMap<>();
+            SortedMap<ByteBuffer, IndexPartitionRead> reads = new TreeMap<>();
             while (iterator.hasNext() && matches.size() < command.limits().count())
             {
                 Match match = iterator.next();
@@ -138,12 +140,11 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
     private class IndexPrepared extends Prepared
     {
         private final Set<Match> matches;
-        private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
-        private final Set<DecoratedKey> newKeys = new HashSet<>();
-        private final Set<Match> newMatches = new HashSet<>();
-        private Index.MultiStepSearcher.MatchIndexer<Match> matchIndexer = null;
+        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+        private final Set<ByteBuffer> newKeys = new HashSet<>();
+        private Index.MatchIndexer<Match> matchIndexer = null;
 
-        public IndexPrepared(Set<Match> matches, SortedMap<DecoratedKey, IndexPartitionRead> reads)
+        public IndexPrepared(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
         {
             this.matches = matches;
             this.reads = reads;
@@ -152,7 +153,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
         @Override
         Completed complete()
         {
-            throw new UnsupportedOperationException();
+            return new IndexCompleted(matches, reads, newKeys);
         }
 
         private boolean indexUpdate(PartitionUpdate update)
@@ -168,7 +169,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
         @Override
         public State augment(PartitionUpdate update)
         {
-            DecoratedKey key = update.partitionKey();
+            ByteBuffer key = update.partitionKey().getKey();
             IndexPartitionRead read = reads.get(key);
             if (read == null)
             {
@@ -188,38 +189,34 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
     private class IndexCompleted extends Completed
     {
         private final Set<Match> matches;
-        private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
-        private final Set<DecoratedKey> newKeys;
-        private final Set<Match> newMatches;
+        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+        private final Set<ByteBuffer> newKeys;
 
-        public IndexCompleted(Set<Match> matches, SortedMap<DecoratedKey, IndexPartitionRead> reads, Set<DecoratedKey> newKeys, Set<Match> newMatches)
+        public IndexCompleted(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Set<ByteBuffer> newKeys)
         {
             this.matches = matches;
             this.reads = reads;
             this.newKeys = newKeys;
-            this.newMatches = newMatches;
         }
 
         @Override
         protected CompletedRead getResult()
         {
-            return new IndexCompletedRead(matches, reads, newKeys, newMatches);
+            return new IndexCompletedRead(matches, reads, newKeys);
         }
     }
 
     private class IndexCompletedRead implements CompletedRead
     {
         private final Set<Match> matches;
-        private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
-        private final Set<DecoratedKey> newKeys;
-        private final Set<Match> newMatches;
+        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+        private final Set<ByteBuffer> newKeys;
 
-        public IndexCompletedRead(Set<Match> matches, SortedMap<DecoratedKey, IndexPartitionRead> reads, Set<DecoratedKey> newKeys, Set<Match> newMatches)
+        public IndexCompletedRead(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Set<ByteBuffer> newKeys)
         {
             this.matches = matches;
             this.reads = reads;
             this.newKeys = newKeys;
-            this.newMatches = newMatches;
         }
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator

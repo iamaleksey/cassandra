@@ -694,11 +694,7 @@ public class SinglePartitionReadCommand extends ReadCommand implements SinglePar
         assert executionController != null && executionController.validForReadOn(cfs);
         Tracing.trace("Executing single-partition query on {}", cfs.name);
 
-        return queryMemtableAndDiskInternal(cfs, executionController);
-    }
-    private UnfilteredRowIterator queryMemtableAndDiskInternal(ColumnFamilyStore cfs, ReadExecutionController controller)
-    {
-        return queryMemtableAndDiskInternal(cfs.select(View.select(SSTableSet.LIVE, partitionKey())), cfs, controller);
+        return queryMemtableAndDiskInternal(cfs.select(View.select(SSTableSet.LIVE, partitionKey())), cfs, executionController);
     }
 
     private UnfilteredRowIterator queryMemtableAndDiskInternal(ReadableView view, ColumnFamilyStore cfs, ReadExecutionController controller)

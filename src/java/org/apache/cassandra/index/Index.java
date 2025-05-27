@@ -720,35 +720,28 @@ public interface Index
         return false;
     }
 
+    interface IndexMatch
+    {
+        ByteBuffer baseKey();
+    }
+
+    interface MatchIndexer<Match extends IndexMatch>
+    {
+        void index(PartitionUpdate update, Collection<Match> indexTo);
+    }
+
     /**
      * Extended searcher capable of participating in tracked reads
      */
-    interface MultiStepSearcher<Match extends MultiStepSearcher.IndexMatch> extends Searcher
+    interface MultiStepSearcher<Match extends IndexMatch> extends Searcher
     {
-        interface IndexMatch
-        {
-            DecoratedKey baseKey();
-        }
-
-        interface MatchIndexer<Match extends MultiStepSearcher.IndexMatch>
-        {
-            void index(PartitionUpdate update, Collection<Match> indexTo);
-        }
 
         PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
-
-        /**
-         * Returns true if the given update could cause one or more of the rows it touches to match the index query.
-         * Since we may not have a full view of the effects this has on index matching, the tracked read assumes
-         * it will return false positives.
-         */
-        boolean isPossibleMatch(DecoratedKey key, Row row);
-
-        Match createMatch(DecoratedKey key, Row row);
 
         MatchIndexer<Match> matchIndexer();
 
         UnfilteredPartitionIterator queryMatch(ReadableView view, Match match);
+
         /**
          * Since partition updates may not contain all the info the index query needs to know if it will create a hit
          * it may return false positives. This filter is meant to catch and remove them from the augmented result

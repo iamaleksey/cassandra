@@ -22,6 +22,7 @@ package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.SortedSet;
 
 import org.slf4j.Logger;
@@ -61,34 +62,12 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.reads.tracked.PartialTrackedRead;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
-public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<CassandraIndexSearcher.CassandraMatch>
+public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<IndexEntry>
 {
-    protected static class CassandraMatch implements Index.MultiStepSearcher.IndexMatch
-    {
-        public final DecoratedKey indexValue;
-        public final Clustering<?> indexClustering;
-        private final DecoratedKey baseKey;
-        private final Clustering<?> baseClustering;
-
-        public CassandraMatch(DecoratedKey indexValue, Clustering<?> indexClustering, DecoratedKey baseKey, Clustering<?> baseClustering)
-        {
-            this.indexValue = indexValue;
-            this.indexClustering = indexClustering;
-            this.baseKey = baseKey;
-            this.baseClustering = baseClustering;
-        }
-
-        @Override
-        public DecoratedKey baseKey()
-        {
-            return baseKey;
-        }
-    }
-
-    protected class MatchIndexer extends CassandraIndex.AbstractIndexer implements Index.MultiStepSearcher.MatchIndexer<CassandraIndexSearcher.CassandraMatch>
+    protected class MatchIndexer extends CassandraIndex.AbstractIndexer implements Index.MatchIndexer<IndexEntry>
     {
         protected DecoratedKey key;
-        protected Collection<CassandraMatch> indexTo;
+        protected Collection<IndexEntry> indexTo;
 
         @Override
         long nowInSec()
@@ -111,9 +90,7 @@ public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<
         @Override
         void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
         {
-            DecoratedKey valueKey = index.getIndexKeyFor(indexgetIndexedValue(rowKey,
-                                                                   clustering,
-                                                                   cell));
+            indexTo.add(index.createIndexEntry(rowKey, clustering, cell, info));
         }
 
         @Override
@@ -129,9 +106,17 @@ public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<
         }
 
         @Override
-        public void index(PartitionUpdate update, Collection<CassandraMatch> indexTo)
+        public void insertRow(Row row)
         {
-            // FIXME:
+            if (!expression.isSatisfiedBy(command.metadata(), key, row, nowInSec()))
+                return;
+            super.insertRow(row);
+        }
+
+        @Override
+        public void index(PartitionUpdate update, Collection<IndexEntry> indexTo)
+        {
+            // FIXME: this is messy
             this.key = update.partitionKey();
             this.indexTo = indexTo;
 
@@ -148,6 +133,33 @@ public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<
                 this.key = null;
                 this.indexTo = null;
             }
+        }
+    }
+
+    protected class MatchComparator implements Comparator<IndexEntry>
+    {
+        @Override
+        public int compare(IndexEntry left, IndexEntry right)
+        {
+            int cmp = left.indexValue.compareTo(right.indexValue);
+            if (cmp != 0)
+                return cmp;
+
+            cmp = index.indexCfs.metadata.get().comparator.compare(left.indexClustering, right.indexClustering);
+            if (cmp != 0)
+                return cmp;
+
+            DecoratedKey dkLeft = command.metadata().partitioner.decorateKey(left.indexedKey);
+            DecoratedKey dkRight = command.metadata().partitioner.decorateKey(right.indexedKey);
+            cmp = dkLeft.compareTo(dkRight);
+            if (cmp != 0)
+                return cmp;
+
+            cmp = command.metadata().comparator.compare(left.indexedEntryClustering, right.indexedEntryClustering);
+            if (cmp != 0)
+                return cmp;
+
+            return Long.compare(left.timestamp, right.timestamp);
         }
     }
 
@@ -179,24 +191,16 @@ public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<
     }
 
     @Override
-    public boolean isPossibleMatch(DecoratedKey key, Row row)
+    public Index.MatchIndexer<IndexEntry> matchIndexer()
     {
-        // TODO (now): confirm this does what you think it does
-        return expression.mayBeSatisfiedBy(command.metadata(), key, row, command.nowInSec());
+        return new MatchIndexer();
     }
 
     @Override
-    public MatchIndexer<CassandraMatch> matchIndexer()
+    public Comparator<IndexEntry> matchComparator()
     {
-        return null;
+        return new MatchComparator();
     }
-
-    //
-//    @Override
-//    public CassandraMatch createMatch(DecoratedKey key, Row row)
-//    {
-//        return null;
-//    }
 
     DecoratedKey indexKey()
     {
