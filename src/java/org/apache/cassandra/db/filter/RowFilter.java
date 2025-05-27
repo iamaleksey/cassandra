@@ -584,6 +584,8 @@ public class RowFilter implements Iterable<RowFilter.Expression>
          */
         public abstract boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec);
 
+        public abstract boolean mayBeSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec);
+
         protected ByteBuffer getValue(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             switch (column.kind)
@@ -757,8 +759,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             super(column, operator, value);
         }
 
-        @Override
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec, boolean nullIsMatch)
         {
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
             // TODO: we should try to merge both code someday.
@@ -783,7 +784,9 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 {
                     // Note that CQL expression are always of the form 'x < 4', i.e. the tested value is on the left.
                     ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                    return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                    if (foundValue == null)
+                        return nullIsMatch;
+                    return operator.isSatisfiedBy(column.type, foundValue, value);
                 }
             }
             else if (operator.appliesToCollectionElements() || operator.appliesToMapKeys())
@@ -793,15 +796,31 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 if (column.isComplex())
                 {
                     ComplexColumnData complexData = row.getComplexColumnData(column);
-                    return complexData != null && operator.isSatisfiedBy(type, complexData, value);
+                    if (complexData == null)
+                        return nullIsMatch;
+                    return operator.isSatisfiedBy(type, complexData, value);
                 }
                 else
                 {
                     ByteBuffer foundValue = getValue(metadata, partitionKey, row, nowInSec);
-                    return foundValue != null && operator.isSatisfiedBy(column.type, foundValue, value);
+                    if (foundValue == null)
+                        return nullIsMatch;
+                    return operator.isSatisfiedBy(column.type, foundValue, value);
                 }
             }
             throw new AssertionError();
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return isSatisfiedBy(metadata, partitionKey, row, nowInSec, false);
+        }
+
+        @Override
+        public boolean mayBeSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return isSatisfiedBy(metadata, partitionKey, row, nowInSec, true);
         }
 
         @Override
@@ -882,8 +901,7 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             return CompositeType.build(ByteBufferAccessor.instance, key, value);
         }
 
-        @Override
-        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        private boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec, boolean nullIsMatch)
         {
             assert key != null;
             // We support null conditions for LWT (in ColumnCondition) but not for RowFilter.
@@ -897,17 +915,33 @@ public class RowFilter implements Iterable<RowFilter.Expression>
             if (column.isComplex())
             {
                 Cell<?> cell = row.getCell(column, CellPath.create(key));
-                return cell != null && operator.isSatisfiedBy(mt.getValuesType(), cell.buffer(), value);
+                if (cell == null)
+                    return nullIsMatch;
+                return operator.isSatisfiedBy(mt.getValuesType(), cell.buffer(), value);
             }
             else
             {
                 ByteBuffer serializedMap = getValue(metadata, partitionKey, row, nowInSec);
                 if (serializedMap == null)
-                    return false;
+                    return nullIsMatch;
 
                 ByteBuffer foundValue = mt.getSerializer().getSerializedValue(serializedMap, key, mt.getKeysType());
-                return foundValue != null && operator.isSatisfiedBy(mt.getValuesType(), foundValue, value);
+                if (foundValue == null)
+                    return nullIsMatch;
+                return operator.isSatisfiedBy(mt.getValuesType(), foundValue, value);
             }
+        }
+
+        @Override
+        public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return isSatisfiedBy(metadata, partitionKey, row, nowInSec, false);
+        }
+
+        @Override
+        public boolean mayBeSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return isSatisfiedBy(metadata, partitionKey, row, nowInSec, true);
         }
 
         @Override
@@ -1004,6 +1038,12 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         // Filtering by custom expressions isn't supported yet, so just accept any row
         @Override
         public boolean isSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
+        {
+            return true;
+        }
+
+        @Override
+        public boolean mayBeSatisfiedBy(TableMetadata metadata, DecoratedKey partitionKey, Row row, long nowInSec)
         {
             return true;
         }

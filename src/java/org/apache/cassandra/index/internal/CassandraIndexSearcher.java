@@ -21,6 +21,7 @@
 package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
+import java.util.Collection;
 import java.util.SortedSet;
 
 import org.slf4j.Logger;
@@ -32,6 +33,8 @@ import org.apache.cassandra.db.ClusteringBound;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.DeletionTime;
+import org.apache.cassandra.db.LivenessInfo;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
@@ -43,18 +46,111 @@ import org.apache.cassandra.db.filter.ClusteringIndexNamesFilter;
 import org.apache.cassandra.db.filter.ClusteringIndexSliceFilter;
 import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.filter.RowFilter;
+import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.rows.Cell;
+import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.RowIterator;
+import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.composites.CollectionValueIndex;
 import org.apache.cassandra.schema.TableMetadata;
+import org.apache.cassandra.service.reads.tracked.PartialTrackedRead;
 import org.apache.cassandra.utils.btree.BTreeSet;
 
-public abstract class CassandraIndexSearcher implements Index.Searcher
+public abstract class CassandraIndexSearcher implements Index.MultiStepSearcher<CassandraIndexSearcher.CassandraMatch>
 {
+    protected static class CassandraMatch implements Index.MultiStepSearcher.IndexMatch
+    {
+        public final DecoratedKey indexValue;
+        public final Clustering<?> indexClustering;
+        private final DecoratedKey baseKey;
+        private final Clustering<?> baseClustering;
+
+        public CassandraMatch(DecoratedKey indexValue, Clustering<?> indexClustering, DecoratedKey baseKey, Clustering<?> baseClustering)
+        {
+            this.indexValue = indexValue;
+            this.indexClustering = indexClustering;
+            this.baseKey = baseKey;
+            this.baseClustering = baseClustering;
+        }
+
+        @Override
+        public DecoratedKey baseKey()
+        {
+            return baseKey;
+        }
+    }
+
+    protected class MatchIndexer extends CassandraIndex.AbstractIndexer implements Index.MultiStepSearcher.MatchIndexer<CassandraIndexSearcher.CassandraMatch>
+    {
+        protected DecoratedKey key;
+        protected Collection<CassandraMatch> indexTo;
+
+        @Override
+        long nowInSec()
+        {
+            return command.nowInSec();
+        }
+
+        @Override
+        CassandraIndex index()
+        {
+            return index;
+        }
+
+        @Override
+        ByteBuffer key()
+        {
+            return key.getKey();
+        }
+
+        @Override
+        void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+        {
+            DecoratedKey valueKey = index.getIndexKeyFor(indexgetIndexedValue(rowKey,
+                                                                   clustering,
+                                                                   cell));
+        }
+
+        @Override
+        void delete(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec)
+        {
+
+        }
+
+        @Override
+        void delete(ByteBuffer rowKey, Clustering<?> clustering, DeletionTime deletion)
+        {
+
+        }
+
+        @Override
+        public void index(PartitionUpdate update, Collection<CassandraMatch> indexTo)
+        {
+            // FIXME:
+            this.key = update.partitionKey();
+            this.indexTo = indexTo;
+
+            try
+            {
+                Row staticRow = update.staticRow();
+                if (staticRow != Rows.EMPTY_STATIC_ROW)
+                    insertRow(staticRow);
+
+                update.forEach(this::insertRow);
+            }
+            finally
+            {
+                this.key = null;
+                this.indexTo = null;
+            }
+        }
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(CassandraIndexSearcher.class);
 
     private final RowFilter.Expression expression;
@@ -76,15 +172,52 @@ public abstract class CassandraIndexSearcher implements Index.Searcher
         return command;
     }
 
+    @Override
+    public PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos)
+    {
+        return new CassandraIndexPartialTrackedRead(executionController, cfs, startTimeNanos, command, this);
+    }
+
+    @Override
+    public boolean isPossibleMatch(DecoratedKey key, Row row)
+    {
+        // TODO (now): confirm this does what you think it does
+        return expression.mayBeSatisfiedBy(command.metadata(), key, row, command.nowInSec());
+    }
+
+    @Override
+    public MatchIndexer<CassandraMatch> matchIndexer()
+    {
+        return null;
+    }
+
+    //
+//    @Override
+//    public CassandraMatch createMatch(DecoratedKey key, Row row)
+//    {
+//        return null;
+//    }
+
+    DecoratedKey indexKey()
+    {
+        return index.getBackingTable().get().decorateKey(expression.getIndexValue());
+    }
+
+    RowIterator queryIndex(DecoratedKey indexKey, ReadExecutionController executionController)
+    {
+        UnfilteredRowIterator indexIter = queryIndex(indexKey, command, executionController);
+        return UnfilteredRowIterators.filter(indexIter, command.nowInSec());
+    }
+
     // of this method.
     public UnfilteredPartitionIterator search(ReadExecutionController executionController)
     {
         // the value of the index expression is the partition key in the index table
-        DecoratedKey indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
-        UnfilteredRowIterator indexIter = queryIndex(indexKey, command, executionController);
+        DecoratedKey indexKey = indexKey();
+        RowIterator indexIter = queryIndex(indexKey, executionController);
         try
         {
-            return queryDataFromIndex(indexKey, UnfilteredRowIterators.filter(indexIter, command.nowInSec()), command, executionController);
+            return queryDataFromIndex(indexKey, indexIter, command, executionController);
         }
         catch (RuntimeException | Error e)
         {

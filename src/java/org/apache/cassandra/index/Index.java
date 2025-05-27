@@ -725,9 +725,14 @@ public interface Index
      */
     interface MultiStepSearcher<Match extends MultiStepSearcher.IndexMatch> extends Searcher
     {
-        interface IndexMatch extends Comparable<IndexMatch>
+        interface IndexMatch
         {
             DecoratedKey baseKey();
+        }
+
+        interface MatchIndexer<Match extends MultiStepSearcher.IndexMatch>
+        {
+            void index(PartitionUpdate update, Collection<Match> indexTo);
         }
 
         PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
@@ -737,7 +742,11 @@ public interface Index
          * Since we may not have a full view of the effects this has on index matching, the tracked read assumes
          * it will return false positives.
          */
-        boolean isPossibleHit(PartitionUpdate update);
+        boolean isPossibleMatch(DecoratedKey key, Row row);
+
+        Match createMatch(DecoratedKey key, Row row);
+
+        MatchIndexer<Match> matchIndexer();
 
         UnfilteredPartitionIterator queryMatch(ReadableView view, Match match);
         /**
@@ -745,6 +754,8 @@ public interface Index
          * it may return false positives. This filter is meant to catch and remove them from the augmented result
          */
         UnfilteredPartitionIterator filterCompletedRead(UnfilteredPartitionIterator iterator);
+
+        Comparator<Match> matchComparator();
 
         @Override
         default boolean isMultiStep()

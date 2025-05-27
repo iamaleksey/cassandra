@@ -19,7 +19,6 @@
 package org.apache.cassandra.service.reads.tracked;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -46,14 +45,15 @@ import org.apache.cassandra.index.Index.MultiStepSearcher.IndexMatch;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
+import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> extends AbstractPartialTrackedRead
+public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> extends AbstractPartialTrackedRead
 {
     private final ReadCommand command;
-    private final Index.MultiStepSearcher<Match> searcher;
+    private final Searcher searcher;
 
-    public AbstractPartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Index.MultiStepSearcher<Match> searcher)
+    public AbstractPartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
     {
         super(executionController, cfs, startTimeNanos);
         this.command = command;
@@ -67,10 +67,12 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
     }
 
     @Override
-    public Index.Searcher searcher()
+    public Searcher searcher()
     {
         return searcher;
     }
+
+    protected abstract CloseableIterator<Match> queryIndex();
 
     static ReadableView freezeView(ColumnFamilyStore.ViewFragment view)
     {
@@ -115,20 +117,22 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
     {
         // TODO: materialize enough hits to satisfy limit
         // TODO: reference memtable and sstables
-        Iterator<Match> iterator = queryIndex();
-        Set<Match> matches = new HashSet<>();
-        SortedMap<DecoratedKey, IndexPartitionRead> reads = new TreeMap<>();
-        while (iterator.hasNext() && matches.size() < command.limits().count())
+        try (CloseableIterator<Match> iterator = queryIndex())
         {
-            Match match = iterator.next();
-            matches.add(match);
-            if (!reads.containsKey(match.baseKey()))
+            Set<Match> matches = new HashSet<>();
+            SortedMap<DecoratedKey, IndexPartitionRead> reads = new TreeMap<>();
+            while (iterator.hasNext() && matches.size() < command.limits().count())
             {
-                IndexPartitionRead partitionRead = createRead(match.baseKey(), cfs);
-                reads.put(match.baseKey(), partitionRead);
+                Match match = iterator.next();
+                matches.add(match);
+                if (!reads.containsKey(match.baseKey()))
+                {
+                    IndexPartitionRead partitionRead = createRead(match.baseKey(), cfs);
+                    reads.put(match.baseKey(), partitionRead);
+                }
             }
+            return new IndexPrepared(matches, reads);
         }
-        return new IndexPrepared(matches, reads);
     }
 
     private class IndexPrepared extends Prepared
@@ -137,6 +141,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
         private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
         private final Set<DecoratedKey> newKeys = new HashSet<>();
         private final Set<Match> newMatches = new HashSet<>();
+        private Index.MultiStepSearcher.MatchIndexer<Match> matchIndexer = null;
 
         public IndexPrepared(Set<Match> matches, SortedMap<DecoratedKey, IndexPartitionRead> reads)
         {
@@ -150,6 +155,16 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
             throw new UnsupportedOperationException();
         }
 
+        private boolean indexUpdate(PartitionUpdate update)
+        {
+            if (matchIndexer == null)
+                matchIndexer = searcher.matchIndexer();
+
+            int startingSize = matches.size();
+            matchIndexer.index(update, matches);
+            return matches.size() > startingSize;
+        }
+
         @Override
         public State augment(PartitionUpdate update)
         {
@@ -157,17 +172,13 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
             IndexPartitionRead read = reads.get(key);
             if (read == null)
             {
-                if (searcher.isPossibleHit(update))
-                {
+                if (indexUpdate(update))
                     newKeys.add(key);
-                    newMatches.add(createHitMarker(update));
-                }
                 return this;
             }
 
             read.augment(update);
-            if (searcher.isPossibleHit(update))
-                matches.add(createHitMarker(update));
+            indexUpdate(update);
 
             // TODO: calling this method mever results in a state change, remove return?
             return this;
@@ -219,7 +230,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
             UnfilteredResultIterator(Set<Match> matches)
             {
                 List<Match> matchList = new ArrayList<>(matches);
-                matchList.sort(Comparator.naturalOrder());
+                matchList.sort(searcher.matchComparator());
                 this.matchIter = matchList.iterator();
             }
 
@@ -292,7 +303,4 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch> 
         }
     }
 
-    protected abstract Iterator<Match> queryIndex();
-    protected abstract PartialTrackedRead query(Match indexMatch);
-    protected abstract Match createHitMarker(PartitionUpdate update);
 }
