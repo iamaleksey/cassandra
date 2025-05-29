@@ -220,6 +220,12 @@ public class SkipListMemtable extends AbstractAllocatorMemtable
         return p != null ? p.unfilteredIterator() : null;
     }
 
+    @Override
+    public Partition snapshotPartition(DecoratedKey partitionKey)
+    {
+        return getPartition(partitionKey);
+    }
+
     private static int estimateRowOverhead(final int count)
     {
         // calculate row overhead

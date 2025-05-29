@@ -35,15 +35,24 @@ import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
 import org.apache.cassandra.db.ReadableView;
+import org.apache.cassandra.db.SinglePartitionReadCommand;
+import org.apache.cassandra.db.Slices;
+import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.lifecycle.View;
+import org.apache.cassandra.db.memtable.Memtable;
+import org.apache.cassandra.db.partitions.Partition;
+import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.SimpleBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
+import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.Index.IndexMatch;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
+import org.apache.cassandra.io.sstable.SSTableReadsListener;
+import org.apache.cassandra.io.sstable.format.SSTableReader;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
@@ -74,7 +83,77 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         return searcher;
     }
 
-    static ReadableView freezeView(ColumnFamilyStore.ViewFragment view)
+    private static class SnapshotView implements ReadableView
+    {
+        final List<MemtableSnapshot> snapshots;
+        final List<SSTableReader> sstables;
+
+        public SnapshotView(List<MemtableSnapshot> snapshots, List<SSTableReader> sstables)
+        {
+            this.snapshots = snapshots;
+            this.sstables = sstables;
+        }
+
+        @Override
+        public Iterable<? extends UnfilteredSource> memtables()
+        {
+            return snapshots;
+        }
+
+        @Override
+        public List<SSTableReader> sstables()
+        {
+            return sstables;
+        }
+    }
+
+    private static class MemtableSnapshot implements UnfilteredSource
+    {
+        private final Partition partition;
+
+        public MemtableSnapshot(Partition partition)
+        {
+            this.partition = partition;
+        }
+
+        static List<MemtableSnapshot> create(DecoratedKey key, Iterable<Memtable> memtables)
+        {
+            List<MemtableSnapshot> snapshots = new ArrayList<>();
+            for (Memtable memtable : memtables)
+            {
+                Partition partition = memtable.snapshotPartition(key);
+                if (partition != null)
+                    snapshots.add(new MemtableSnapshot(partition));
+            }
+            return snapshots;
+        }
+
+        @Override
+        public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter columnFilter, boolean reversed, SSTableReadsListener listener)
+        {
+            return partition.unfilteredIterator(columnFilter, slices, reversed);
+        }
+
+        @Override
+        public UnfilteredPartitionIterator partitionIterator(ColumnFilter columnFilter, DataRange dataRange, SSTableReadsListener listener)
+        {
+            throw new IllegalStateException("Range scans not supported");
+        }
+
+        @Override
+        public long getMinTimestamp()
+        {
+            return partition.stats().minTimestamp;
+        }
+
+        @Override
+        public long getMinLocalDeletionTime()
+        {
+            return partition.stats().minLocalDeletionTime;
+        }
+    }
+
+    static ReadableView freezeView(DecoratedKey key, ColumnFamilyStore.ViewFragment view)
     {
         throw new UnsupportedOperationException("TODO: freeze memtable state");
     }

@@ -319,6 +319,12 @@ public class TrieMemtable extends AbstractShardedMemtable
     }
 
     @Override
+    public Partition snapshotPartition(DecoratedKey partitionKey)
+    {
+        return getPartition(partitionKey);
+    }
+
+    @Override
     public UnfilteredRowIterator rowIterator(DecoratedKey key, Slices slices, ColumnFilter selectedColumns, boolean reversed, SSTableReadsListener listener)
     {
         Partition p = getPartition(key);

@@ -62,7 +62,7 @@ public class ShardReplicatedOffsets
 
     public static final IVerbHandler<ShardReplicatedOffsets> verbHandler = message -> {
         ShardReplicatedOffsets replicatedOffsets = message.payload;
-        logger.trace("Received replicated offsets {} from {}", replicatedOffsets, message.from());
+//        logger.trace("Received replicated offsets {} from {}", replicatedOffsets, message.from());
         MutationTrackingService.instance.updateReplicatedOffsets(replicatedOffsets.keyspace,
                                                                  replicatedOffsets.range,
                                                                  replicatedOffsets.replicatedOffsets,

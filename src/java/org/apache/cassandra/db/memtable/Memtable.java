@@ -23,6 +23,7 @@ import javax.annotation.concurrent.NotThreadSafe;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.CoordinatorLogBoundaries;
+import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.RegularAndStaticColumns;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
@@ -195,6 +196,7 @@ public interface Memtable extends Comparable<Memtable>, UnfilteredSource
     long put(MutationId mutationId, PartitionUpdate update, UpdateTransaction indexer, OpOrder.Group opGroup);
 
     // Read operations are provided by the UnfilteredSource interface.
+    Partition snapshotPartition(DecoratedKey partitionKey);
 
     // Statistics
 
