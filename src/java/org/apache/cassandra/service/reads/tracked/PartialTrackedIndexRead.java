@@ -31,6 +31,7 @@ import com.google.common.base.Preconditions;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
+import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
@@ -46,6 +47,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.SimpleBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredSource;
 import org.apache.cassandra.index.Index;
@@ -64,11 +66,18 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     private final ReadCommand command;
     private final Searcher searcher;
 
-    public PartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
+    PartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
     {
         super(executionController, cfs, startTimeNanos);
         this.command = command;
         this.searcher = searcher;
+    }
+
+    public static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> PartialTrackedIndexRead<Match, Searcher> create(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
+    {
+        PartialTrackedIndexRead<Match, Searcher> read = new PartialTrackedIndexRead<>(executionController, cfs, startTimeNanos, command, searcher);
+        read.prepare(null);
+        return read;
     }
 
     @Override
@@ -155,7 +164,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     static ReadableView freezeView(DecoratedKey key, ColumnFamilyStore.ViewFragment view)
     {
-        throw new UnsupportedOperationException("TODO: freeze memtable state");
+        return new SnapshotView(MemtableSnapshot.create(key, view.memtables), view.sstables());
     }
 
     class IndexPartitionRead
@@ -190,19 +199,25 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     IndexPartitionRead createRead(ByteBuffer key, ColumnFamilyStore cfs)
     {
         DecoratedKey partitionKey = command.metadata().partitioner.decorateKey(key);
-        ReadableView view = freezeView(cfs.select(View.select(SSTableSet.LIVE, partitionKey)));
+        ReadableView view = freezeView(partitionKey, cfs.select(View.select(SSTableSet.LIVE, partitionKey)));
         return new IndexPartitionRead(partitionKey, view);
     }
 
     @Override
     protected Prepared prepareInternal(UnfilteredPartitionIterator initialData)
     {
-        // TODO: materialize enough hits to satisfy limit
-        // TODO: reference memtable and sstables
+        SortedMap<ByteBuffer, IndexPartitionRead> reads = new TreeMap<>();
+        if (command instanceof SinglePartitionReadCommand)
+        {
+            SinglePartitionReadCommand cmd = (SinglePartitionReadCommand) command;
+            ByteBuffer key = cmd.partitionKey().getKey();
+            IndexPartitionRead partitionRead = createRead(key, cfs);
+            reads.put(key, partitionRead);
+        }
+
         try (CloseableIterator<Match> iterator = searcher.matchIterator(executionController))
         {
             Set<Match> matches = new HashSet<>();
-            SortedMap<ByteBuffer, IndexPartitionRead> reads = new TreeMap<>();
             while (iterator.hasNext() && matches.size() < command.limits().count())
             {
                 Match match = iterator.next();
@@ -253,6 +268,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             IndexPartitionRead read = reads.get(key);
             if (read == null)
             {
+                // TODO: maybe we should immediately start a follow up read if it's likely this key will be included in the response
                 if (indexUpdate(update))
                     newKeys.add(key);
                 return this;
@@ -290,13 +306,13 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     {
         private final Set<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private final Set<ByteBuffer> newKeys;
+        private final Set<ByteBuffer> followUpKeys;
 
         public IndexCompletedRead(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Set<ByteBuffer> newKeys)
         {
             this.matches = matches;
             this.reads = reads;
-            this.newKeys = newKeys;
+            this.followUpKeys = newKeys;
         }
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
@@ -350,11 +366,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         {
             try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(matches))
             {
+                UnfilteredPartitionIterator postFiltered = searcher.filterCompletedRead(iterator);
                 // TODO: filter
                 // TODO: detect attempted read of key we didn't initially read and create a followup read, merging that result in with this one
                 // TODO: do a post filter of the results, we may have had false positive matches
 
-                throw new UnsupportedOperationException("TODO");
+//                throw new UnsupportedOperationException("TODO");
+                PartitionIterator filtered = UnfilteredPartitionIterators.filter(postFiltered, command.nowInSec());
+                return TrackedDataResponse.create(filtered, command.columnFilter());
+//                PartitionIterator counted = Transformation.apply(filtered, mergedResultCounter);
+//                PartitionIterator result = Transformation.apply(counted, new EmptyPartitionsDiscarder());
+//                return TrackedDataResponse.create(result, command.columnFilter());
             }
         }
 

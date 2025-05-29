@@ -57,6 +57,7 @@ import org.apache.cassandra.db.rows.RowIterator;
 import org.apache.cassandra.db.rows.Rows;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredRowIterators;
+import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.internal.composites.CollectionValueIndex;
@@ -169,18 +170,30 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
     @Override
     public PartialTrackedRead beginRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos)
     {
-        return new PartialTrackedIndexRead<>(executionController, cfs, startTimeNanos, command, this);
+        return PartialTrackedIndexRead.create(executionController, cfs, startTimeNanos, command, this);
     }
 
     @Override
     public UnfilteredPartitionIterator filterCompletedRead(UnfilteredPartitionIterator iterator)
     {
-        throw new UnsupportedOperationException("TODO");
-    }
+        return Transformation.apply(iterator, new Transformation<UnfilteredRowIterator>()
+        {
+            DecoratedKey key = null;
+            @Override
+            protected DecoratedKey applyToPartitionKey(DecoratedKey key)
+            {
+                this.key = key;
+                return super.applyToPartitionKey(key);
+            }
 
-    DecoratedKey indexKey()
-    {
-        return indexKey;
+            @Override
+            protected Row applyToRow(Row row)
+            {
+                if (!expression.isSatisfiedBy(command.metadata(), key, row, command.nowInSec()))
+                    return null;
+                return row;
+            }
+        });
     }
 
     protected RowIterator queryIndex(DecoratedKey indexKey, ReadExecutionController executionController)
