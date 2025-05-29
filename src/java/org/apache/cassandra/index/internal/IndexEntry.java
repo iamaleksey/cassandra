@@ -25,6 +25,7 @@ import java.nio.ByteBuffer;
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.schema.TableMetadata;
 
 /**
  * Entries in indexes on non-compact tables (tables with composite comparators)
@@ -57,5 +58,28 @@ public final class IndexEntry implements Index.IndexMatch
     public ByteBuffer baseKey()
     {
         return indexedKey;
+    }
+
+    public static int compare(TableMetadata indexMetadata, TableMetadata baseMetadata, IndexEntry left, IndexEntry right)
+    {
+        int cmp = left.indexValue.compareTo(right.indexValue);
+        if (cmp != 0)
+            return cmp;
+
+        cmp = indexMetadata.comparator.compare(left.indexClustering, right.indexClustering);
+        if (cmp != 0)
+            return cmp;
+
+        DecoratedKey dkLeft = baseMetadata.partitioner.decorateKey(left.indexedKey);
+        DecoratedKey dkRight = baseMetadata.partitioner.decorateKey(right.indexedKey);
+        cmp = dkLeft.compareTo(dkRight);
+        if (cmp != 0)
+            return cmp;
+
+        cmp = baseMetadata.comparator.compare(left.indexedEntryClustering, right.indexedEntryClustering);
+        if (cmp != 0)
+            return cmp;
+
+        return Long.compare(left.timestamp, right.timestamp);
     }
 }

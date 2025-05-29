@@ -47,14 +47,15 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.CloseableIterator;
+import org.apache.cassandra.utils.CloseablePeekingIterator;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> extends AbstractPartialTrackedRead
+public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> extends AbstractPartialTrackedRead
 {
     private final ReadCommand command;
     private final Searcher searcher;
 
-    public AbstractPartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
+    public PartialTrackedIndexRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, ReadCommand command, Searcher searcher)
     {
         super(executionController, cfs, startTimeNanos);
         this.command = command;
@@ -72,8 +73,6 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
     {
         return searcher;
     }
-
-    protected abstract CloseableIterator<Match> queryIndex();
 
     static ReadableView freezeView(ColumnFamilyStore.ViewFragment view)
     {
@@ -101,9 +100,11 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
             augmentedData.update(update);
         }
 
-        UnfilteredPartitionIterator readHit(Match match)
+        UnfilteredRowIterator readHit(CloseablePeekingIterator<Match> matchIterator)
         {
-            return searcher.queryMatch(view, match);
+            Preconditions.checkArgument(matchIterator.hasNext());
+            Preconditions.checkArgument(matchIterator.peek().baseKey().equals(partitionKey.getKey()));
+            return searcher.queryNextMatches(executionController, partitionKey, view, matchIterator);
         }
     }
 
@@ -119,7 +120,7 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
     {
         // TODO: materialize enough hits to satisfy limit
         // TODO: reference memtable and sstables
-        try (CloseableIterator<Match> iterator = queryIndex())
+        try (CloseableIterator<Match> iterator = searcher.matchIterator(executionController))
         {
             Set<Match> matches = new HashSet<>();
             SortedMap<ByteBuffer, IndexPartitionRead> reads = new TreeMap<>();
@@ -221,14 +222,22 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
         {
-            final Iterator<Match> matchIter;
-            UnfilteredPartitionIterator current;
+            final CloseablePeekingIterator<Match> matchIter;
 
             UnfilteredResultIterator(Set<Match> matches)
             {
                 List<Match> matchList = new ArrayList<>(matches);
                 matchList.sort(searcher.matchComparator());
-                this.matchIter = matchList.iterator();
+                this.matchIter = new AbstractIterator<>()
+                {
+                    final Iterator<Match> iter = matchList.iterator();
+
+                    @Override
+                    protected Match computeNext()
+                    {
+                        return iter.hasNext() ? iter.next() : endOfData();
+                    }
+                };
             }
 
             @Override
@@ -240,37 +249,20 @@ public abstract class AbstractPartialTrackedIndexRead<Match extends IndexMatch, 
             @Override
             protected UnfilteredRowIterator computeNext()
             {
-                while (true)
-                {
-                    if (current == null || !current.hasNext())
-                    {
-                        if (current != null)
-                        {
-                            current.close();
-                            current = null;
-                        }
+                if (!matchIter.hasNext())
+                    return endOfData();
 
-                        if (!matchIter.hasNext())
-                            return endOfData();
+                IndexPartitionRead read = reads.get(matchIter.peek().baseKey());
+                if (read == null)
+                    throw new IllegalStateException("Handle short reads");
 
-                        Match match = matchIter.next();
-
-                        IndexPartitionRead read = reads.get(match.baseKey());
-                        if (read == null)
-                            throw new IllegalStateException("Handle short reads");
-
-                        current = read.readHit(match);
-                        continue;
-                    }
-                    return current.next();
-                }
+                return read.readHit(matchIter);
             }
 
             @Override
             public void close()
             {
-                if (current != null)
-                    current.close();
+                matchIter.close();
             }
         }
 

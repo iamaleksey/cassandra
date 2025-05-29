@@ -570,7 +570,7 @@ public abstract class CassandraIndex implements Index
         logger.trace("Removed index entry for stale value {}", indexKey);
     }
 
-    IndexEntry createIndexEntry(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+    public IndexEntry createIndexEntry(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
     {
         DecoratedKey indexKey = getIndexKeyFor(getIndexedValue(rowKey,
                                                                clustering,
