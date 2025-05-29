@@ -41,6 +41,7 @@ import org.apache.cassandra.db.filter.*;
 import org.apache.cassandra.db.transform.BasePartitions;
 import org.apache.cassandra.db.transform.BaseRows;
 import org.apache.cassandra.exceptions.CoordinatorBehindException;
+import org.apache.cassandra.exceptions.QueryCancelledException;
 import org.apache.cassandra.exceptions.UnknownTableException;
 import org.apache.cassandra.metrics.TCMMetrics;
 import org.apache.cassandra.net.MessageFlag;
@@ -901,11 +902,11 @@ public abstract class ReadCommand extends AbstractReadQuery
                 return;
             lastCheckedAt = approxTime.now();
 
-//            if (isAborted())
-//            {
-//                stop();
-//                throw new QueryCancelledException(ReadCommand.this);
-//            }
+            if (isAborted())
+            {
+                stop();
+                throw new QueryCancelledException(ReadCommand.this);
+            }
         }
     }
 
