@@ -542,6 +542,7 @@ public class TrackedLocalReadCoordinator
         try
         {
             read = command.beginTrackedRead(controller);
+            read.setFollowUpReadContext(replicaPlan.consistencyLevel(), expiresAtNanos);
             if (partialReadConsumer != null)
                 partialReadConsumer.accept(read);
             // Create another summary once initial data has been read fully. We do this to catch

@@ -78,6 +78,12 @@ public interface PartialTrackedRead
         }
     }
 
+    /**
+     * Sets consistency level and expiration info to be used for follow up reads. Needs to be called before making the
+     * read available for receiving augmenting mutations
+     */
+    default void setFollowUpReadContext(ConsistencyLevel consistencyLevel, long expiresAtNanos) {}
+
     CompletedRead complete();
 
     void augment(Mutation mutation);
