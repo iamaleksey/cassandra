@@ -56,7 +56,13 @@ import java.util.function.Consumer;
 
 public class TrackedLocalReadCoordinator
 {
+    public interface Completer
+    {
+        void complete(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos);
+    }
+
     private static final Logger logger = LoggerFactory.getLogger(TrackedLocalReadCoordinator.class);
+    private static final Completer DEFAULT_COMPLETER = ((promise, read, selection, consistencyLevel, expiresAtNanos) -> Stage.READ.submit(() -> completeInternal(promise, read, selection, consistencyLevel, expiresAtNanos)));
 
     private final TrackedRead.Id readId;
     private final AsyncPromise<TrackedDataResponse> promise;
@@ -81,7 +87,7 @@ public class TrackedLocalReadCoordinator
     {
         abstract Status status();
 
-        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos)
+        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos, Completer completer)
         {
             // TODO: validate permitted state instead of just ignoring events?
             return this;
@@ -148,9 +154,9 @@ public class TrackedLocalReadCoordinator
         Status status() { return Status.INITIALIZED; }
 
         @Override
-        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos)
+        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos, Completer completer)
         {
-            return new Reading(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos);
+            return new Reading(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos, completer);
         }
 
         @Override
@@ -216,9 +222,9 @@ public class TrackedLocalReadCoordinator
         }
 
         @Override
-        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos)
+        State startLocalRead(TrackedRead.Id readId, AsyncPromise<TrackedDataResponse> promise, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos, Completer completer)
         {
-            return new Reading(readId, promise, command, replicaPlan, summaryNodes, summaries, expiresAtNanos);
+            return new Reading(readId, promise, command, replicaPlan, summaryNodes, summaries, expiresAtNanos, completer);
         }
 
         @Override
@@ -245,6 +251,7 @@ public class TrackedLocalReadCoordinator
         private final long expiresAtNanos;
         private final ReplicaPlan.AbstractForRead<?, ?> replicaPlan;
         private final Accumulator<ReceivedSummary> summaries;
+        private final Completer completer;
         private final int[] summaryNodes; // for speculating when we haven't received enough summaries
 
         Reading(
@@ -253,7 +260,8 @@ public class TrackedLocalReadCoordinator
             ReadCommand command,
             ReplicaPlan.AbstractForRead<?, ?> replicaPlan,
             int[] summaryNodes,
-            long expiresAtNanos)
+            long expiresAtNanos,
+            Completer completer)
         {
             this.readId = readId;
             this.promise = promise;
@@ -262,6 +270,7 @@ public class TrackedLocalReadCoordinator
             this.replicaPlan = replicaPlan;
             this.summaries = new Accumulator<>(replicaPlan.readCandidates().size());
             this.summaryNodes = summaryNodes;
+            this.completer = completer == null ? DEFAULT_COMPLETER : completer;
         }
 
         Reading(
@@ -271,9 +280,10 @@ public class TrackedLocalReadCoordinator
             ReplicaPlan.AbstractForRead<?, ?> replicaPlan,
             int[] summaryNodes,
             List<ReceivedSummary> summaries,
-            long expiresAtNanos)
+            long expiresAtNanos,
+            Completer completer)
         {
-            this(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos);
+            this(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos, completer);
             for (ReceivedSummary summary : summaries) this.summaries.add(summary);
         }
 
@@ -302,13 +312,13 @@ public class TrackedLocalReadCoordinator
             if (reconciliations.isEmpty())
             {
                 logger.trace("Read complete for {}", readId);
-                complete(promise, read, command.columnFilter(), replicaPlan.consistencyLevel(), expiresAtNanos);
+                completer.complete(promise, read, command.columnFilter(), replicaPlan.consistencyLevel(), expiresAtNanos);
                 return COMPLETED;
             }
             else
             {
                 logger.trace("Beginning reconciliation for {}", readId);
-                Reconciling reconciling = new Reconciling(readId, promise, command, read, replicaPlan.consistencyLevel(), expiresAtNanos, reconciliations);
+                Reconciling reconciling = new Reconciling(readId, promise, command, read, replicaPlan.consistencyLevel(), expiresAtNanos, completer, reconciliations);
                 reconciling.start();  // TODO: don't do this until after the coordinator state is set to reconciling if converting to lock free
                 return reconciling;
             }
@@ -374,6 +384,7 @@ public class TrackedLocalReadCoordinator
         private final PartialTrackedRead read;
         private final ConsistencyLevel consistencyLevel;
         private final long expiresAtNanos;
+        private final Completer completer;
 
         final Map<InetAddressAndPort, ReconciliationPlan> plans;
         final Log2OffsetsMap.Mutable outstandingMutations = new Log2OffsetsMap.Mutable();
@@ -387,6 +398,7 @@ public class TrackedLocalReadCoordinator
             PartialTrackedRead read,
             ConsistencyLevel consistencyLevel,
             long expiresAtNanos,
+            Completer completer,
             Map<InetAddressAndPort, ReconciliationPlan> plans)
         {
             this.readId = readId;
@@ -395,6 +407,7 @@ public class TrackedLocalReadCoordinator
             this.read = Preconditions.checkNotNull(read);
             this.consistencyLevel = consistencyLevel;
             this.expiresAtNanos = expiresAtNanos;
+            this.completer = completer;
             this.plans = plans;
 
             int syncs = 0;
@@ -457,7 +470,7 @@ public class TrackedLocalReadCoordinator
                 return this;
 
             logger.trace("Reconciliation completed for read {}", readId);
-            complete(promise, read, command.columnFilter(), consistencyLevel, expiresAtNanos);
+            completer.complete(promise, read, command.columnFilter(), consistencyLevel, expiresAtNanos);
             return COMPLETED;
         }
 
@@ -513,11 +526,11 @@ public class TrackedLocalReadCoordinator
         });
     }
 
-    public void startLocalRead(TrackedRead.Id readId, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos, Consumer<PartialTrackedRead> partialReadConsumer)
+    public void startLocalRead(TrackedRead.Id readId, ReadCommand command, ReplicaPlan.AbstractForRead<?, ?> replicaPlan, int[] summaryNodes, long expiresAtNanos, Consumer<PartialTrackedRead> partialReadConsumer, TrackedLocalReadCoordinator.Completer completer)
     {
         synchronized (this)
         {
-            if (!(state = state.startLocalRead(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos)).isReading())
+            if (!(state = state.startLocalRead(readId, promise, command, replicaPlan, summaryNodes, expiresAtNanos, completer)).isReading())
                 return;
         }
 
@@ -547,11 +560,6 @@ public class TrackedLocalReadCoordinator
         {
             state = state.receiveInProgressRead(read, secondarySummary);
         }
-    }
-
-    private static void complete(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos)
-    {
-        Stage.READ.submit(() -> completeInternal(promise, read, selection, consistencyLevel, expiresAtNanos));
     }
 
     private static void completeInternal(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos)

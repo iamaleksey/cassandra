@@ -109,7 +109,7 @@ class FilteredFollowupRead extends AsyncPromise<TrackedDataResponse>
         {
             partialRead = new AtomicReference<>();
             TrackedRead.Range rangeRead = makeFollowUpRead(command, followUpBounds, remaining, consistencyLevel, expiresAtNanos);
-            rangeRead.startLocal(expiresAtNanos, partialRead::set);
+            rangeRead.startLocal(expiresAtNanos, partialRead::set, null);
             futures.add(rangeRead.future());
         }
         else

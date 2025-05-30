@@ -90,7 +90,7 @@ public class TrackedLocalReads implements Shutdownable
         getOrCreate(summary.readId()).receiveSummary(from, summary.summary());
     }
 
-    public TrackedLocalReadCoordinator beginRead(TrackedRead.Id readId, ClusterMetadata metadata, ReadCommand command, ConsistencyLevel consistencyLevel, int[] summaryNodes, long expiresAtNanos, Consumer<PartialTrackedRead> partialReadConsumer)
+    public TrackedLocalReadCoordinator beginRead(TrackedRead.Id readId, ClusterMetadata metadata, ReadCommand command, ConsistencyLevel consistencyLevel, int[] summaryNodes, long expiresAtNanos, Consumer<PartialTrackedRead> partialReadConsumer, TrackedLocalReadCoordinator.Completer completer)
     {
         Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
@@ -117,7 +117,7 @@ public class TrackedLocalReads implements Shutdownable
         // TODO: confirm all summaryNodes are present in the replica plan
 
         TrackedLocalReadCoordinator coordinator = getOrCreate(readId);
-        coordinator.startLocalRead(readId, command, replicaPlan, summaryNodes, expiresAtNanos, partialReadConsumer);
+        coordinator.startLocalRead(readId, command, replicaPlan, summaryNodes, expiresAtNanos, partialReadConsumer, completer);
         return coordinator;
     }
 

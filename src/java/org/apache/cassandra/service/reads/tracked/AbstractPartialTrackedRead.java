@@ -183,7 +183,6 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
         }
 
         abstract Completed complete();
-
     }
 
     protected abstract class Completed extends State
