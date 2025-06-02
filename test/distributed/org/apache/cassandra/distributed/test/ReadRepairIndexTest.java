@@ -158,8 +158,8 @@ public class ReadRepairIndexTest extends TestBaseImpl
         tester("WHERE k=1 AND v=2")
         .createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))")
         .createIndex("v")
-        .mutate(1, "INSERT INTO %s (k, c, v) VALUES (1, 1, 1)")
         .mutate(2, "INSERT INTO %s (k, c, v) VALUES (1, 2, 2)")
+        .mutate(1, "INSERT INTO %s (k, c, v) VALUES (1, 1, 1)")
         .queryColumns("k, c, v", 1, 0,
                       rows(row(1, 2, 2)),
                       rows(row(1, 2, 2)),
