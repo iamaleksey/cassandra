@@ -185,7 +185,11 @@ public class ReadRepairIndexTest extends TestBaseImpl
                       rows(row(1, 2), row(4, 2)))
         .tearDown(2,
                   rows(row(1, 2), row(2, 1), row(4, 2), row(3, 1)),
-                  rows(row(1, 2), row(2, 1), row(4, 2)),
-                  rows(row(1, 2), row(4, 2), row(3, 1)));
+                  (replicationType.isTracked()
+                   ? rows(row(1, 2), row(2, 1), row(4, 2), row(3, 1))
+                   : rows(row(1, 2), row(2, 1), row(4, 2))),
+                  (replicationType.isTracked()
+                   ? rows(row(1, 2), row(2, 1), row(4, 2), row(3, 1))
+                   : rows(row(1, 2), row(4, 2), row(3, 1))));
     }
 }

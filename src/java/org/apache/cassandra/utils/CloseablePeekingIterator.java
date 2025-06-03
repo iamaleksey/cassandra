@@ -24,4 +24,17 @@ import com.google.common.collect.PeekingIterator;
 
 public interface CloseablePeekingIterator<V> extends Iterator<V>, PeekingIterator<V>, CloseableIterator<V>
 {
+    static <V> CloseablePeekingIterator<V> wrap(Iterator<V> iterator)
+    {
+        return new AbstractIterator<V>()
+        {
+            @Override
+            protected V computeNext()
+            {
+                if (!iterator.hasNext())
+                    return endOfData();
+                return iterator.next();
+            }
+        };
+    }
 }

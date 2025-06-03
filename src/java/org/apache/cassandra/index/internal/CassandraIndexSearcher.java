@@ -21,8 +21,8 @@
 package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
-import java.util.Collection;
 import java.util.SortedSet;
+import java.util.function.Consumer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +73,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
     protected abstract class AbstractMatchIndexer<M extends Index.IndexMatch> extends CassandraIndex.AbstractIndexer implements Index.MatchIndexer<M>
     {
         protected DecoratedKey key;
-        protected Collection<M> indexTo;
+        protected Consumer<M> indexTo;
 
         @Override
         long nowInSec()
@@ -98,7 +98,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         @Override
         void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
         {
-            indexTo.add(createMatch(rowKey, clustering, cell, info));
+            indexTo.accept(createMatch(rowKey, clustering, cell, info));
         }
 
         @Override
@@ -122,7 +122,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         }
 
         @Override
-        public void index(PartitionUpdate update, Collection<M> indexTo)
+        public void index(PartitionUpdate update, Consumer<M> indexTo)
         {
             // FIXME: this is messy
             this.key = update.partitionKey();

@@ -20,15 +20,17 @@ package org.apache.cassandra.service.reads.tracked;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Preconditions;
 
@@ -49,7 +51,6 @@ import org.apache.cassandra.db.lifecycle.View;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionIterator;
-import org.apache.cassandra.db.partitions.PartitionIterators;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.SimpleBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
@@ -121,6 +122,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     public interface CompletedIndexRead<Match extends IndexMatch> extends CompletedRead
     {
         CompletedIndexPartitionRead<Match> partitionRead(ByteBuffer key);
+        Collection<Match> matches();
     }
 
     private static class FollowUpRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> implements CompletedIndexPartitionRead<Match>
@@ -174,7 +176,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         public UnfilteredRowIterator readHit(CloseablePeekingIterator<Match> matchIterator)
         {
             Preconditions.checkState(matchIterator.hasNext());
-            Preconditions.checkState(matchIterator.peek().baseKey().equals(key));
+            Preconditions.checkState(matchIterator.peek().baseKey().equals(key.getKey()));
             return partitionRead.readHit(matchIterator);
         }
     }
@@ -348,7 +350,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         try (CloseableIterator<Match> iterator = searcher.matchIterator(executionController))
         {
-            Set<Match> matches = new HashSet<>();
+            SortedSet<Match> matches = new TreeSet<>(searcher.matchComparator());
             while (iterator.hasNext() && matches.size() < command.limits().count())
             {
                 Match match = iterator.next();
@@ -365,7 +367,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private class IndexPrepared extends Prepared
     {
-        private final Set<Match> matches;
+        private final SortedSet<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
         private Index.MatchIndexer<Match> matchIndexer = null;
 
@@ -374,7 +376,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         // the prepare phase of the read. Futures for those reads are kept here
         private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads = new HashMap<>();
 
-        public IndexPrepared(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
+        public IndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
         {
             this.matches = matches;
             this.reads = reads;
@@ -386,13 +388,24 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             return new IndexCompleted(matches, reads, followUpReads);
         }
 
-        private boolean indexUpdate(PartitionUpdate update)
+        private Index.MatchIndexer<Match> matchIndexer()
         {
             if (matchIndexer == null)
                 matchIndexer = searcher.matchIndexer();
+            return matchIndexer;
+        }
 
+        private boolean indexNewKey(PartitionUpdate update)
+        {
+            AtomicBoolean hasMatches = new AtomicBoolean(false);
+            matchIndexer().index(update, e -> hasMatches.set(true));
+            return hasMatches.get();
+        }
+
+        private boolean indexUpdate(PartitionUpdate update)
+        {
             int startingSize = matches.size();
-            matchIndexer.index(update, matches);
+            matchIndexer().index(update, matches::add);
             return matches.size() > startingSize;
         }
 
@@ -406,7 +419,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             if (read == null)
             {
                 // TODO: maybe we should immediately start a follow up read if it's likely this key will be included in the response
-                if (indexUpdate(update) && !followUpReads.containsKey(key))
+                if (!followUpReads.containsKey(key) && indexNewKey(update))
                 {
                     Future<FollowUpRead<Match, Searcher>> followUpRead = FollowUpRead.start(command, update.partitionKey(), consistencyLevel, expiresAtNanos);
                     followUpReads.put(key, followUpRead);
@@ -424,11 +437,11 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private class IndexCompleted extends Completed
     {
-        private final Set<Match> matches;
+        private final SortedSet<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
         private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads;
 
-        public IndexCompleted(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        public IndexCompleted(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
             this.matches = matches;
             this.reads = reads;
@@ -444,35 +457,32 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private class IndexCompletedRead implements CompletedIndexRead<Match>
     {
+        private final SortedSet<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures;
-        final CloseablePeekingIterator<Match> matchIter;
-        protected boolean followUpRequired = false;
+        private final Future<List<FollowUpRead<Match, Searcher>>> followUp;
 
-        public IndexCompletedRead(Set<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures)
+        public IndexCompletedRead(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures)
         {
+            this.matches = matches;
             this.reads = reads;
-            this.followUpReadFutures = followUpReadFutures;
-            List<Match> matchList = new ArrayList<>(matches);
-            matchList.sort(searcher.matchComparator());
-
-            this.matchIter = new AbstractIterator<>() {
-                final Iterator<Match> iter = matches.iterator();
-                @Override
-                protected Match computeNext()
-                {
-                    return iter.hasNext() ? iter.next() : endOfData();
-                }
-            };
+            this.followUp = followUpReadFutures != null && !followUpReadFutures.isEmpty() ? FutureCombiner.allOf(followUpReadFutures.values()) : null;
         }
 
-        private abstract class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+        @Override
+        public Collection<Match> matches()
         {
+            return matches;
+        }
+
+        private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+        {
+            private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
             private final CloseablePeekingIterator<Match> matchIter;
 
-            public UnfilteredResultIterator(CloseablePeekingIterator<Match> matchIter)
+            public UnfilteredResultIterator(CloseablePeekingIterator<Match> matchIter, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
             {
                 this.matchIter = matchIter;
+                this.followUpReads = followUpReads;
             }
 
             @Override
@@ -480,8 +490,6 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             {
                 return command.metadata();
             }
-
-            abstract UnfilteredRowIterator readFollowUp(ByteBuffer key, CloseablePeekingIterator<Match> matchIter);
 
             @Override
             protected UnfilteredRowIterator computeNext()
@@ -494,74 +502,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
                 if (read != null)
                     return read.readHit(matchIter);
 
-                return readFollowUp(nextKey, matchIter);
+                FollowUpRead<Match, Searcher> followUpRead = followUpReads.get(nextKey);
+                if (followUpRead == null)
+                    throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(nextKey));
+
+                return followUpRead.readHit(matchIter);
             }
 
             @Override
             public void close()
             {
                 matchIter.close();
-            }
-        }
-
-        class Initial extends UnfilteredResultIterator
-        {
-            private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures;
-            private boolean followUpRequired = false;
-
-            public Initial(CloseablePeekingIterator<Match> matchIter, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures)
-            {
-                super(matchIter);
-                this.followUpReadFutures = followUpReadFutures;
-            }
-
-            @Override
-            UnfilteredRowIterator readFollowUp(ByteBuffer key, CloseablePeekingIterator<Match> matchIter)
-            {
-                Future<FollowUpRead<Match, Searcher>> future = followUpReadFutures.get(key);
-                if (future == null)
-                    throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(key));
-
-                if (!future.isDone())
-                {
-                    followUpRequired = true;
-                    return endOfData();
-                }
-
-                try
-                {
-                    FollowUpRead<Match, Searcher> followUpRead = future.get();
-                    return followUpRead.readHit(matchIter);
-                }
-                catch (InterruptedException e)
-                {
-                    throw new UncheckedInterruptedException(e);
-                }
-                catch (ExecutionException e)
-                {
-                    throw new RuntimeException(e.getCause());
-                }
-            }
-        }
-
-        class FollowUp extends UnfilteredResultIterator
-        {
-            private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
-
-            public FollowUp(CloseablePeekingIterator<Match> matchIter, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
-            {
-                super(matchIter);
-                this.followUpReads = followUpReads;
-            }
-
-            @Override
-            UnfilteredRowIterator readFollowUp(ByteBuffer key, CloseablePeekingIterator<Match> matchIter)
-            {
-                FollowUpRead<Match, Searcher> followUpRead = followUpReads.get(key);
-                if (followUpRead == null)
-                    throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(key));
-
-                return followUpRead.readHit(matchIter);
             }
         }
 
@@ -576,44 +527,63 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 //            return result;
         }
 
+        private TrackedDataResponse readWithFollowups(List<FollowUpRead<Match, Searcher>> followUpReads)
+        {
+
+            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
+            for (FollowUpRead<Match, Searcher> followUpRead : followUpReads)
+            {
+                matches.addAll(followUpRead.completedRead.matches());
+                followupReads.put(followUpRead.key.getKey(), followUpRead);
+            }
+
+            try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(CloseablePeekingIterator.wrap(matches.iterator()), followupReads))
+            {
+                PartitionIterator filtered = filter(iterator);
+                return TrackedDataResponse.create(filtered, command.columnFilter());
+            }
+        }
+
         @Override
         public TrackedDataResponse response()
         {
-            try (Initial iterator = new Initial(matchIter, followUpReadFutures))
+            if (followUp != null && !followUp.isDone())
+                return null;
+
+            try
             {
-                PartitionIterator result = PartitionIterators.loggingIterator(filter(iterator), "PartialTrackedIndexRead#response");
-                TrackedDataResponse response = TrackedDataResponse.create(result, command.columnFilter());
-                followUpRequired = iterator.followUpRequired;
-                return response;
+                List<FollowUpRead<Match, Searcher>> followUpReads = followUp != null ? followUp.get() : Collections.emptyList();
+                return readWithFollowups(followUpReads);
+            }
+            catch (InterruptedException e)
+            {
+                throw new UncheckedInterruptedException(e);
+            }
+            catch (ExecutionException e)
+            {
+                throw new RuntimeException(e);
             }
         }
 
         @Override
         public Future<TrackedDataResponse> followupRead(TrackedDataResponse initialResponse, ConsistencyLevel consistencyLevel, long expiresAtNanos)
         {
-            if (!followUpRequired)
+            if (initialResponse != null)
                 return null;
 
             // TODO: add normal short read protection support
 
             AsyncPromise<TrackedDataResponse> promise = new AsyncPromise<>();
-            FutureCombiner.allOf(followUpReadFutures.values()).addCallback((result, error) -> {
+            followUp.addCallback((result, error) -> {
                 if (error != null)
                 {
                     promise.tryFailure(error);
                     return;
                 }
 
-                Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
-                for (FollowUpRead<Match, Searcher> followUpRead : result)
-                    followupReads.put(followUpRead.key.getKey(), followUpRead);
-
-                try (FollowUp iterator = new FollowUp(matchIter, followupReads))
+                try
                 {
-                    PartitionIterator initialIterator = initialResponse.makeIterator(command);
-                    PartitionIterator followUpIterator = filter(iterator);
-                    PartitionIterator concatenated = PartitionIterators.concat(List.of(initialIterator, followUpIterator));
-                    promise.trySuccess(TrackedDataResponse.create(concatenated, command.columnFilter()));
+                    promise.trySuccess(readWithFollowups(result));
                 }
                 catch (Exception e)
                 {

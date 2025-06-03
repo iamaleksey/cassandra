@@ -29,6 +29,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -731,7 +732,7 @@ public interface Index
 
     interface MatchIndexer<Match extends IndexMatch>
     {
-        void index(PartitionUpdate update, Collection<Match> indexTo);
+        void index(PartitionUpdate update, Consumer<Match> indexTo);
     }
 
     /**
