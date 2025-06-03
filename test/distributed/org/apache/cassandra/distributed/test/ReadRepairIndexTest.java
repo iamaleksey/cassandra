@@ -169,4 +169,23 @@ public class ReadRepairIndexTest extends TestBaseImpl
                   rows(row(1, 2, 2)));
 
     }
+    @Test
+    public void rangeReadTest()
+    {
+        tester("WHERE v=2")
+        .createTable("CREATE TABLE %s (k int, v int, PRIMARY KEY (k))")
+        .createIndex("v")
+        .mutate(2, "INSERT INTO %s (k, v) VALUES (1, 2)")
+        .mutate(1, "INSERT INTO %s (k, v) VALUES (2, 1)")
+        .mutate(2, "INSERT INTO %s (k, v) VALUES (3, 1)")
+        .mutate(1, "INSERT INTO %s (k, v) VALUES (4, 2)")
+        .queryColumns("k, v", 2, 0,
+                      rows(row(1, 2), row(4, 2)),
+                      rows(row(1, 2), row(4, 2)),
+                      rows(row(1, 2), row(4, 2)))
+        .tearDown(2,
+                  rows(row(1, 2), row(2, 1), row(4, 2), row(3, 1)),
+                  rows(row(1, 2), row(2, 1), row(4, 2)),
+                  rows(row(1, 2), row(4, 2), row(3, 1)));
+    }
 }

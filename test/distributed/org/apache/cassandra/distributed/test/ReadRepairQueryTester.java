@@ -200,7 +200,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
             assertRowsDistributed(columnsQuery, columnsQueryRepairedRows, columnsQueryResults);
 
             // query entire rows to repair the rest of the columns, that might trigger new repairs for those columns
-            return verifyQuery(allColumnsQuery, rowsQueryRepairedRows, node1Rows, node2Rows);
+            return verifyQuery(allColumnsQuery, rowsQueryRepairedRows, node1Rows, node1Rows, node2Rows);
         }
 
         /**
@@ -253,7 +253,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
             if (replicationType.isTracked())
                 repairedRows = Math.min(repairedRows, 1);
 
-            return verifyQuery(allColumnsQuery, repairedRows, node1Rows, node2Rows);
+            return verifyQuery(allColumnsQuery, repairedRows, node1Rows, node1Rows, node2Rows);
         }
 
         T mutate(String... queries)
@@ -261,18 +261,18 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
             return mutate(1, queries);
         }
 
-        private T verifyQuery(String query, long expectedRepairedRows, Object[][] node1Rows, Object[][] node2Rows)
+        private T verifyQuery(String query, long expectedRepairedRows, Object[][] allRows, Object[][] node1Rows, Object[][] node2Rows)
         {
             // verify the per-replica status before running the query distributedly
             assertRows(cluster.get(1).executeInternal(query), node1Rows);
             assertRows(cluster.get(2).executeInternal(query), strategy == NONE ? EMPTY_ROWS : node2Rows);
 
             // now, run the query with CL=ALL to reconcile and repair the replicas
-            assertRowsDistributed(query, expectedRepairedRows, node1Rows);
+            assertRowsDistributed(query, expectedRepairedRows, allRows);
 
             // run the query locally again to verify that the distributed query has repaired everything
-            assertRows(cluster.get(1).executeInternal(query), node1Rows);
-            assertRows(cluster.get(2).executeInternal(query), strategy == NONE ? EMPTY_ROWS : node1Rows);
+            assertRows(cluster.get(1).executeInternal(query), allRows);
+            assertRows(cluster.get(2).executeInternal(query), strategy == NONE ? EMPTY_ROWS : allRows);
 
             return self();
         }
@@ -293,7 +293,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
          * The expectUnrepaired flag is meant for range query tests where logged replication table special casing
          * doesn't apply since we do expect the final query to find and repair missing mutations
          */
-        void tearDown(long repairedRows, Object[][] node1Rows, Object[][] node2Rows, boolean expectUnrepaired)
+        void tearDown(long repairedRows, Object[][] allRows, Object[][] node1Rows, Object[][] node2Rows, boolean expectUnrepaired)
         {
             if (replicationType.isTracked() && !expectUnrepaired)
             {
@@ -315,7 +315,7 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
                 // we also expect all pending mutations to be reconciled in the initial read, and none to be reconciled on the verification step
                 repairedRows = 0;
             }
-            verifyQuery("SELECT * FROM " + qualifiedTableName, repairedRows, node1Rows, node2Rows);
+            verifyQuery("SELECT * FROM " + qualifiedTableName, repairedRows, allRows, node1Rows, node2Rows);
             for (int n = 1; n <= cluster.size(); n++)
             {
                 if (n == coordinator)
@@ -331,9 +331,25 @@ public abstract class ReadRepairQueryTester extends TestBaseImpl
 
         void tearDown(long repairedRows, Object[][] node1Rows, Object[][] node2Rows)
         {
-            tearDown(repairedRows, node1Rows, node2Rows, false);
+            tearDown(repairedRows, node1Rows, node1Rows, node2Rows, false);
+        }
+
+        void tearDown(long repairedRows, Object[][] allRows, Object[][] node1Rows, Object[][] node2Rows)
+        {
+            tearDown(repairedRows, allRows, node1Rows, node2Rows, false);
+        }
+
+        void tearDown(long repairedRows, Object[][] node1Rows, Object[][] node2Rows, boolean expectUnrepaired)
+        {
+            tearDown(repairedRows, node1Rows, node1Rows, node2Rows, expectUnrepaired);
         }
     }
+
+    void tearDown(long repairedRows, Object[][] node1Rows, Object[][] node2Rows, boolean expectUnrepaired)
+    {
+
+    }
+
 
     protected static class Tester extends AbstractTester<Tester>
     {
