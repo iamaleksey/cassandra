@@ -19,14 +19,12 @@ package org.apache.cassandra.service.reads.tracked;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
-import org.apache.cassandra.db.filter.ColumnFilter;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.ReplicaPlan;
 import org.apache.cassandra.metrics.ReadRepairMetrics;
@@ -43,7 +41,6 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.AbstractFuture;
 import org.apache.cassandra.utils.concurrent.Accumulator;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
-import org.apache.cassandra.utils.concurrent.Future;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,11 +55,11 @@ public class TrackedLocalReadCoordinator
 {
     public interface Completer
     {
-        void complete(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos);
+        void complete(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ConsistencyLevel consistencyLevel, long expiresAtNanos);
+        Completer DEFAULT = (promise, read, consistencyLevel, expiresAtNanos) -> read.complete(promise, consistencyLevel, expiresAtNanos);
     }
 
     private static final Logger logger = LoggerFactory.getLogger(TrackedLocalReadCoordinator.class);
-    private static final Completer DEFAULT_COMPLETER = ((promise, read, selection, consistencyLevel, expiresAtNanos) -> Stage.READ.submit(() -> completeInternal(promise, read, selection, consistencyLevel, expiresAtNanos)));
 
     private final TrackedRead.Id readId;
     private final AsyncPromise<TrackedDataResponse> promise;
@@ -270,7 +267,7 @@ public class TrackedLocalReadCoordinator
             this.replicaPlan = replicaPlan;
             this.summaries = new Accumulator<>(replicaPlan.readCandidates().size());
             this.summaryNodes = summaryNodes;
-            this.completer = completer == null ? DEFAULT_COMPLETER : completer;
+            this.completer = completer == null ? Completer.DEFAULT : completer;
         }
 
         Reading(
@@ -312,7 +309,7 @@ public class TrackedLocalReadCoordinator
             if (reconciliations.isEmpty())
             {
                 logger.trace("Read complete for {}", readId);
-                completer.complete(promise, read, command.columnFilter(), replicaPlan.consistencyLevel(), expiresAtNanos);
+                completer.complete(promise, read, replicaPlan.consistencyLevel(), expiresAtNanos);
                 return COMPLETED;
             }
             else
@@ -470,7 +467,7 @@ public class TrackedLocalReadCoordinator
                 return this;
 
             logger.trace("Reconciliation completed for read {}", readId);
-            completer.complete(promise, read, command.columnFilter(), consistencyLevel, expiresAtNanos);
+            completer.complete(promise, read, consistencyLevel, expiresAtNanos);
             return COMPLETED;
         }
 
@@ -560,40 +557,6 @@ public class TrackedLocalReadCoordinator
         synchronized (this)
         {
             state = state.receiveInProgressRead(read, secondarySummary);
-        }
-    }
-
-    private static void completeInternal(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos)
-    {
-        try (PartialTrackedRead.CompletedRead completedRead = read.complete())
-        {
-            TrackedDataResponse response = completedRead.response();
-            Future<TrackedDataResponse> followUp = completedRead.followupRead(response, consistencyLevel, expiresAtNanos);
-
-            if (followUp != null)
-            {
-                followUp.addCallback((newResponse, error) -> {
-                    if (error != null)
-                    {
-                        promise.tryFailure(error);
-                        return;
-                    }
-                    promise.trySuccess(newResponse);
-                });
-            }
-            else
-            {
-                promise.trySuccess(response);
-            }
-        }
-        catch (Exception e)
-        {
-            promise.tryFailure(e);
-            throw e;
-        }
-        finally
-        {
-            read.close();
         }
     }
 

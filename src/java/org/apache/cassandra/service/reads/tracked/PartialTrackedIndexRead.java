@@ -21,7 +21,6 @@ package org.apache.cassandra.service.reads.tracked;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,8 +32,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Iterables;
 
-import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DataRange;
@@ -62,6 +61,7 @@ import org.apache.cassandra.index.Index.IndexMatch;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.io.sstable.SSTableReadsListener;
 import org.apache.cassandra.io.sstable.format.SSTableReader;
+import org.apache.cassandra.io.util.FileUtils;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
@@ -125,25 +125,23 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         Collection<Match> matches();
     }
 
-    private static class FollowUpRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> implements CompletedIndexPartitionRead<Match>
+    private static class FollowUpRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> implements CompletedIndexPartitionRead<Match>, AutoCloseable
     {
         private final DecoratedKey key;
         private final AsyncPromise<TrackedDataResponse> promise;
         private final PartialTrackedIndexRead<Match, Searcher> read;
         private final CompletedIndexRead<Match> completedRead;
         private final CompletedIndexPartitionRead<Match> partitionRead;
-        private final ColumnFilter selection;
         private final ConsistencyLevel consistencyLevel;
         private final long expiresAtNanos;
 
-        public FollowUpRead(DecoratedKey key, AsyncPromise<TrackedDataResponse> promise, PartialTrackedIndexRead<Match, Searcher> read, ColumnFilter selection, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+        public FollowUpRead(DecoratedKey key, AsyncPromise<TrackedDataResponse> promise, PartialTrackedIndexRead<Match, Searcher> read, ConsistencyLevel consistencyLevel, long expiresAtNanos)
         {
             this.key = key;
             this.promise = promise;
             this.read = read;
             this.completedRead = (CompletedIndexRead<Match>) read.complete();
             this.partitionRead = Preconditions.checkNotNull(completedRead.partitionRead(key.getKey()));
-            this.selection = selection;
             this.consistencyLevel = consistencyLevel;
             this.expiresAtNanos = expiresAtNanos;
         }
@@ -159,10 +157,10 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             AsyncPromise<FollowUpRead<Match, Searcher>> followUpPromise = new AsyncPromise<>();
             TrackedRead.Partition trackedRead = TrackedRead.create(metadata, partitionReadCommand, consistencyLevel);
 
-            trackedRead.startLocal(expiresAtNanos, null, ((promise1, read, selection1, consistencyLevel1, expiresAtNanos1) -> {
+            trackedRead.startLocal(expiresAtNanos, null, ((promise1, read, consistencyLevel1, expiresAtNanos1) -> {
                 try
                 {
-                    followUpPromise.trySuccess(new FollowUpRead<>(key, promise1, (PartialTrackedIndexRead<Match, Searcher>) read, selection1, consistencyLevel1, expiresAtNanos1));
+                    followUpPromise.trySuccess(new FollowUpRead<>(key, promise1, (PartialTrackedIndexRead<Match, Searcher>) read, consistencyLevel1, expiresAtNanos1));
                 }
                 catch (Exception e)
                 {
@@ -179,6 +177,47 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             Preconditions.checkState(matchIterator.peek().baseKey().equals(key.getKey()));
             return partitionRead.readHit(matchIterator);
         }
+
+        @Override
+        public void close()
+        {
+            read.close();
+        }
+
+        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> void close(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        {
+            for (Future<FollowUpRead<Match, Searcher>> future : followUpReads.values())
+            {
+                future.addCallback((followup, failure) -> {
+                    if (failure != null)
+                        followup.close();
+                });
+            }
+        }
+
+        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Map<ByteBuffer, FollowUpRead<Match, Searcher>> getResults(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> futures, SortedSet<Match> matches)
+        {
+            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
+            for (Future<FollowUpRead<Match, Searcher>> future : futures.values())
+            {
+                try
+                {
+                    FollowUpRead<Match, Searcher> followUpRead = future.get();
+                    matches.addAll(followUpRead.completedRead.matches());
+                    followupReads.put(followUpRead.key.getKey(), followUpRead);
+                }
+                catch (ExecutionException e)
+                {
+                    throw new RuntimeException(e);
+                }
+                catch (InterruptedException e)
+                {
+                    throw new UncheckedInterruptedException(e);
+                }
+            }
+            return followupReads;
+        }
+
     }
 
     private static class SnapshotView implements ReadableView
@@ -365,27 +404,71 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         }
     }
 
-    private class IndexPrepared extends Prepared
+    @Override
+    public synchronized void complete(AsyncPromise<TrackedDataResponse> promise, ConsistencyLevel consistencyLevel, long expiresAtNanos)
     {
-        private final SortedSet<Match> matches;
-        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private Index.MatchIndexer<Match> matchIndexer = null;
+        Preconditions.checkState(state().isPrepared());
+        IndexPrepared prepared = (IndexPrepared) state();
 
+        if (prepared.isCompletable())
+        {
+            super.complete(promise, consistencyLevel, expiresAtNanos);
+            return;
+        }
+
+        IndexPreComplete preComplete = prepared.preComplete();
+        state = preComplete;
+
+        // simple listener - completion will handle any failed futures
+        preComplete.future().addListener(() -> super.complete(promise, consistencyLevel, expiresAtNanos));
+    }
+
+    private abstract class AbstractIndexPrepared extends Prepared
+    {
+        protected final SortedSet<Match> matches;
+        protected final SortedMap<ByteBuffer, IndexPartitionRead> reads;
         // for range scans, if we learn of new keys with matching contents as part of reconciliation, we need
         // to do follow up reads against them since we didn't snapshot memtable contents for the keys during
         // the prepare phase of the read. Futures for those reads are kept here
-        private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads = new HashMap<>();
+        protected final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads;
 
-        public IndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
+        public AbstractIndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
             this.matches = matches;
             this.reads = reads;
+            this.followUpReads = followUpReads;
+        }
+
+        boolean isCompletable()
+        {
+            return Iterables.all(followUpReads.values(), Future::isDone);
         }
 
         @Override
         Completed complete()
         {
-            return new IndexCompleted(matches, reads, followUpReads);
+            Preconditions.checkState(isCompletable());
+            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpResults = FollowUpRead.getResults(followUpReads, matches);
+            return new IndexCompleted(matches, reads, followUpResults);
+        }
+
+        abstract IndexPreComplete preComplete();
+
+        @Override
+        void close()
+        {
+            FollowUpRead.close(followUpReads);
+            super.close();
+        }
+    }
+
+    private class IndexPrepared extends AbstractIndexPrepared
+    {
+        private Index.MatchIndexer<Match> matchIndexer = null;
+
+        public IndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
+        {
+            super(matches, reads, new HashMap<>());
         }
 
         private Index.MatchIndexer<Match> matchIndexer()
@@ -433,15 +516,46 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             // TODO: calling this method mever results in a state change, remove return?
             return this;
         }
+
+        @Override
+        IndexPreComplete preComplete()
+        {
+            return new IndexPreComplete(matches, reads, followUpReads);
+        }
+    }
+
+    private class IndexPreComplete extends AbstractIndexPrepared
+    {
+        public IndexPreComplete(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        {
+            super(matches, reads, followUpReads);
+        }
+
+        @Override
+        public State augment(PartitionUpdate update)
+        {
+            throw new IllegalStateException("cannot augment reads pending completion");
+        }
+
+        @Override
+        IndexPreComplete preComplete()
+        {
+            return this;
+        }
+
+        Future<List<FollowUpRead<Match, Searcher>>> future()
+        {
+            return FutureCombiner.allOf(followUpReads.values());
+        }
     }
 
     private class IndexCompleted extends Completed
     {
         private final SortedSet<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads;
+        private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
 
-        public IndexCompleted(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        public IndexCompleted(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
         {
             this.matches = matches;
             this.reads = reads;
@@ -459,13 +573,13 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     {
         private final SortedSet<Match> matches;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private final Future<List<FollowUpRead<Match, Searcher>>> followUp;
+        private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads;
 
-        public IndexCompletedRead(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReadFutures)
+        public IndexCompletedRead(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads)
         {
             this.matches = matches;
             this.reads = reads;
-            this.followUp = followUpReadFutures != null && !followUpReadFutures.isEmpty() ? FutureCombiner.allOf(followUpReadFutures.values()) : null;
+            this.followupReads = followupReads;
         }
 
         @Override
@@ -547,57 +661,24 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         @Override
         public TrackedDataResponse response()
         {
-            if (followUp != null && !followUp.isDone())
-                return null;
-
-            try
+            try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(CloseablePeekingIterator.wrap(matches.iterator()), followupReads))
             {
-                List<FollowUpRead<Match, Searcher>> followUpReads = followUp != null ? followUp.get() : Collections.emptyList();
-                return readWithFollowups(followUpReads);
-            }
-            catch (InterruptedException e)
-            {
-                throw new UncheckedInterruptedException(e);
-            }
-            catch (ExecutionException e)
-            {
-                throw new RuntimeException(e);
+                PartitionIterator filtered = filter(iterator);
+                return TrackedDataResponse.create(filtered, command.columnFilter());
             }
         }
 
         @Override
         public Future<TrackedDataResponse> followupRead(TrackedDataResponse initialResponse, ConsistencyLevel consistencyLevel, long expiresAtNanos)
         {
-            if (initialResponse != null)
-                return null;
-
             // TODO: add normal short read protection support
-
-            AsyncPromise<TrackedDataResponse> promise = new AsyncPromise<>();
-            followUp.addCallback((result, error) -> {
-                if (error != null)
-                {
-                    promise.tryFailure(error);
-                    return;
-                }
-
-                try
-                {
-                    promise.trySuccess(readWithFollowups(result));
-                }
-                catch (Exception e)
-                {
-                    promise.tryFailure(e);
-                }
-            }, Stage.READ.executor());
-
-            return promise;
+            return null;
         }
 
         @Override
         public void close()
         {
-            // TODO: make sure we're closing everything
+            FileUtils.closeQuietly(followupReads.values());
         }
 
         @Override

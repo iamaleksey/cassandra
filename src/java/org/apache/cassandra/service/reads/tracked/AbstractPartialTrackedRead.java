@@ -217,7 +217,7 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
     final ReadExecutionController executionController;
     final ColumnFamilyStore cfs;
     final long startTimeNanos;
-    private State state = new Initialized();
+    protected State state = new Initialized();
 
     public AbstractPartialTrackedRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos)
     {

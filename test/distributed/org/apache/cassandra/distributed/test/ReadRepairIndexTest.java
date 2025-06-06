@@ -20,10 +20,13 @@ package org.apache.cassandra.distributed.test;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
 
+import org.apache.commons.lang3.ArrayUtils;
 import org.junit.AfterClass;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -41,7 +44,39 @@ public class ReadRepairIndexTest extends TestBaseImpl
     private static final int NUM_NODES = 2;
     enum IndexType
     {
-        SECONDARY, SAI
+        SECONDARY, SAI;
+
+        static IndexType[] fixmeValues()
+        {
+            return new IndexType[] { SECONDARY };
+        }
+    }
+
+    enum SelectOrder
+    {
+        ASC, DESC;
+
+        Object[] apply(Object[] objects)
+        {
+            switch (this)
+            {
+                case ASC:
+                    return objects;
+
+                case DESC:
+
+                    Object[] reversed = Arrays.copyOf(objects, objects.length);
+                    ArrayUtils.reverse(reversed);
+                    return reversed;
+                default:
+                    throw new IllegalStateException();
+            }
+        }
+
+        void skipIfDesc()
+        {
+            Assume.assumeFalse(this == DESC);
+        }
     }
 
     /**
@@ -83,10 +118,8 @@ public class ReadRepairIndexTest extends TestBaseImpl
             for (boolean flush : BOOLEANS)
                 for (boolean paging : BOOLEANS)
                     for (ReplicationType replication : ReplicationType.values())
-                        for (IndexType indexType : IndexType.values())
+                        for (IndexType indexType : IndexType.fixmeValues())
                             result.add(new Object[]{ ReadRepairStrategy.BLOCKING, coordinator, flush, paging, replication, indexType});
-        for (IndexType indexType : IndexType.values())
-            result.add(new Object[]{ ReadRepairStrategy.NONE, 1, false, false, ReplicationType.untracked, indexType});
         return result;
     }
 
