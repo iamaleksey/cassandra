@@ -254,7 +254,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         {
             return new ResultIterator(matchIterator, executionController);
         }
-        catch (RuntimeException | Error e)
+        catch (Throwable e)
         {
             matchIterator.close();
             throw e;
