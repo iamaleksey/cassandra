@@ -202,12 +202,12 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         return UnfilteredRowIterators.filter(indexIter, command.nowInSec());
     }
 
-    protected class SearchIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
+    protected class ResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
     {
         private final CloseablePeekingIterator<Match> matchIterator;
         private final ReadExecutionController executionController;
 
-        public SearchIterator(CloseablePeekingIterator<Match> matchIterator, ReadExecutionController executionController)
+        public ResultIterator(CloseablePeekingIterator<Match> matchIterator, ReadExecutionController executionController)
         {
             this.matchIterator = matchIterator;
             this.executionController = executionController;
@@ -252,7 +252,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         CloseablePeekingIterator<Match> matchIterator = matchIterator(executionController);
         try
         {
-            return new SearchIterator(matchIterator, executionController);
+            return new ResultIterator(matchIterator, executionController);
         }
         catch (RuntimeException | Error e)
         {
