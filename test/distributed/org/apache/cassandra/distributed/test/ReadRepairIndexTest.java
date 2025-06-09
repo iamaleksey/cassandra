@@ -45,11 +45,6 @@ public class ReadRepairIndexTest extends TestBaseImpl
     enum IndexType
     {
         SECONDARY, SAI;
-
-        static IndexType[] fixmeValues()
-        {
-            return new IndexType[] { SECONDARY };
-        }
     }
 
     enum SelectOrder
@@ -118,7 +113,7 @@ public class ReadRepairIndexTest extends TestBaseImpl
             for (boolean flush : BOOLEANS)
                 for (boolean paging : BOOLEANS)
                     for (ReplicationType replication : ReplicationType.values())
-                        for (IndexType indexType : IndexType.fixmeValues())
+                        for (IndexType indexType : IndexType.values())
                             result.add(new Object[]{ ReadRepairStrategy.BLOCKING, coordinator, flush, paging, replication, indexType});
         return result;
     }
