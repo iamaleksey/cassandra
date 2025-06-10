@@ -608,19 +608,24 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             @Override
             protected UnfilteredRowIterator computeNext()
             {
-                if (!matchIter.hasNext())
-                    return endOfData();
+                for (;;)
+                {
+                    if (!matchIter.hasNext())
+                        return endOfData();
 
-                ByteBuffer nextKey = matchIter.peek().baseKey();
-                IndexPartitionRead read = reads.get(nextKey);
-                if (read != null)
-                    return read.readHit(matchIter);
+                    ByteBuffer nextKey = matchIter.peek().baseKey();
+                    IndexPartitionRead read = reads.get(nextKey);
+                    if (read != null)
+                        return read.readHit(matchIter);
 
-                FollowUpRead<Match, Searcher> followUpRead = followUpReads.get(nextKey);
-                if (followUpRead == null)
-                    throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(nextKey));
+                    FollowUpRead<Match, Searcher> followUpRead = followUpReads.get(nextKey);
+                    if (followUpRead == null)
+                        throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(nextKey));
 
-                return followUpRead.readHit(matchIter);
+                    UnfilteredRowIterator next = followUpRead.readHit(matchIter);
+                    if (next != null)
+                        return next;
+                }
             }
 
             @Override

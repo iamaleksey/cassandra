@@ -534,7 +534,8 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
         Preconditions.checkArgument(matchIter.peek().partitionKey().equals(partitionKey));
 
         UnfilteredRowIterator iterator = nextRowIterator(executionController, partitionKey, view, matchIter);
-        Preconditions.checkState(iterator != null);
+        if (iterator == null)
+            return null;
         return iteratePartition(executionController, view, matchIter, iterator);
     }
 
