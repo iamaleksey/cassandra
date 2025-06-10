@@ -220,4 +220,29 @@ public class ReadRepairIndexTest extends TestBaseImpl
                    ? rows(row(1, 2), row(2, 1), row(4, 2), row(3, 1))
                    : rows(row(1, 2), row(4, 2), row(3, 1))));
     }
+
+    @Test
+    public void sortedRangeRead()
+    {
+        Assume.assumeTrue("CassandraIndex doesn't support numerical ranges", indexType == IndexType.SAI);
+
+        tester("WHERE v>2")
+        .createTable("CREATE TABLE %s (k int, c int, v int, PRIMARY KEY (k, c))")
+        .createIndex("v")
+        .mutate(2, "INSERT INTO %s (k, c, v) VALUES (1, 2, 2)")
+        .mutate(1, "INSERT INTO %s (k, c, v) VALUES (1, 4, 4)")
+        .mutate(2, "INSERT INTO %s (k, c, v) VALUES (5, 2, 1)")
+        .mutate(1, "INSERT INTO %s (k, c, v) VALUES (8, 4, 3)")
+        .queryColumns("k, c, v", 2, 0,
+                      rows(row(1, 4, 4), row(8, 4, 3)),
+                      rows(row(1, 4, 4), row(8, 4, 3)),
+                      rows(row(1, 4, 4), row(8, 4, 3)))
+        .tearDown(2,
+                  rows(row(5, 2, 1), row(1, 2, 2), row(1, 4, 4), row(8, 4, 3)),
+                  replicationType.isTracked()
+                    ? rows(row(5, 2, 1), row(1, 2, 2), row(1, 4, 4), row(8, 4, 3))
+                    : rows(row(1, 4, 4), row(8, 4, 3)),
+                  rows(row(5, 2, 1), row(1, 2, 2), row(1, 4, 4), row(8, 4, 3)));
+
+    }
 }
