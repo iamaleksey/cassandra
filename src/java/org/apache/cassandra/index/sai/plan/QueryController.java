@@ -261,7 +261,10 @@ public class QueryController
                     if (unrepairedIterator.getMaxKeys() > 0)
                     {
                         builder.add(unrepairedIterator);
-                        queryContext.hasUnrepairedMatches = true;
+
+                        // mutation tracking internally repairs all partitions ranges/keys as part of a read
+                        if (!command.metadata().replicationType().isTracked())
+                            queryContext.hasUnrepairedMatches = true;
                     }
                     else
                     {

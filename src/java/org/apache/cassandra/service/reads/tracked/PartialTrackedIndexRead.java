@@ -637,7 +637,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         private PartitionIterator filter(UnfilteredPartitionIterator iterator)
         {
-//            iterator = searcher.filterCompletedRead(iterator);
+            iterator = searcher.filterCompletedRead(iterator);
             iterator = command.completeTrackedRead(iterator, PartialTrackedIndexRead.this);
             PartitionIterator filtered = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
             return filtered;

@@ -739,7 +739,10 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
             protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
             {
                 this.staticRow = partition.staticRow();
-                return super.applyToPartition(partition);
+                if (!filterTree.restrictsNonStaticRow())
+                    return filterTree.isSatisfiedBy(partition.partitionKey(), staticRow, staticRow) ? partition : null;
+
+                return Transformation.apply(partition, this);
             }
 
             @Override
@@ -747,7 +750,7 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
             {
                 if (!filterTree.isSatisfiedBy(key, row, staticRow))
                     return null;
-                return row;
+                return super.applyToRow(row);
             }
         });
     }
