@@ -46,9 +46,8 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
     final DataLimits.Counter mergedResultCounter;
     private final boolean partitionsFetched;
     private final boolean initialIteratorExhausted;
-    protected final AbstractBounds<PartitionPosition> followUpBounds;
 
-    public ExtendingCompletedRead(ReadCommand command, boolean partitionsFetched, boolean initialIteratorExhausted, AbstractBounds<PartitionPosition> followUpBounds)
+    public ExtendingCompletedRead(ReadCommand command, boolean partitionsFetched, boolean initialIteratorExhausted)
     {
         this.mergedResultCounter = command.limits().newCounter(command.nowInSec(),
                                                                true,
@@ -56,7 +55,6 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
                                                                command.metadata().enforceStrictLiveness());
         this.partitionsFetched = partitionsFetched;
         this.initialIteratorExhausted = initialIteratorExhausted;
-        this.followUpBounds = followUpBounds;
     }
 
     abstract ReadCommand command();
@@ -137,10 +135,12 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
         return makeFollowupRead(initialResponse, toQuery, consistencyLevel, expiresAtNanos);
     }
 
+    protected abstract AbstractBounds<PartitionPosition> followUpBounds();
+
     protected Future<TrackedDataResponse> makeFollowupRead(TrackedDataResponse initialResponse, int toQuery, ConsistencyLevel consistencyLevel, long expiresAtNanos)
     {
         Preconditions.checkState(command() instanceof PartitionRangeReadCommand);
-        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead((PartitionRangeReadCommand) command(), followUpBounds, toQuery, consistencyLevel, expiresAtNanos);
+        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead((PartitionRangeReadCommand) command(), followUpBounds(), toQuery, consistencyLevel, expiresAtNanos);
         followUpRead.start(expiresAtNanos);
         AsyncPromise<TrackedDataResponse> combinedRead = new AsyncPromise<>();
         followUpRead.future().addCallback((result, failure) -> {
@@ -167,6 +167,7 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
     {
         final PartitionRangeReadCommand command;
         final UnfilteredPartitionIterator iterator;
+        protected final AbstractBounds<PartitionPosition> followUpBounds;
 
         public RangeRead(PartitionRangeReadCommand command,
                          UnfilteredPartitionIterator iterator,
@@ -174,15 +175,22 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
                          boolean initialIteratorExhausted,
                          AbstractBounds<PartitionPosition> followUpBounds)
         {
-            super(command, partitionsFetched, initialIteratorExhausted, followUpBounds);
+            super(command, partitionsFetched, initialIteratorExhausted);
             this.command = command;
             this.iterator = iterator;
+            this.followUpBounds = followUpBounds;
         }
 
         @Override
         ReadCommand command()
         {
             return command;
+        }
+
+        @Override
+        protected AbstractBounds<PartitionPosition> followUpBounds()
+        {
+            return followUpBounds;
         }
 
         @Override

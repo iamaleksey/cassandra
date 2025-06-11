@@ -745,16 +745,9 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         }
     }
 
-    static AbstractBounds<PartitionPosition> followUpBounds(ReadCommand command, DecoratedKey lastPartitionKey)
-    {
-        AbstractBounds<PartitionPosition> bounds = command.dataRange().keyRange();
-        return bounds.inclusiveRight()
-               ? new Range<>(lastPartitionKey, bounds.right)
-               : new ExcludingBounds<>(lastPartitionKey, bounds.right);
-    }
-
     private class IndexCompletedRead extends ExtendingCompletedRead implements CompletedIndexRead<Match>
     {
+        private final DecoratedKey maxKey;
         private final MergingStoppingMatchIterator matchIterator;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
 
@@ -762,7 +755,8 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         public IndexCompletedRead(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads)
         {
-            super(command, materializedMatches.hasNext(), true, followUpBounds(command, maxKey));
+            super(command, materializedMatches.hasNext(), true);
+            this.maxKey = maxKey;
             this.matchIterator = new MergingStoppingMatchIterator(maxKey, materializedMatches, additionalMatches);
             this.reads = reads;
             this.followupReads = followupReads;
@@ -778,6 +772,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         ReadCommand command()
         {
             return command;
+        }
+
+        @Override
+        protected AbstractBounds<PartitionPosition> followUpBounds()
+        {
+            Preconditions.checkState(command.isRangeRequest());
+            Preconditions.checkNotNull(maxKey);
+            AbstractBounds<PartitionPosition> bounds = command.dataRange().keyRange();
+            return bounds.inclusiveRight()
+                   ? new Range<>(maxKey, bounds.right)
+                   : new ExcludingBounds<>(maxKey, bounds.right);
         }
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
@@ -850,6 +855,8 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         @Override
         protected boolean followUpRequired()
         {
+            if (!command.isRangeRequest())
+                return false;
             return matchIterator.followUpRequired || super.followUpRequired();
         }
 
