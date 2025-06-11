@@ -287,12 +287,6 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
                 if (lastKey == null)
                     resultKeyIterator.skipTo(firstPrimaryKey);
 
-                // Theoretically we wouldn't need this if the caller of computeNext always ran the
-                // returned iterators to the completion. Unfortunately, we have no control over the caller behavior here.
-                // Hence, we skip to the next partition in order to comply to the unwritten partition iterator contract
-                // saying this iterator must not return the same partition twice.
-                skipToNextPartition();
-
                 PrimaryKey nextKey = nextKeyInRange();
                 if (nextKey == null)
                     return endOfData();
@@ -369,18 +363,6 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
         private void skipTo(@Nonnull Token token)
         {
             resultKeyIterator.skipTo(keyFactory.create(token));
-        }
-
-        /**
-         * Skips to the key that belongs to a different partition than the last key we fetched.
-         */
-        private void skipToNextPartition()
-        {
-            if (lastKey == null)
-                return;
-            DecoratedKey lastPartitionKey = lastKey.partitionKey();
-            while (resultKeyIterator.hasNext() && resultKeyIterator.peek().partitionKey().equals(lastPartitionKey))
-                resultKeyIterator.next();
         }
 
         @Override
@@ -475,6 +457,10 @@ public class StorageAttachedIndexSearcher implements Index.MultiStepSearcher<Pri
             @Override
             public void close()
             {
+                // skip to the next partition key if the matchIterator hasn't been exhausted
+                while (matchIter.hasNext() && matchIter.peek().partitionKey().equals(partitionKey))
+                    matchIter.next();
+
                 FileUtils.closeQuietly(currentIter);
                 super.close();
             }
