@@ -727,6 +727,7 @@ public interface Index
 
     interface IndexMatch
     {
+        // TODO (now): make this a decorated key
         ByteBuffer baseKey();
     }
 

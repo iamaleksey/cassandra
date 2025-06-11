@@ -18,6 +18,7 @@
 
 package org.apache.cassandra.service.reads.tracked;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,44 +39,27 @@ import org.apache.cassandra.utils.FBUtilities;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 
-class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
+public abstract class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
 {
     private static final Logger logger = LoggerFactory.getLogger(ExtendingCompletedRead.class);
-
-    final PartitionRangeReadCommand command;
-    final UnfilteredPartitionIterator iterator;
     // merged end-result counter
     final DataLimits.Counter mergedResultCounter;
-
     private final boolean partitionsFetched;
     private final boolean initialIteratorExhausted;
     protected final AbstractBounds<PartitionPosition> followUpBounds;
 
-    public ExtendingCompletedRead(PartitionRangeReadCommand command,
-                                  UnfilteredPartitionIterator iterator,
-                                  boolean partitionsFetched,
-                                  boolean initialIteratorExhausted,
-                                  AbstractBounds<PartitionPosition> followUpBounds)
+    public ExtendingCompletedRead(ReadCommand command, boolean partitionsFetched, boolean initialIteratorExhausted, AbstractBounds<PartitionPosition> followUpBounds)
     {
-        this.command = command;
-        this.iterator = iterator;
-        mergedResultCounter = command.limits().newCounter(command.nowInSec(),
-                                                          true,
-                                                          command.selectsFullPartition(),
-                                                          command.metadata().enforceStrictLiveness());
+        this.mergedResultCounter = command.limits().newCounter(command.nowInSec(),
+                                                               true,
+                                                               command.selectsFullPartition(),
+                                                               command.metadata().enforceStrictLiveness());
         this.partitionsFetched = partitionsFetched;
         this.initialIteratorExhausted = initialIteratorExhausted;
         this.followUpBounds = followUpBounds;
     }
 
-    @Override
-    public TrackedDataResponse response()
-    {
-        PartitionIterator filtered = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
-        PartitionIterator counted = Transformation.apply(filtered, mergedResultCounter);
-        PartitionIterator result = Transformation.apply(counted, new EmptyPartitionsDiscarder());
-        return TrackedDataResponse.create(result, command.columnFilter());
-    }
+    abstract ReadCommand command();
 
     static boolean followUpReadRequired(ReadCommand command, DataLimits.Counter mergedResultCounter, boolean initialIteratorExhausted, boolean partitionsFetched)
     {
@@ -115,7 +99,7 @@ class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
 
     protected boolean followUpRequired()
     {
-        return followUpReadRequired(command, mergedResultCounter, initialIteratorExhausted, partitionsFetched);
+        return followUpReadRequired(command(), mergedResultCounter, initialIteratorExhausted, partitionsFetched);
     }
 
     static int toQuery(ReadCommand command, DataLimits.Counter mergedResultCounter)
@@ -144,9 +128,9 @@ class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
          * the total # of rows remaining - if it has some. If we don't grab enough rows in some of the partitions,
          * then future ShortReadRowsProtection.moreContents() calls will fetch the missing ones.
          */
-        int toQuery = toQuery(command, mergedResultCounter);
+        int toQuery = toQuery(command(), mergedResultCounter);
 
-        ColumnFamilyStore.metricsFor(command.metadata().id).shortReadProtectionRequests.mark();
+        ColumnFamilyStore.metricsFor(command().metadata().id).shortReadProtectionRequests.mark();
         Tracing.trace("Requesting {} extra rows from {} for short read protection", toQuery, FBUtilities.getBroadcastAddressAndPort());
         logger.info("Requesting {} extra rows from {} for short read protection", toQuery, FBUtilities.getBroadcastAddressAndPort());
 
@@ -155,7 +139,8 @@ class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
 
     protected Future<TrackedDataResponse> makeFollowupRead(TrackedDataResponse initialResponse, int toQuery, ConsistencyLevel consistencyLevel, long expiresAtNanos)
     {
-        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead(command, followUpBounds, toQuery, consistencyLevel, expiresAtNanos);
+        Preconditions.checkState(command() instanceof PartitionRangeReadCommand);
+        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead((PartitionRangeReadCommand) command(), followUpBounds, toQuery, consistencyLevel, expiresAtNanos);
         followUpRead.start(expiresAtNanos);
         AsyncPromise<TrackedDataResponse> combinedRead = new AsyncPromise<>();
         followUpRead.future().addCallback((result, failure) -> {
@@ -178,9 +163,41 @@ class ExtendingCompletedRead implements PartialTrackedRead.CompletedRead
         return combinedRead;
     }
 
-    @Override
-    public void close()
+    static class RangeRead extends ExtendingCompletedRead
     {
-        iterator.close();
+        final PartitionRangeReadCommand command;
+        final UnfilteredPartitionIterator iterator;
+
+        public RangeRead(PartitionRangeReadCommand command,
+                         UnfilteredPartitionIterator iterator,
+                         boolean partitionsFetched,
+                         boolean initialIteratorExhausted,
+                         AbstractBounds<PartitionPosition> followUpBounds)
+        {
+            super(command, partitionsFetched, initialIteratorExhausted, followUpBounds);
+            this.command = command;
+            this.iterator = iterator;
+        }
+
+        @Override
+        ReadCommand command()
+        {
+            return command;
+        }
+
+        @Override
+        public TrackedDataResponse response()
+        {
+            PartitionIterator filtered = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
+            PartitionIterator counted = Transformation.apply(filtered, mergedResultCounter);
+            PartitionIterator result = Transformation.apply(counted, new EmptyPartitionsDiscarder());
+            return TrackedDataResponse.create(result, command.columnFilter());
+        }
+
+        @Override
+        public void close()
+        {
+            iterator.close();
+        }
     }
 }

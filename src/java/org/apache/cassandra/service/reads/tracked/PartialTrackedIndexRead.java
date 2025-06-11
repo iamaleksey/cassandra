@@ -20,8 +20,8 @@ package org.apache.cassandra.service.reads.tracked;
 
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.SortedMap;
@@ -33,11 +33,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
+import com.google.common.collect.PeekingIterator;
 
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.DataRange;
 import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.PartitionPosition;
 import org.apache.cassandra.db.PartitionRangeReadCommand;
 import org.apache.cassandra.db.ReadCommand;
 import org.apache.cassandra.db.ReadExecutionController;
@@ -56,6 +59,11 @@ import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.rows.UnfilteredSource;
+import org.apache.cassandra.db.transform.EmptyPartitionsDiscarder;
+import org.apache.cassandra.db.transform.Transformation;
+import org.apache.cassandra.dht.AbstractBounds;
+import org.apache.cassandra.dht.ExcludingBounds;
+import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.index.Index;
 import org.apache.cassandra.index.Index.IndexMatch;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
@@ -66,7 +74,6 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.utils.AbstractIterator;
 import org.apache.cassandra.utils.ByteBufferUtil;
-import org.apache.cassandra.utils.CloseableIterator;
 import org.apache.cassandra.utils.CloseablePeekingIterator;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
@@ -122,7 +129,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     public interface CompletedIndexRead<Match extends IndexMatch> extends CompletedRead
     {
         CompletedIndexPartitionRead<Match> partitionRead(ByteBuffer key);
-        Collection<Match> matches();
+        CloseablePeekingIterator<Match> matchIterator();
+    }
+
+    private static DecoratedKey maxKey(DecoratedKey left, DecoratedKey right)
+    {
+        if (left == null)
+            return right;
+        if (right == null)
+            return left;
+
+        return right.compareTo(left) > 0 ? right : left;
     }
 
     private static class FollowUpRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> implements CompletedIndexPartitionRead<Match>, AutoCloseable
@@ -137,6 +154,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         public FollowUpRead(DecoratedKey key, AsyncPromise<TrackedDataResponse> promise, PartialTrackedIndexRead<Match, Searcher> read, ConsistencyLevel consistencyLevel, long expiresAtNanos)
         {
+            Preconditions.checkArgument(!read.command.isRangeRequest());
             this.key = key;
             this.promise = promise;
             this.read = read;
@@ -195,7 +213,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             }
         }
 
-        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Map<ByteBuffer, FollowUpRead<Match, Searcher>> getResults(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> futures, SortedSet<Match> matches)
+        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Map<ByteBuffer, FollowUpRead<Match, Searcher>> getResults(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> futures, List<CloseablePeekingIterator<Match>> matchIterators)
         {
             Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
             for (Future<FollowUpRead<Match, Searcher>> future : futures.values())
@@ -203,7 +221,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
                 try
                 {
                     FollowUpRead<Match, Searcher> followUpRead = future.get();
-                    matches.addAll(followUpRead.completedRead.matches());
+                    matchIterators.add(followUpRead.completedRead.matchIterator());
                     followupReads.put(followUpRead.key.getKey(), followUpRead);
                 }
                 catch (ExecutionException e)
@@ -387,20 +405,32 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             reads.put(key, partitionRead);
         }
 
-        try (CloseableIterator<Match> iterator = searcher.matchIterator(executionController))
+        DecoratedKey maxKey = null;
+        CloseablePeekingIterator<Match> matchIterator = searcher.matchIterator(executionController);
+        try
         {
-            SortedSet<Match> matches = new TreeSet<>(searcher.matchComparator());
-            while (iterator.hasNext() && matches.size() < command.limits().count())
+            SortedSet<Match> materializedMatches = new TreeSet<>(searcher.matchComparator());
+            while (matchIterator.hasNext() && materializedMatches.size() < command.limits().count())
             {
-                Match match = iterator.next();
-                matches.add(match);
+                Match match = matchIterator.next();
+                materializedMatches.add(match);
                 if (!reads.containsKey(match.baseKey()))
                 {
+                    // TODO (now): make decorated key part of IndexEntry interface
+                    DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                    maxKey = maxKey(maxKey, key);
+
                     IndexPartitionRead partitionRead = createRead(match.baseKey(), cfs);
+
                     reads.put(match.baseKey(), partitionRead);
                 }
             }
-            return new IndexPrepared(matches, reads);
+            return new IndexPrepared(maxKey, materializedMatches, matchIterator, reads);
+        }
+        catch (Throwable t)
+        {
+            FileUtils.closeQuietly(matchIterator);
+            throw t;
         }
     }
 
@@ -425,17 +455,29 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private abstract class AbstractIndexPrepared extends Prepared
     {
-        protected final SortedSet<Match> matches;
+        protected DecoratedKey maxKey;
+        protected final SortedSet<Match> materializedMatches;
+        // there may be additional matches for keys we've already scanned, this allows us to read them before
+        // starting a short read
+        protected final CloseablePeekingIterator<Match> additionalMatches;
+
         protected final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+
         // for range scans, if we learn of new keys with matching contents as part of reconciliation, we need
         // to do follow up reads against them since we didn't snapshot memtable contents for the keys during
         // the prepare phase of the read. Futures for those reads are kept here
         protected final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads;
 
-        public AbstractIndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        public AbstractIndexPrepared(DecoratedKey maxKey,
+                                     SortedSet<Match> materializedMatches,
+                                     CloseablePeekingIterator<Match> additionalMatches,
+                                     SortedMap<ByteBuffer, IndexPartitionRead> reads,
+                                     Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
-            this.matches = matches;
+            this.maxKey = maxKey;
+            this.materializedMatches = materializedMatches;
             this.reads = reads;
+            this.additionalMatches = additionalMatches;
             this.followUpReads = followUpReads;
         }
 
@@ -448,8 +490,10 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         Completed complete()
         {
             Preconditions.checkState(isCompletable());
-            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpResults = FollowUpRead.getResults(followUpReads, matches);
-            return new IndexCompleted(matches, reads, followUpResults);
+            List<CloseablePeekingIterator<Match>> matchIterators = new ArrayList<>(followUpReads.size() + 1);
+            matchIterators.add(CloseablePeekingIterator.wrap(materializedMatches.iterator()));
+            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpResults = FollowUpRead.getResults(followUpReads, matchIterators);
+            return new IndexCompleted(maxKey, new MergingMatchIterator(matchIterators), additionalMatches, reads, followUpResults);
         }
 
         abstract IndexPreComplete preComplete();
@@ -466,9 +510,9 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     {
         private Index.MatchIndexer<Match> matchIndexer = null;
 
-        public IndexPrepared(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
+        public IndexPrepared(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
         {
-            super(matches, reads, new HashMap<>());
+            super(maxKey, materializedMatches, additionalMatches, reads, new HashMap<>());
         }
 
         private Index.MatchIndexer<Match> matchIndexer()
@@ -487,9 +531,9 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         private boolean indexUpdate(PartitionUpdate update)
         {
-            int startingSize = matches.size();
-            matchIndexer().index(update, matches::add);
-            return matches.size() > startingSize;
+            int startingSize = materializedMatches.size();
+            matchIndexer().index(update, materializedMatches::add);
+            return materializedMatches.size() > startingSize;
         }
 
         @Override
@@ -504,6 +548,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
                 // TODO: maybe we should immediately start a follow up read if it's likely this key will be included in the response
                 if (!followUpReads.containsKey(key) && indexNewKey(update))
                 {
+                    maxKey = maxKey(maxKey, update.partitionKey());
                     Future<FollowUpRead<Match, Searcher>> followUpRead = FollowUpRead.start(command, update.partitionKey(), consistencyLevel, expiresAtNanos);
                     followUpReads.put(key, followUpRead);
                 }
@@ -520,15 +565,15 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         @Override
         IndexPreComplete preComplete()
         {
-            return new IndexPreComplete(matches, reads, followUpReads);
+            return new IndexPreComplete(maxKey, materializedMatches, additionalMatches, reads, followUpReads);
         }
     }
 
     private class IndexPreComplete extends AbstractIndexPrepared
     {
-        public IndexPreComplete(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        public IndexPreComplete(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
-            super(matches, reads, followUpReads);
+            super(maxKey, materializedMatches, additionalMatches, reads, followUpReads);
         }
 
         @Override
@@ -551,13 +596,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private class IndexCompleted extends Completed
     {
-        private final SortedSet<Match> matches;
+        private final DecoratedKey maxKey;
+        private final CloseablePeekingIterator<Match> materializedMatchIterator;
+        private final CloseablePeekingIterator<Match> additionalMatchIterator;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
         private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
 
-        public IndexCompleted(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
+        public IndexCompleted(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatchIterator, CloseablePeekingIterator<Match> additionalMatchIterator, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
         {
-            this.matches = matches;
+            this.maxKey = maxKey;
+            this.materializedMatchIterator = materializedMatchIterator;
+            this.additionalMatchIterator = additionalMatchIterator;
             this.reads = reads;
             this.followUpReads = followUpReads;
         }
@@ -565,27 +614,170 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         @Override
         protected CompletedRead getResult()
         {
-            return new IndexCompletedRead(matches, reads, followUpReads);
+            return new IndexCompletedRead(maxKey, materializedMatchIterator, additionalMatchIterator, reads, followUpReads);
         }
     }
 
-    private class IndexCompletedRead implements CompletedIndexRead<Match>
+    protected class MergingMatchIterator extends AbstractIterator<Match>
     {
-        private final SortedSet<Match> matches;
+        private final List<CloseablePeekingIterator<Match>> iterators;
+
+        public MergingMatchIterator(List<CloseablePeekingIterator<Match>> iterators)
+        {
+            this.iterators = iterators;
+        }
+
+        @Override
+        protected Match computeNext()
+        {
+            int minIdx = -1;
+            Match minMatch = null;
+            for (int i=0,mi=iterators.size(); i<mi; i++)
+            {
+                CloseablePeekingIterator<Match> iterator = iterators.get(i);
+                if (!iterator.hasNext())
+                    continue;
+
+                if (minMatch == null)
+                {
+                    minMatch = iterator.peek();
+                    minIdx = i;
+                    continue;
+                }
+
+                Match thisMatch = iterator.peek();
+                int cmp = searcher.matchComparator().compare(thisMatch, minMatch);
+                if (cmp < 0)
+                {
+                    minMatch = thisMatch;
+                    minIdx = i;
+                }
+                else if (cmp == 0)
+                {
+                    // if this iterator equals the current minimum, advance the iterator - we don't merge equal matches
+                    iterator.next();
+                }
+            }
+
+            if (minMatch != null)
+            {
+                Preconditions.checkArgument(minIdx >= 0);
+                iterators.get(minIdx).next();
+                return minMatch;
+            }
+
+            return endOfData();
+        }
+
+        @Override
+        public void close()
+        {
+            FileUtils.closeQuietly(iterators);
+        }
+    }
+
+    /**
+     * Merges a materialized iterator and an additional iterator. The additional iterator is meant to be the initial
+     * match iterator from the searcher. If we encounter previously unseen keys from the initial match iterator, it
+     * means that we're in a short read and need to start a follow-up read, which this iterator signals to the caller
+     */
+    private class MergingStoppingMatchIterator extends AbstractIterator<Match>
+    {
+        private final DecoratedKey maxKey;
+        private final PeekingIterator<Match> materializedIterator;
+        private final CloseablePeekingIterator<Match> additionalIterator;
+        private boolean followUpRequired = false;
+
+        public MergingStoppingMatchIterator(DecoratedKey maxKey, Iterator<Match> materializedIterator, CloseablePeekingIterator<Match> additionalIterator)
+        {
+            this.maxKey = maxKey;
+            this.materializedIterator = Iterators.peekingIterator(materializedIterator);
+            this.additionalIterator = additionalIterator;
+        }
+
+        @Override
+        protected Match computeNext()
+        {
+            if (materializedIterator.hasNext() && additionalIterator.hasNext())
+            {
+                int cmp = searcher.matchComparator().compare(materializedIterator.peek(), additionalIterator.peek());
+                if (cmp == 0)
+                {
+                    additionalIterator.next();
+                    return materializedIterator.next();
+                }
+                else if (cmp < 0)
+                {
+                    return materializedIterator.next();
+                }
+                else
+                {
+                    Match match = additionalIterator.next();
+                    DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                    Preconditions.checkArgument(key.compareTo(maxKey) <= 0);
+                    return match;
+                }
+            }
+
+            if (materializedIterator.hasNext())
+                return materializedIterator.next();
+
+            if (additionalIterator.hasNext())
+            {
+                Match match = additionalIterator.next();
+                DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                if (key.compareTo(maxKey) > 0)
+                {
+                    Preconditions.checkArgument(command.isRangeRequest());
+                    followUpRequired = true;
+                    return endOfData();
+                }
+                return match;
+            }
+
+            return endOfData();
+        }
+
+        @Override
+        public void close()
+        {
+            additionalIterator.close();
+        }
+    }
+
+    static AbstractBounds<PartitionPosition> followUpBounds(ReadCommand command, DecoratedKey lastPartitionKey)
+    {
+        AbstractBounds<PartitionPosition> bounds = command.dataRange().keyRange();
+        return bounds.inclusiveRight()
+               ? new Range<>(lastPartitionKey, bounds.right)
+               : new ExcludingBounds<>(lastPartitionKey, bounds.right);
+    }
+
+    private class IndexCompletedRead extends ExtendingCompletedRead implements CompletedIndexRead<Match>
+    {
+        private final MergingStoppingMatchIterator matchIterator;
         private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+
         private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads;
 
-        public IndexCompletedRead(SortedSet<Match> matches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads)
+        public IndexCompletedRead(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads)
         {
-            this.matches = matches;
+            super(command, materializedMatches.hasNext(), true, followUpBounds(command, maxKey));
+            this.matchIterator = new MergingStoppingMatchIterator(maxKey, materializedMatches, additionalMatches);
             this.reads = reads;
             this.followupReads = followupReads;
         }
 
         @Override
-        public Collection<Match> matches()
+        public CloseablePeekingIterator<Match> matchIterator()
         {
-            return matches;
+            return matchIterator;
+        }
+
+        @Override
+        ReadCommand command()
+        {
+            return command;
         }
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
@@ -640,33 +832,15 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             iterator = searcher.filterCompletedRead(iterator);
             iterator = command.completeTrackedRead(iterator, PartialTrackedIndexRead.this);
             PartitionIterator filtered = UnfilteredPartitionIterators.filter(iterator, command.nowInSec());
-            return filtered;
-//            PartitionIterator counted = Transformation.apply(filtered, mergedResultCounter);
-//            PartitionIterator result = Transformation.apply(counted, new EmptyPartitionsDiscarder());
-//            return result;
-        }
-
-        private TrackedDataResponse readWithFollowups(List<FollowUpRead<Match, Searcher>> followUpReads)
-        {
-
-            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
-            for (FollowUpRead<Match, Searcher> followUpRead : followUpReads)
-            {
-                matches.addAll(followUpRead.completedRead.matches());
-                followupReads.put(followUpRead.key.getKey(), followUpRead);
-            }
-
-            try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(CloseablePeekingIterator.wrap(matches.iterator()), followupReads))
-            {
-                PartitionIterator filtered = filter(iterator);
-                return TrackedDataResponse.create(filtered, command.columnFilter());
-            }
+            PartitionIterator counted = Transformation.apply(filtered, mergedResultCounter);
+            PartitionIterator result = Transformation.apply(counted, new EmptyPartitionsDiscarder());
+            return result;
         }
 
         @Override
         public TrackedDataResponse response()
         {
-            try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(CloseablePeekingIterator.wrap(matches.iterator()), followupReads))
+            try (UnfilteredResultIterator iterator = new UnfilteredResultIterator(matchIterator, followupReads))
             {
                 PartitionIterator filtered = filter(iterator);
                 return TrackedDataResponse.create(filtered, command.columnFilter());
@@ -674,15 +848,15 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         }
 
         @Override
-        public Future<TrackedDataResponse> followupRead(TrackedDataResponse initialResponse, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+        protected boolean followUpRequired()
         {
-            // TODO: add normal short read protection support
-            return null;
+            return matchIterator.followUpRequired || super.followUpRequired();
         }
 
         @Override
         public void close()
         {
+            FileUtils.closeQuietly(matchIterator);
             FileUtils.closeQuietly(followupReads.values());
         }
 

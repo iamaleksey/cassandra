@@ -399,7 +399,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
             @Override
             protected CompletedRead extendRead(UnfilteredPartitionIterator iterator)
             {
-                return new ExtendingCompletedRead(command, iterator, shortReadSupport.partitionsFetched, shortReadSupport.initialIteratorExhausted, shortReadSupport.followUpBounds);
+                return new ExtendingCompletedRead.RangeRead(command, iterator, shortReadSupport.partitionsFetched, shortReadSupport.initialIteratorExhausted, shortReadSupport.followUpBounds);
             }
         }
 
@@ -521,7 +521,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
             }
         }
 
-        class FilteredCompletedRead extends ExtendingCompletedRead
+        class FilteredCompletedRead extends ExtendingCompletedRead.RangeRead
         {
             private final DecoratedKey lastMatchingKey;
             private final SortedMap<DecoratedKey, FollowUpReadInfo> followUpReadInfo;
