@@ -149,7 +149,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
             // be relatively small so it's much better than the previous code that was materializing all
             // *data* for a given partition.
             BTreeSet.Builder<Clustering<?>> clusterings = BTreeSet.builder(index.baseCfs.getComparator());
-            while (matches.hasNext() && partitionKey.getKey().equals(matches.peek().indexedKey))
+            while (matches.hasNext() && partitionKey.equals(matches.peek().indexedKey))
             {
                 // We're queried a slice of the index, and some hits may not match some of the clustering column constraints,
                 // but they will have been filtered out upstream
@@ -262,7 +262,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
                         // be relatively small so it's much better than the previous code that was materializing all
                         // *data* for a given partition.
                         BTreeSet.Builder<Clustering<?>> clusterings = BTreeSet.builder(index.baseCfs.getComparator());
-                        while (nextEntry != null && partitionKey.getKey().equals(nextEntry.indexedKey))
+                        while (nextEntry != null && partitionKey.equals(nextEntry.indexedKey))
                         {
                             // We're queried a slice of the index, but some hits may not match some of the clustering column constraints
                             if (isMatchingEntry(partitionKey, nextEntry, command))
