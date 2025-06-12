@@ -21,9 +21,11 @@
 package org.apache.cassandra.index.internal;
 
 import java.nio.ByteBuffer;
+import java.util.Optional;
 import java.util.SortedSet;
 import java.util.function.Consumer;
 
+import com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,7 +151,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
     private final RowFilter.Expression expression;
     protected final CassandraIndex index;
     protected final ReadCommand command;
-    protected final DecoratedKey indexKey;
+    protected final DecoratedKey indexedKey;
 
     public CassandraIndexSearcher(ReadCommand command,
                                   RowFilter.Expression expression,
@@ -158,7 +160,9 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         this.command = command;
         this.expression = expression;
         this.index = index;
-        this.indexKey = index.getBackingTable().get().decorateKey(expression.getIndexValue());
+        Optional<ColumnFamilyStore> backingTable = index.getBackingTable();
+        Preconditions.checkState(backingTable.isPresent());
+        this.indexedKey = backingTable.get().decorateKey(expression.getIndexValue());
     }
 
     @Override

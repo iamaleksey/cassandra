@@ -72,7 +72,7 @@ public class KeysSearcher extends CassandraIndexSearcher<IndexEntry>
     @Override
     public CloseablePeekingIterator<IndexEntry> matchIterator(ReadExecutionController executionController)
     {
-        RowIterator indexHits = queryIndex(indexKey, executionController);
+        RowIterator indexHits = queryIndex(indexedKey, executionController);
         try
         {
             Preconditions.checkState(indexHits.staticRow() == Rows.EMPTY_STATIC_ROW);
@@ -88,7 +88,7 @@ public class KeysSearcher extends CassandraIndexSearcher<IndexEntry>
                         if (!command.selectsKey(key))
                             continue;
 
-                        return new IndexEntry(indexKey, hit.clustering(), hit.primaryKeyLivenessInfo().timestamp(), key, Clustering.EMPTY);
+                        return new IndexEntry(indexedKey, hit.clustering(), hit.primaryKeyLivenessInfo().timestamp(), key, Clustering.EMPTY);
                     }
                     return endOfData();
                 }
@@ -131,7 +131,7 @@ public class KeysSearcher extends CassandraIndexSearcher<IndexEntry>
         // by the next caller of next, or through closing this iterator is this come before.
         return filterIfStale(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
                              entry.timestamp,
-                             indexKey.getKey(),
+                             indexedKey.getKey(),
                              executionController.getWriteContext(),
                              command.nowInSec());
     }

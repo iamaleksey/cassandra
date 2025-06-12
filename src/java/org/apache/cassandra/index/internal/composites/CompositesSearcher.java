@@ -83,7 +83,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
     @Override
     public CloseablePeekingIterator<IndexEntry> matchIterator(ReadExecutionController executionController)
     {
-        RowIterator indexHits = queryIndex(indexKey, executionController);
+        RowIterator indexHits = queryIndex(indexedKey, executionController);
         try
         {
             Preconditions.checkState(indexHits.staticRow() == Rows.EMPTY_STATIC_ROW);
@@ -94,7 +94,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
                 {
                     while (indexHits.hasNext())
                     {
-                        IndexEntry nextEntry = index.decodeEntry(indexKey, indexHits.next());
+                        IndexEntry nextEntry = index.decodeEntry(indexedKey, indexHits.next());
                         DecoratedKey partitionKey = nextEntry.indexedKey;
                         if (!isMatchingEntry(partitionKey, nextEntry, command))
                             continue;
@@ -175,7 +175,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
 
         // by the next caller of next, or through closing this iterator is this come before.
         return filterStaleEntries(dataCmd.queryMemtableAndDisk(view, index.baseCfs, executionController),
-                                  indexKey.getKey(),
+                                  indexedKey.getKey(),
                                   entries,
                                   executionController.getWriteContext(),
                                   command.nowInSec());
@@ -292,11 +292,11 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
 
                     // by the next caller of next, or through closing this iterator is this come before.
                     UnfilteredRowIterator dataIter =
-                    filterStaleEntries(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
-                                       indexKey.getKey(),
-                                       entries,
-                                       executionController.getWriteContext(),
-                                       command.nowInSec());
+                        filterStaleEntries(dataCmd.queryMemtableAndDisk(index.baseCfs, executionController),
+                                           indexKey.getKey(),
+                                           entries,
+                                           executionController.getWriteContext(),
+                                           command.nowInSec());
 
                     if (dataIter.isEmpty())
                     {
@@ -326,10 +326,10 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
     private void deleteAllEntries(final List<IndexEntry> entries, final WriteContext ctx, final long nowInSec)
     {
         entries.forEach(entry ->
-                        index.deleteStaleEntry(entry.indexValue,
-                                               entry.indexClustering,
-                                               DeletionTime.build(entry.timestamp, nowInSec),
-                                               ctx));
+            index.deleteStaleEntry(entry.indexValue,
+                                   entry.indexClustering,
+                                   DeletionTime.build(entry.timestamp, nowInSec),
+                                   ctx));
     }
 
     // We assume all rows in dataIter belong to the same partition.
@@ -423,7 +423,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
                 private boolean containsOnlyNullValues(Clustering<?> indexedEntryClustering)
                 {
                     int i = 0;
-                    for (; i < indexedEntryClustering.size() && indexedEntryClustering.get(i) == null; i++) ;
+                    for (; i < indexedEntryClustering.size() && indexedEntryClustering.get(i) == null; i++);
                     return i == indexedEntryClustering.size();
                 }
 
