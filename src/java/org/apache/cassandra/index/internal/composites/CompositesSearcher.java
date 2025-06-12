@@ -57,7 +57,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
         return new AbstractMatchIndexer<IndexEntry>()
         {
             @Override
-            protected IndexEntry createMatch(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+            protected IndexEntry createMatch(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
             {
                 return index.createIndexEntry(rowKey, clustering, cell, info);
             }
@@ -95,7 +95,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
                     while (indexHits.hasNext())
                     {
                         IndexEntry nextEntry = index.decodeEntry(indexKey, indexHits.next());
-                        DecoratedKey partitionKey = index.baseCfs.decorateKey(nextEntry.indexedKey);
+                        DecoratedKey partitionKey = nextEntry.indexedKey;
                         if (!isMatchingEntry(partitionKey, nextEntry, command))
                             continue;
 
@@ -230,7 +230,7 @@ public class CompositesSearcher extends CassandraIndexSearcher<IndexEntry>
                     }
 
                     SinglePartitionReadCommand dataCmd;
-                    DecoratedKey partitionKey = index.baseCfs.decorateKey(nextEntry.indexedKey);
+                    DecoratedKey partitionKey = nextEntry.indexedKey;
                     List<IndexEntry> entries = new ArrayList<>();
                     if (isStaticColumn())
                     {

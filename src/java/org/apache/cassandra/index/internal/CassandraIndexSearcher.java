@@ -88,27 +88,27 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         }
 
         @Override
-        ByteBuffer key()
+        DecoratedKey key()
         {
-            return key.getKey();
+            return key;
         }
 
-        protected abstract M createMatch(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info);
+        protected abstract M createMatch(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info);
 
         @Override
-        void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+        void insert(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
         {
             indexTo.accept(createMatch(rowKey, clustering, cell, info));
         }
 
         @Override
-        void delete(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec)
+        void delete(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec)
         {
 
         }
 
         @Override
-        void delete(ByteBuffer rowKey, Clustering<?> clustering, DeletionTime deletion)
+        void delete(DecoratedKey rowKey, Clustering<?> clustering, DeletionTime deletion)
         {
 
         }

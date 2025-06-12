@@ -365,11 +365,11 @@ public abstract class CassandraIndex implements Index
         }
 
         abstract long nowInSec();
-        abstract ByteBuffer key();
+        abstract DecoratedKey key();
 
-        abstract void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info);
-        abstract void delete(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec);
-        abstract void delete(ByteBuffer rowKey, Clustering<?> clustering, DeletionTime deletion);
+        abstract void insert(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info);
+        abstract void delete(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec);
+        abstract void delete(DecoratedKey rowKey, Clustering<?> clustering, DeletionTime deletion);
 
         public void insertRow(Row row)
         {
@@ -528,27 +528,27 @@ public abstract class CassandraIndex implements Index
             }
 
             @Override
-            ByteBuffer key()
+            DecoratedKey key()
             {
-                return key.getKey();
+                return key;
             }
 
             @Override
-            void insert(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+            void insert(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
             {
-                CassandraIndex.this.insert(rowKey, clustering, cell, info, ctx);
+                CassandraIndex.this.insert(rowKey.getKey(), clustering, cell, info, ctx);
             }
 
             @Override
-            void delete(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec)
+            void delete(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, long nowInSec)
             {
-                CassandraIndex.this.delete(rowKey, clustering, cell, ctx, nowInSec);
+                CassandraIndex.this.delete(rowKey.getKey(), clustering, cell, ctx, nowInSec);
             }
 
             @Override
-            void delete(ByteBuffer rowKey, Clustering<?> clustering, DeletionTime deletion)
+            void delete(DecoratedKey rowKey, Clustering<?> clustering, DeletionTime deletion)
             {
-                CassandraIndex.this.delete(rowKey, clustering, deletion, ctx);
+                CassandraIndex.this.delete(rowKey.getKey(), clustering, deletion, ctx);
             }
         };
     }
@@ -570,12 +570,12 @@ public abstract class CassandraIndex implements Index
         logger.trace("Removed index entry for stale value {}", indexKey);
     }
 
-    public IndexEntry createIndexEntry(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+    public IndexEntry createIndexEntry(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
     {
-        DecoratedKey indexKey = getIndexKeyFor(getIndexedValue(rowKey,
+        DecoratedKey indexKey = getIndexKeyFor(getIndexedValue(rowKey.getKey(),
                                                                clustering,
                                                                cell));
-        Clustering<?> indexClustering = buildIndexClustering(rowKey, clustering, cell);
+        Clustering<?> indexClustering = buildIndexClustering(rowKey.getKey(), clustering, cell);
         return new IndexEntry(indexKey, indexClustering, info.timestamp(), rowKey, clustering);
     }
 

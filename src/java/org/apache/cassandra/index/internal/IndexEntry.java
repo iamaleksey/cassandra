@@ -20,8 +20,6 @@
  */
 package org.apache.cassandra.index.internal;
 
-import java.nio.ByteBuffer;
-
 import org.apache.cassandra.db.Clustering;
 import org.apache.cassandra.db.DecoratedKey;
 import org.apache.cassandra.index.Index;
@@ -38,13 +36,13 @@ public final class IndexEntry implements Index.IndexMatch
     public final Clustering<?> indexClustering;
     public final long timestamp;
 
-    public final ByteBuffer indexedKey;
+    public final DecoratedKey indexedKey;
     public final Clustering<?> indexedEntryClustering;
 
     public IndexEntry(DecoratedKey indexValue,
                       Clustering<?> indexClustering,
                       long timestamp,
-                      ByteBuffer indexedKey,
+                      DecoratedKey indexedKey,
                       Clustering<?> indexedEntryClustering)
     {
         this.indexValue = indexValue;
@@ -55,7 +53,7 @@ public final class IndexEntry implements Index.IndexMatch
     }
 
     @Override
-    public ByteBuffer baseKey()
+    public DecoratedKey key()
     {
         return indexedKey;
     }
@@ -70,9 +68,7 @@ public final class IndexEntry implements Index.IndexMatch
         if (cmp != 0)
             return cmp;
 
-        DecoratedKey dkLeft = baseMetadata.partitioner.decorateKey(left.indexedKey);
-        DecoratedKey dkRight = baseMetadata.partitioner.decorateKey(right.indexedKey);
-        cmp = dkLeft.compareTo(dkRight);
+        cmp = left.indexedKey.compareTo(right.indexedKey);
         if (cmp != 0)
             return cmp;
 

@@ -56,7 +56,7 @@ public class KeysSearcher extends CassandraIndexSearcher<IndexEntry>
         return new AbstractMatchIndexer<IndexEntry>()
         {
             @Override
-            protected IndexEntry createMatch(ByteBuffer rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
+            protected IndexEntry createMatch(DecoratedKey rowKey, Clustering<?> clustering, Cell<?> cell, LivenessInfo info)
             {
                 return index.createIndexEntry(rowKey, clustering, cell, info);
             }
@@ -88,7 +88,7 @@ public class KeysSearcher extends CassandraIndexSearcher<IndexEntry>
                         if (!command.selectsKey(key))
                             continue;
 
-                        return new IndexEntry(indexKey, hit.clustering(), hit.primaryKeyLivenessInfo().timestamp(), key.getKey(), Clustering.EMPTY);
+                        return new IndexEntry(indexKey, hit.clustering(), hit.primaryKeyLivenessInfo().timestamp(), key, Clustering.EMPTY);
                     }
                     return endOfData();
                 }
