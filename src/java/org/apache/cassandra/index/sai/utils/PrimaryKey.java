@@ -466,9 +466,9 @@ public interface PrimaryKey extends Comparable<PrimaryKey>, ByteComparable, Inde
     DecoratedKey partitionKey();
 
     @Override
-    default ByteBuffer baseKey()
+    default DecoratedKey key()
     {
-        return partitionKey().getKey();
+        return partitionKey();
     }
 
     /**

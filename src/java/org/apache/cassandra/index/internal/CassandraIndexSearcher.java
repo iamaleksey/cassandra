@@ -218,7 +218,7 @@ public abstract class CassandraIndexSearcher<Match extends Index.IndexMatch> imp
         {
             while (matchIterator.hasNext())
             {
-                DecoratedKey key = index.baseCfs.decorateKey(matchIterator.peek().baseKey());
+                DecoratedKey key = matchIterator.peek().key();
                 ReadableView view = index.baseCfs.select(View.select(SSTableSet.LIVE, key));
                 UnfilteredRowIterator partition = queryNextMatches(executionController, key, view, matchIterator);
 

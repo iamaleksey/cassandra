@@ -18,7 +18,6 @@
 
 package org.apache.cassandra.service.reads.tracked;
 
-import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -128,7 +127,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     public interface CompletedIndexRead<Match extends IndexMatch> extends CompletedRead
     {
-        CompletedIndexPartitionRead<Match> partitionRead(ByteBuffer key);
+        CompletedIndexPartitionRead<Match> partitionRead(DecoratedKey key);
         CloseablePeekingIterator<Match> matchIterator();
     }
 
@@ -159,7 +158,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             this.promise = promise;
             this.read = read;
             this.completedRead = (CompletedIndexRead<Match>) read.complete();
-            this.partitionRead = Preconditions.checkNotNull(completedRead.partitionRead(key.getKey()));
+            this.partitionRead = Preconditions.checkNotNull(completedRead.partitionRead(key));
             this.consistencyLevel = consistencyLevel;
             this.expiresAtNanos = expiresAtNanos;
         }
@@ -192,7 +191,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         public UnfilteredRowIterator readHit(CloseablePeekingIterator<Match> matchIterator)
         {
             Preconditions.checkState(matchIterator.hasNext());
-            Preconditions.checkState(matchIterator.peek().baseKey().equals(key.getKey()));
+            Preconditions.checkState(matchIterator.peek().key().equals(key));
             return partitionRead.readHit(matchIterator);
         }
 
@@ -202,7 +201,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             read.close();
         }
 
-        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> void close(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> void close(Map<DecoratedKey, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
             for (Future<FollowUpRead<Match, Searcher>> future : followUpReads.values())
             {
@@ -213,16 +212,16 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             }
         }
 
-        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Map<ByteBuffer, FollowUpRead<Match, Searcher>> getResults(Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> futures, List<CloseablePeekingIterator<Match>> matchIterators)
+        static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Map<DecoratedKey, FollowUpRead<Match, Searcher>> getResults(Map<DecoratedKey, Future<FollowUpRead<Match, Searcher>>> futures, List<CloseablePeekingIterator<Match>> matchIterators)
         {
-            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
+            Map<DecoratedKey, FollowUpRead<Match, Searcher>> followupReads = new HashMap<>();
             for (Future<FollowUpRead<Match, Searcher>> future : futures.values())
             {
                 try
                 {
                     FollowUpRead<Match, Searcher> followUpRead = future.get();
                     matchIterators.add(followUpRead.completedRead.matchIterator());
-                    followupReads.put(followUpRead.key.getKey(), followUpRead);
+                    followupReads.put(followUpRead.key, followUpRead);
                 }
                 catch (ExecutionException e)
                 {
@@ -381,26 +380,25 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         public UnfilteredRowIterator readHit(CloseablePeekingIterator<Match> matchIterator)
         {
             Preconditions.checkArgument(matchIterator.hasNext());
-            Preconditions.checkArgument(matchIterator.peek().baseKey().equals(partitionKey.getKey()));
+            Preconditions.checkArgument(matchIterator.peek().key().equals(partitionKey));
             return searcher.queryNextMatches(executionController, partitionKey, view, matchIterator);
         }
     }
 
-    IndexPartitionRead createRead(ByteBuffer key, ColumnFamilyStore cfs)
+    IndexPartitionRead createRead(DecoratedKey key, ColumnFamilyStore cfs)
     {
-        DecoratedKey partitionKey = command.metadata().partitioner.decorateKey(key);
-        SnapshotView view = SnapshotView.create(partitionKey, cfs);
-        return new IndexPartitionRead(partitionKey, view);
+        SnapshotView view = SnapshotView.create(key, cfs);
+        return new IndexPartitionRead(key, view);
     }
 
     @Override
     protected Prepared prepareInternal(UnfilteredPartitionIterator initialData)
     {
-        SortedMap<ByteBuffer, IndexPartitionRead> reads = new TreeMap<>();
+        SortedMap<DecoratedKey, IndexPartitionRead> reads = new TreeMap<>();
         if (command instanceof SinglePartitionReadCommand)
         {
             SinglePartitionReadCommand cmd = (SinglePartitionReadCommand) command;
-            ByteBuffer key = cmd.partitionKey().getKey();
+            DecoratedKey key = cmd.partitionKey();
             IndexPartitionRead partitionRead = createRead(key, cfs);
             reads.put(key, partitionRead);
         }
@@ -414,15 +412,15 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             {
                 Match match = matchIterator.next();
                 materializedMatches.add(match);
-                if (!reads.containsKey(match.baseKey()))
+                if (!reads.containsKey(match.key()))
                 {
                     // TODO (now): make decorated key part of IndexEntry interface
-                    DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                    DecoratedKey key = match.key();
                     maxKey = maxKey(maxKey, key);
 
-                    IndexPartitionRead partitionRead = createRead(match.baseKey(), cfs);
+                    IndexPartitionRead partitionRead = createRead(key, cfs);
 
-                    reads.put(match.baseKey(), partitionRead);
+                    reads.put(key, partitionRead);
                 }
             }
             return new IndexPrepared(maxKey, materializedMatches, matchIterator, reads);
@@ -461,18 +459,18 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         // starting a short read
         protected final CloseablePeekingIterator<Match> additionalMatches;
 
-        protected final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+        protected final SortedMap<DecoratedKey, IndexPartitionRead> reads;
 
         // for range scans, if we learn of new keys with matching contents as part of reconciliation, we need
         // to do follow up reads against them since we didn't snapshot memtable contents for the keys during
         // the prepare phase of the read. Futures for those reads are kept here
-        protected final Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads;
+        protected final Map<DecoratedKey, Future<FollowUpRead<Match, Searcher>>> followUpReads;
 
         public AbstractIndexPrepared(DecoratedKey maxKey,
                                      SortedSet<Match> materializedMatches,
                                      CloseablePeekingIterator<Match> additionalMatches,
-                                     SortedMap<ByteBuffer, IndexPartitionRead> reads,
-                                     Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+                                     SortedMap<DecoratedKey, IndexPartitionRead> reads,
+                                     Map<DecoratedKey, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
             this.maxKey = maxKey;
             this.materializedMatches = materializedMatches;
@@ -492,7 +490,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             Preconditions.checkState(isCompletable());
             List<CloseablePeekingIterator<Match>> matchIterators = new ArrayList<>(followUpReads.size() + 1);
             matchIterators.add(CloseablePeekingIterator.wrap(materializedMatches.iterator()));
-            Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpResults = FollowUpRead.getResults(followUpReads, matchIterators);
+            Map<DecoratedKey, FollowUpRead<Match, Searcher>> followUpResults = FollowUpRead.getResults(followUpReads, matchIterators);
             return new IndexCompleted(maxKey, new MergingMatchIterator(matchIterators), additionalMatches, reads, followUpResults);
         }
 
@@ -510,7 +508,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     {
         private Index.MatchIndexer<Match> matchIndexer = null;
 
-        public IndexPrepared(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads)
+        public IndexPrepared(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<DecoratedKey, IndexPartitionRead> reads)
         {
             super(maxKey, materializedMatches, additionalMatches, reads, new HashMap<>());
         }
@@ -541,7 +539,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         {
             Preconditions.checkState(consistencyLevel != null,
                                      "PartialTrackedRead#setFollowUpReadContext needs to be called before making reads available for augmenting mutation");
-            ByteBuffer key = update.partitionKey().getKey();
+            DecoratedKey key = update.partitionKey();
             IndexPartitionRead read = reads.get(key);
             if (read == null)
             {
@@ -571,7 +569,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
     private class IndexPreComplete extends AbstractIndexPrepared
     {
-        public IndexPreComplete(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, Future<FollowUpRead<Match, Searcher>>> followUpReads)
+        public IndexPreComplete(DecoratedKey maxKey, SortedSet<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<DecoratedKey, IndexPartitionRead> reads, Map<DecoratedKey, Future<FollowUpRead<Match, Searcher>>> followUpReads)
         {
             super(maxKey, materializedMatches, additionalMatches, reads, followUpReads);
         }
@@ -599,10 +597,10 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         private final DecoratedKey maxKey;
         private final CloseablePeekingIterator<Match> materializedMatchIterator;
         private final CloseablePeekingIterator<Match> additionalMatchIterator;
-        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
-        private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
+        private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
+        private final Map<DecoratedKey, FollowUpRead<Match, Searcher>> followUpReads;
 
-        public IndexCompleted(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatchIterator, CloseablePeekingIterator<Match> additionalMatchIterator, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
+        public IndexCompleted(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatchIterator, CloseablePeekingIterator<Match> additionalMatchIterator, SortedMap<DecoratedKey, IndexPartitionRead> reads, Map<DecoratedKey, FollowUpRead<Match, Searcher>> followUpReads)
         {
             this.maxKey = maxKey;
             this.materializedMatchIterator = materializedMatchIterator;
@@ -713,7 +711,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
                 else
                 {
                     Match match = additionalIterator.next();
-                    DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                    DecoratedKey key = match.key();
                     Preconditions.checkArgument(key.compareTo(maxKey) <= 0);
                     return match;
                 }
@@ -725,7 +723,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             if (additionalIterator.hasNext())
             {
                 Match match = additionalIterator.next();
-                DecoratedKey key = command.metadata().partitioner.decorateKey(match.baseKey());
+                DecoratedKey key = match.key();
                 if (key.compareTo(maxKey) > 0)
                 {
                     Preconditions.checkArgument(command.isRangeRequest());
@@ -749,11 +747,11 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     {
         private final DecoratedKey maxKey;
         private final MergingStoppingMatchIterator matchIterator;
-        private final SortedMap<ByteBuffer, IndexPartitionRead> reads;
+        private final SortedMap<DecoratedKey, IndexPartitionRead> reads;
 
-        private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads;
+        private final Map<DecoratedKey, FollowUpRead<Match, Searcher>> followupReads;
 
-        public IndexCompletedRead(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<ByteBuffer, IndexPartitionRead> reads, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followupReads)
+        public IndexCompletedRead(DecoratedKey maxKey, CloseablePeekingIterator<Match> materializedMatches, CloseablePeekingIterator<Match> additionalMatches, SortedMap<DecoratedKey, IndexPartitionRead> reads, Map<DecoratedKey, FollowUpRead<Match, Searcher>> followupReads)
         {
             super(command, materializedMatches.hasNext(), true);
             this.maxKey = maxKey;
@@ -787,10 +785,10 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
 
         private class UnfilteredResultIterator extends AbstractIterator<UnfilteredRowIterator> implements UnfilteredPartitionIterator
         {
-            private final Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads;
+            private final Map<DecoratedKey, FollowUpRead<Match, Searcher>> followUpReads;
             private final CloseablePeekingIterator<Match> matchIter;
 
-            public UnfilteredResultIterator(CloseablePeekingIterator<Match> matchIter, Map<ByteBuffer, FollowUpRead<Match, Searcher>> followUpReads)
+            public UnfilteredResultIterator(CloseablePeekingIterator<Match> matchIter, Map<DecoratedKey, FollowUpRead<Match, Searcher>> followUpReads)
             {
                 this.matchIter = matchIter;
                 this.followUpReads = followUpReads;
@@ -810,14 +808,14 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
                     if (!matchIter.hasNext())
                         return endOfData();
 
-                    ByteBuffer nextKey = matchIter.peek().baseKey();
+                    DecoratedKey nextKey = matchIter.peek().key();
                     IndexPartitionRead read = reads.get(nextKey);
                     if (read != null)
                         return read.readHit(matchIter);
 
                     FollowUpRead<Match, Searcher> followUpRead = followUpReads.get(nextKey);
                     if (followUpRead == null)
-                        throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(nextKey));
+                        throw new IllegalStateException("Received match for key without initial or followup read: " + ByteBufferUtil.bytesToHex(nextKey.getKey()));
 
                     UnfilteredRowIterator next = followUpRead.readHit(matchIter);
                     if (next != null)
@@ -868,7 +866,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         }
 
         @Override
-        public CompletedIndexPartitionRead<Match> partitionRead(ByteBuffer key)
+        public CompletedIndexPartitionRead<Match> partitionRead(DecoratedKey key)
         {
             return reads.get(key);
         }
