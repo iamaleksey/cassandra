@@ -67,7 +67,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
 
     protected final PartitionRangeReadCommand command;
 
-    PartialTrackedRangeRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, PartitionRangeReadCommand command)
+    private PartialTrackedRangeRead(ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos, PartitionRangeReadCommand command)
     {
         super(executionController, cfs, startTimeNanos);
         this.command = command;
@@ -521,7 +521,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
             }
         }
 
-        class FilteredCompletedRead extends ExtendingCompletedRead
+        static class FilteredCompletedRead extends ExtendingCompletedRead
         {
             private final DecoratedKey lastMatchingKey;
             private final SortedMap<DecoratedKey, FollowUpReadInfo> followUpReadInfo;

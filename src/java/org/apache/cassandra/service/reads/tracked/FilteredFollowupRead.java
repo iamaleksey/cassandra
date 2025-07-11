@@ -96,7 +96,7 @@ class FilteredFollowupRead extends AsyncPromise<TrackedDataResponse>
             FollowUpReadInfo info = followUpReadInfo.get(key);
             remaining -= info.potentialMatches;
             SinglePartitionReadCommand cmd = SinglePartitionReadCommand.fromRangeRead(key, command, command.limits().forShortReadRetry(toQuery));
-            TrackedRead.Partition read = TrackedRead.create(metadata, cmd, consistencyLevel);
+            TrackedRead.Partition read = TrackedRead.Partition.create(metadata, cmd, consistencyLevel);
             read.start(expiresAtNanos);
             futures.add(read.future());
         }

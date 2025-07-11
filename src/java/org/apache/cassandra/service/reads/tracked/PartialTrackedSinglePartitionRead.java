@@ -42,20 +42,17 @@ public class PartialTrackedSinglePartitionRead extends AbstractPartialTrackedRea
 {
     private final Index.Searcher searcher;
     private final SinglePartitionReadCommand command;
-    private final UnfilteredPartitionIterator initialData;
-    private SimpleBTreePartition augmentedData;
 
-    public PartialTrackedSinglePartitionRead(ReadExecutionController executionController, Index.Searcher searcher, ColumnFamilyStore cfs, long startTimeNanos, SinglePartitionReadCommand command, UnfilteredPartitionIterator initialData)
+    public PartialTrackedSinglePartitionRead(ReadExecutionController executionController, Index.Searcher searcher, ColumnFamilyStore cfs, long startTimeNanos, SinglePartitionReadCommand command)
     {
         super(executionController, cfs, startTimeNanos);
         this.searcher = searcher;
         this.command = command;
-        this.initialData = initialData;
     }
 
     public static PartialTrackedSinglePartitionRead create(ReadExecutionController executionController, Index.Searcher searcher, ColumnFamilyStore cfs, long startTimeNanos, SinglePartitionReadCommand command, UnfilteredPartitionIterator initialData)
     {
-        PartialTrackedSinglePartitionRead read = new PartialTrackedSinglePartitionRead(executionController, searcher, cfs, startTimeNanos, command, initialData);
+        PartialTrackedSinglePartitionRead read = new PartialTrackedSinglePartitionRead(executionController, searcher, cfs, startTimeNanos, command);
         try
         {
             read.prepare(initialData);

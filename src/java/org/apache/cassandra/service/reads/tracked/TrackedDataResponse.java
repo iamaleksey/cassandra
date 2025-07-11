@@ -59,11 +59,7 @@ public class TrackedDataResponse
 
     public TrackedDataResponse merge(TrackedDataResponse that)
     {
-        Preconditions.checkArgument(serializationVersion == that.serializationVersion);
-        List<ByteBuffer> newData = new ArrayList<>(data.size() + that.data.size());
-        newData.addAll(data);
-        newData.addAll(that.data);
-        return new TrackedDataResponse(serializationVersion, newData);
+        return merge(this, that);
     }
 
     public static TrackedDataResponse merge(TrackedDataResponse l, TrackedDataResponse r)
@@ -78,10 +74,13 @@ public class TrackedDataResponse
     public static TrackedDataResponse merge(List<TrackedDataResponse> responses)
     {
         Preconditions.checkArgument(!responses.isEmpty());
-        int serializationVersion = responses.get(0).serializationVersion;
-        int size = 0;
-        for (int i=0,mi=responses.size(); i<mi; i++)
+
+        int version = responses.get(0).serializationVersion;
+        int size = responses.get(0).data.size();
+
+        for (int i=1,mi=responses.size(); i<mi; i++)
         {
+            Preconditions.checkState(responses.get(i).serializationVersion == version);
             size += responses.get(i).data.size();
         }
 
@@ -89,7 +88,7 @@ public class TrackedDataResponse
         for (int i=0,mi=responses.size(); i<mi; i++)
             newData.addAll(responses.get(i).data);
 
-        return new TrackedDataResponse(serializationVersion, newData);
+        return new TrackedDataResponse(version, newData);
     }
 
     public static TrackedDataResponse create(PartitionIterator iter, ColumnFilter selection)
@@ -139,7 +138,7 @@ public class TrackedDataResponse
         return counter.applyTo(makeIteratorUnlimited(command));
     }
 
-    public static final IVersionedSerializer<TrackedDataResponse> serializer = new IVersionedSerializer<TrackedDataResponse>()
+    public static final IVersionedSerializer<TrackedDataResponse> serializer = new IVersionedSerializer<>()
     {
         @Override
         public void serialize(TrackedDataResponse response, DataOutputPlus out, int version) throws IOException

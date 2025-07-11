@@ -208,8 +208,6 @@ public class RowFilter implements Iterable<RowFilter.Expression>
         private final long nowInSec;
         private final List<Expression> partitionLevelExpressions = new ArrayList<>();
         private final List<Expression> rowLevelExpressions = new ArrayList<>();
-        private final long numberOfRegularColumnExpressions;
-        private final boolean filterNonStaticColumns;
         private DecoratedKey pk;
 
         private RowFilterTransformation(RowFilter filter, TableMetadata metadata, long nowInSec)
@@ -223,8 +221,6 @@ public class RowFilter implements Iterable<RowFilter.Expression>
                 else
                     rowLevelExpressions.add(e);
             }
-            numberOfRegularColumnExpressions = rowLevelExpressions.size();
-            filterNonStaticColumns = numberOfRegularColumnExpressions > 0;
         }
 
         public int potentialMatches(PartitionUpdate update)
@@ -270,16 +266,19 @@ public class RowFilter implements Iterable<RowFilter.Expression>
 
             // Short-circuit all partitions that won't match based on static and partition keys
             for (Expression e : partitionLevelExpressions)
+            {
                 if (!e.isSatisfiedBy(metadata, partition.partitionKey(), partition.staticRow(), nowInSec))
                 {
                     partition.close();
                     return null;
                 }
+            }
 
             BaseRowIterator<?> iterator = partition instanceof UnfilteredRowIterator
                                           ? Transformation.apply((UnfilteredRowIterator) partition, this)
                                           : Transformation.apply((RowIterator) partition, this);
 
+            boolean filterNonStaticColumns = !rowLevelExpressions.isEmpty();
             if (filterNonStaticColumns && !iterator.hasNext())
             {
                 iterator.close();

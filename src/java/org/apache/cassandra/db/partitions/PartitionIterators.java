@@ -106,7 +106,7 @@ public abstract class PartitionIterators
      */
     public static PartitionIterator mergeNonOverlapping(List<PartitionIterator> iterators)
     {
-        MergeIterator.Reducer<RowIterator, RowIterator> reducer = new MergeIterator.Reducer<RowIterator, RowIterator>()
+        MergeIterator.Reducer<RowIterator, RowIterator> reducer = new MergeIterator.Reducer<>()
         {
             RowIterator current;
 
@@ -133,8 +133,7 @@ public abstract class PartitionIterators
             }
         };
 
-        Comparator<RowIterator> comparator = Comparator.comparing(p -> p.partitionKey());
-        MergeIterator<RowIterator, RowIterator> mergeIterator = MergeIterator.get(iterators, comparator, reducer);
+        MergeIterator<RowIterator, RowIterator> mergeIterator = MergeIterator.get(iterators, rowIteratorComparator, reducer);
 
         return new AbstractPartitionIterator()
         {
@@ -145,6 +144,7 @@ public abstract class PartitionIterators
             }
         };
     }
+    private static final Comparator<RowIterator> rowIteratorComparator = Comparator.comparing(BaseRowIterator::partitionKey);
 
     /**
      * Consumes all rows in the next partition of the provided partition iterator.
@@ -271,5 +271,5 @@ public abstract class PartitionIterators
                 }
             };
         }
-    };
+    }
 }

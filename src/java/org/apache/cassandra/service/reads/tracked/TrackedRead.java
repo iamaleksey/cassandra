@@ -177,25 +177,6 @@ public abstract class TrackedRead<E extends Endpoints<E>, P extends ReplicaPlan.
         return command.dataRange().contains(key);
     }
 
-    public static Partition create(ClusterMetadata metadata,
-                                   SinglePartitionReadCommand command,
-                                   ConsistencyLevel consistencyLevel)
-    {
-        Preconditions.checkArgument(command.metadata().replicationType().isTracked());
-        Keyspace keyspace = Keyspace.open(command.metadata().keyspace);
-        ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(command.metadata().id);
-        SpeculativeRetryPolicy retry = cfs.metadata().params.speculativeRetry;
-
-        ReplicaPlan.ForTokenRead replicaPlan = ReplicaPlans.forRead(metadata,
-                                                                    keyspace,
-                                                                    command.partitionKey().getToken(),
-                                                                    command.indexQueryPlan(),
-                                                                    consistencyLevel,
-                                                                    retry);
-
-        return new Partition(command, replicaPlan, consistencyLevel);
-    }
-
     public static class Partition extends TrackedRead<EndpointsForToken, ReplicaPlan.ForTokenRead>
     {
         private Partition(SinglePartitionReadCommand command, ReplicaPlan.AbstractForRead<EndpointsForToken, ReplicaPlan.ForTokenRead> replicaPlan, ConsistencyLevel consistencyLevel)

@@ -18,9 +18,6 @@
 
 package org.apache.cassandra.service.reads.tracked;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import com.google.common.base.Preconditions;
 
 import org.slf4j.Logger;
@@ -99,10 +96,7 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
 
         Augmentable asAugmentable()
         {
-            if (isPrepared())
-                return asPrepared();
-            if (isInitialized())
-                return asInitialized();
+            if (isPrepared()) return asPrepared();
             throw new IllegalStateException("State is " + name() + ", not augmentable");
         }
 
@@ -113,15 +107,13 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
 
         void close()
         {
-
         }
     }
 
-    protected final class Initialized extends State implements Augmentable
+    // TODO (expected): this is a redundant state, never exposed
+    protected final class Initialized extends State
     {
         static final String NAME = "initialized";
-
-        List<PartitionUpdate> queuedUpdates = new ArrayList<>();
 
         @Override
         String name()
@@ -141,20 +133,9 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
             return this;
         }
 
-        @Override
-        public State augment(PartitionUpdate update)
-        {
-            logger.trace("queueing update on {}", AbstractPartialTrackedRead.this);
-            queuedUpdates.add(update);
-            return this;
-        }
-
-
         Prepared prepare(UnfilteredPartitionIterator initialData)
         {
-            Prepared prepared = prepareInternal(initialData);
-            queuedUpdates.forEach(prepared::augment);
-            return prepared;
+            return prepareInternal(initialData);
         }
     }
 
@@ -246,6 +227,7 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
 
     /**
      * Implementors need to call this before returning this from createInProgressRead
+     * TODO (expected): this is a redundant transition from a redundant state (INITIALIZED)
      */
     synchronized void prepare(UnfilteredPartitionIterator initialData)
     {
@@ -259,11 +241,6 @@ public abstract class AbstractPartialTrackedRead implements PartialTrackedRead
         PartitionUpdate update = mutation.getPartitionUpdate(command().metadata());
         if (update != null)
             state = state.asAugmentable().augment(update);
-    }
-
-    private UnfilteredPartitionIterator complete(UnfilteredPartitionIterator iterator)
-    {
-        return command().completeTrackedRead(iterator, this);
     }
 
     @Override
