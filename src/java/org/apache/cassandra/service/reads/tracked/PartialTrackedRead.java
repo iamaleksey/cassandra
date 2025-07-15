@@ -20,6 +20,7 @@ package org.apache.cassandra.service.reads.tracked;
 
 import java.util.Collection;
 
+import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.db.ColumnFamilyStore;
 import org.apache.cassandra.db.ConsistencyLevel;
 import org.apache.cassandra.db.Mutation;
@@ -30,6 +31,7 @@ import org.apache.cassandra.db.partitions.PartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.index.Index;
+import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 
 public interface PartialTrackedRead
@@ -78,7 +80,54 @@ public interface PartialTrackedRead
         }
     }
 
+    /**
+     * Sets consistency level and expiration info to be used for follow up reads. Needs to be called before making the
+     * read available for receiving augmenting mutations
+     */
+    default void setFollowUpReadContext(ConsistencyLevel consistencyLevel, long expiresAtNanos) {}
+
     CompletedRead complete();
+
+    default void complete(AsyncPromise<TrackedDataResponse> promise, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+    {
+        complete(promise, this, consistencyLevel, expiresAtNanos);
+    }
+
+    static void complete(AsyncPromise<TrackedDataResponse> promise, PartialTrackedRead read, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+    {
+        Stage.READ.submit(() -> {
+            try (PartialTrackedRead.CompletedRead completedRead = read.complete())
+            {
+                TrackedDataResponse response = completedRead.response();
+                Future<TrackedDataResponse> followUp = completedRead.followupRead(response, consistencyLevel, expiresAtNanos);
+
+                if (followUp != null)
+                {
+                    followUp.addCallback((newResponse, error) -> {
+                        if (error != null)
+                        {
+                            promise.tryFailure(error);
+                            return;
+                        }
+                        promise.trySuccess(newResponse);
+                    });
+                }
+                else
+                {
+                    promise.trySuccess(response);
+                }
+            }
+            catch (Exception e)
+            {
+                promise.tryFailure(e);
+                throw e;
+            }
+            finally
+            {
+                read.close();
+            }
+        });
+    }
 
     void augment(Mutation mutation);
 

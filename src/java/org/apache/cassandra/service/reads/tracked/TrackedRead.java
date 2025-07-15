@@ -255,7 +255,7 @@ public abstract class TrackedRead<E extends Endpoints<E>, P extends ReplicaPlan.
         return hostids;
     }
 
-    private void start(long expiresAt, Consumer<PartialTrackedRead> partialReadConsumer)
+    private void start(long expiresAt, Consumer<PartialTrackedRead> partialReadConsumer, TrackedLocalReadCoordinator.Completer completer)
     {
         // TODO: skip local coordination if this node knows its recovering from an outage
         // TODO: read speculation
@@ -280,7 +280,7 @@ public abstract class TrackedRead<E extends Endpoints<E>, P extends ReplicaPlan.
         {
             logger.trace("Locally coordinating {}", readId);
             Stage.READ.submit(() -> {
-                TrackedLocalReadCoordinator coordinator = MutationTrackingService.instance.localReads().beginRead(readId, ClusterMetadata.current(), command, consistencyLevel, summaryHostIds, expiresAt, partialReadConsumer);
+                TrackedLocalReadCoordinator coordinator = MutationTrackingService.instance.localReads().beginRead(readId, ClusterMetadata.current(), command, consistencyLevel, summaryHostIds, expiresAt, partialReadConsumer, completer);
                 coordinator.addCallback((response, error) -> {
                     if (error != null)
                     {
@@ -327,12 +327,12 @@ public abstract class TrackedRead<E extends Endpoints<E>, P extends ReplicaPlan.
 
     public void start(long expiresAt)
     {
-        start(expiresAt, null);
+        start(expiresAt, null, null);
     }
 
-    public void startLocal(long expiresAt, Consumer<PartialTrackedRead> partialReadConsumer)
+    public void startLocal(long expiresAt, Consumer<PartialTrackedRead> partialReadConsumer, TrackedLocalReadCoordinator.Completer completer)
     {
-        start(expiresAt, partialReadConsumer);
+        start(expiresAt, partialReadConsumer, completer);
     }
 
     public void start(Dispatcher.RequestTime requestTime)
@@ -450,7 +450,7 @@ public abstract class TrackedRead<E extends Endpoints<E>, P extends ReplicaPlan.
         @Override
         public void executeLocally(Message<? extends Request> message, ClusterMetadata metadata)
         {
-            TrackedLocalReadCoordinator coordinator = MutationTrackingService.instance.localReads().beginRead(readId, metadata, command, consistencyLevel, summaryNodes, message.expiresAtNanos(), null);
+            TrackedLocalReadCoordinator coordinator = MutationTrackingService.instance.localReads().beginRead(readId, metadata, command, consistencyLevel, summaryNodes, message.expiresAtNanos(), null, null);
             coordinator.addCallback((response, error) -> {
                 if (error != null)
                 {

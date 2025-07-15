@@ -56,6 +56,7 @@ import org.apache.cassandra.db.lifecycle.SSTableSet;
 import org.apache.cassandra.db.memtable.AbstractMemtable;
 import org.apache.cassandra.db.memtable.Memtable;
 import org.apache.cassandra.db.partitions.FilteredPartition;
+import org.apache.cassandra.db.partitions.Partition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
 import org.apache.cassandra.db.rows.Cell;
@@ -952,6 +953,12 @@ public class ColumnFamilyStoreTest
             @Override
             public void performSnapshot(String snapshotName)
             {
+            }
+
+            @Override
+            public Partition snapshotPartition(DecoratedKey partitionKey)
+            {
+                return null;
             }
 
             @Override
