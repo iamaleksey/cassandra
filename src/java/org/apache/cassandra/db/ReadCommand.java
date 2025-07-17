@@ -103,7 +103,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         T complete(ReadCommand command, UnfilteredPartitionIterator iterator, ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
         T complete(ReadCommand command, Index.Searcher searcher, ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos);
 
-        ReadCompleter<UnfilteredPartitionIterator> IMMEDIATE = new ReadCompleter<UnfilteredPartitionIterator>()
+        ReadCompleter<UnfilteredPartitionIterator> IMMEDIATE = new ReadCompleter<>()
         {
             @Override
             public UnfilteredPartitionIterator complete(ReadCommand command, UnfilteredPartitionIterator iterator, ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos)
@@ -119,7 +119,7 @@ public abstract class ReadCommand extends AbstractReadQuery
             }
         };
 
-        ReadCompleter<PartialTrackedRead> TRACKED = new ReadCompleter<PartialTrackedRead>()
+        ReadCompleter<PartialTrackedRead> TRACKED = new ReadCompleter<>()
         {
             @Override
             public PartialTrackedRead complete(ReadCommand command, UnfilteredPartitionIterator iterator, ReadExecutionController executionController, ColumnFamilyStore cfs, long startTimeNanos)
@@ -482,23 +482,24 @@ public abstract class ReadCommand extends AbstractReadQuery
             ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
             Index.QueryPlan indexQueryPlan = indexQueryPlan();
 
-            Index.Searcher searcher = null;
             if (indexQueryPlan != null)
             {
                 cfs.indexManager.checkQueryability(indexQueryPlan);
 
-                searcher = indexQueryPlan.searcherFor(this);
-                Tracing.trace("Executing read on {}.{} using index{} {}",
-                              cfs.metadata.keyspace,
-                              cfs.metadata.name,
-                              indexQueryPlan.getIndexes().size() == 1 ? "" : "es",
-                              indexQueryPlan.getIndexes()
-                                            .stream()
-                                            .map(i -> i.getIndexMetadata().name)
-                                            .collect(Collectors.joining(",")));
+                if (logger.isTraceEnabled())
+                {
+                    Tracing.trace("Executing read on {}.{} using index{} {}",
+                                  cfs.metadata.keyspace,
+                                  cfs.metadata.name,
+                                  indexQueryPlan.getIndexes().size() == 1 ? "" : "es",
+                                  indexQueryPlan.getIndexes()
+                                                .stream()
+                                                .map(i -> i.getIndexMetadata().name)
+                                                .collect(Collectors.joining(",")));
+                }
+                Index.Searcher searcher = indexQueryPlan.searcherFor(this);
                 return completer.complete(this, searcher, executionController, cfs, startTimeNanos);
             }
-
             UnfilteredPartitionIterator iterator = queryStorage(cfs, executionController);
             return completer.complete(this, iterator, executionController, cfs, startTimeNanos);
         }

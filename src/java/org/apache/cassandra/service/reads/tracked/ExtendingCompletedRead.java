@@ -140,7 +140,7 @@ public abstract class ExtendingCompletedRead implements PartialTrackedRead.Compl
     protected Future<TrackedDataResponse> makeFollowupRead(TrackedDataResponse initialResponse, int toQuery, ConsistencyLevel consistencyLevel, long expiresAtNanos)
     {
         Preconditions.checkState(command() instanceof PartitionRangeReadCommand);
-        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead((PartitionRangeReadCommand) command(), followUpBounds(), toQuery, consistencyLevel, expiresAtNanos);
+        TrackedRead.Range followUpRead = PartialTrackedRangeRead.makeFollowUpRead((PartitionRangeReadCommand) command(), followUpBounds(), toQuery, consistencyLevel);
         followUpRead.start(expiresAtNanos);
         AsyncPromise<TrackedDataResponse> combinedRead = new AsyncPromise<>();
         followUpRead.future().addCallback((result, failure) -> {

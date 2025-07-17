@@ -22,11 +22,11 @@ import java.util.Iterator;
 
 import com.google.common.collect.PeekingIterator;
 
-public interface CloseablePeekingIterator<V> extends Iterator<V>, PeekingIterator<V>, CloseableIterator<V>
+public interface CloseablePeekingIterator<V> extends PeekingIterator<V>, CloseableIterator<V>
 {
     static <V> CloseablePeekingIterator<V> wrap(Iterator<V> iterator)
     {
-        return new AbstractIterator<V>()
+        return new AbstractIterator<>()
         {
             @Override
             protected V computeNext()

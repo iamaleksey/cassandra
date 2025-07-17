@@ -79,7 +79,7 @@ import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
 import org.apache.cassandra.utils.concurrent.UncheckedInterruptedException;
 
-public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> extends AbstractPartialTrackedRead
+public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> extends PartialTrackedRead
 {
     private final ReadCommand command;
     private final Searcher searcher;
@@ -144,23 +144,17 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
     private static class FollowUpRead<Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> implements CompletedIndexPartitionRead<Match>, AutoCloseable
     {
         private final DecoratedKey key;
-        private final AsyncPromise<TrackedDataResponse> promise;
         private final PartialTrackedIndexRead<Match, Searcher> read;
         private final CompletedIndexRead<Match> completedRead;
         private final CompletedIndexPartitionRead<Match> partitionRead;
-        private final ConsistencyLevel consistencyLevel;
-        private final long expiresAtNanos;
 
-        public FollowUpRead(DecoratedKey key, AsyncPromise<TrackedDataResponse> promise, PartialTrackedIndexRead<Match, Searcher> read, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+        public FollowUpRead(DecoratedKey key, PartialTrackedIndexRead<Match, Searcher> read)
         {
             Preconditions.checkArgument(!read.command.isRangeRequest());
             this.key = key;
-            this.promise = promise;
             this.read = read;
             this.completedRead = (CompletedIndexRead<Match>) read.complete();
             this.partitionRead = Preconditions.checkNotNull(completedRead.partitionRead(key));
-            this.consistencyLevel = consistencyLevel;
-            this.expiresAtNanos = expiresAtNanos;
         }
 
         static <Match extends IndexMatch, Searcher extends Index.MultiStepSearcher<Match>> Future<FollowUpRead<Match, Searcher>> start(ReadCommand command, DecoratedKey key, ConsistencyLevel consistencyLevel, long expiresAtNanos)
@@ -177,7 +171,7 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             trackedRead.startLocal(expiresAtNanos, null, ((promise1, read, consistencyLevel1, expiresAtNanos1) -> {
                 try
                 {
-                    followUpPromise.trySuccess(new FollowUpRead<>(key, promise1, (PartialTrackedIndexRead<Match, Searcher>) read, consistencyLevel1, expiresAtNanos1));
+                    followUpPromise.trySuccess(new FollowUpRead<>(key, (PartialTrackedIndexRead<Match, Searcher>) read));
                 }
                 catch (Exception e)
                 {
@@ -494,8 +488,6 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             return new IndexCompleted(maxKey, new MergingMatchIterator(matchIterators), additionalMatches, reads, followUpResults);
         }
 
-        abstract IndexPreComplete preComplete();
-
         @Override
         void close()
         {
@@ -560,7 +552,6 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
             return this;
         }
 
-        @Override
         IndexPreComplete preComplete()
         {
             return new IndexPreComplete(maxKey, materializedMatches, additionalMatches, reads, followUpReads);
@@ -578,12 +569,6 @@ public class PartialTrackedIndexRead<Match extends IndexMatch, Searcher extends 
         public State augment(PartitionUpdate update)
         {
             throw new IllegalStateException("cannot augment reads pending completion");
-        }
-
-        @Override
-        IndexPreComplete preComplete()
-        {
-            return this;
         }
 
         Future<List<FollowUpRead<Match, Searcher>>> future()

@@ -107,7 +107,7 @@ class FilteredFollowupRead extends AsyncPromise<TrackedDataResponse>
         if (remaining > 0)
         {
             partialRead = new AtomicReference<>();
-            TrackedRead.Range rangeRead = makeFollowUpRead(command, followUpBounds, remaining, consistencyLevel, expiresAtNanos);
+            TrackedRead.Range rangeRead = makeFollowUpRead(command, followUpBounds, remaining, consistencyLevel);
             rangeRead.startLocal(expiresAtNanos, partialRead::set, null);
             futures.add(rangeRead.future());
         }

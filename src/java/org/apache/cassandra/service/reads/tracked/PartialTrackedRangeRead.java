@@ -44,6 +44,7 @@ import org.apache.cassandra.db.partitions.AbstractUnfilteredPartitionIterator;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.db.partitions.SimpleBTreePartition;
 import org.apache.cassandra.db.partitions.UnfilteredPartitionIterator;
+import org.apache.cassandra.db.partitions.UnfilteredPartitionIterators;
 import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.db.transform.Transformation;
 import org.apache.cassandra.dht.AbstractBounds;
@@ -56,7 +57,7 @@ import org.apache.cassandra.locator.ReplicaPlans;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.concurrent.Future;
 
-public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
+public abstract class PartialTrackedRangeRead extends PartialTrackedRead
 {
     private static final Logger logger = LoggerFactory.getLogger(PartialTrackedRangeRead.class);
 
@@ -110,19 +111,15 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
 
     protected static class ShortReadSupport
     {
-        final DecoratedKey lastPartitionKey; // key of the last observed partition
         final boolean partitionsFetched; // whether we've seen any new partitions since iteration start or last moreContents() call
         final boolean initialIteratorExhausted;
         final AbstractBounds<PartitionPosition> followUpBounds;
-        boolean wasAugmented;
 
         ShortReadSupport(Builder builder, boolean initialIteratorExhausted, AbstractBounds<PartitionPosition> followUpBounds)
         {
-            this.lastPartitionKey = builder.lastPartitionKey;
             this.partitionsFetched = builder.partitionsFetched;
             this.initialIteratorExhausted = initialIteratorExhausted;
             this.followUpBounds = followUpBounds;
-            this.wasAugmented = false;
         }
 
         protected static class Builder
@@ -174,33 +171,18 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
 
         RangePrepared materialize(UnfilteredPartitionIterator inputIterator)
         {
-            try
+            try (inputIterator)
             {
-                UnfilteredPartitionIterator materialized = Transformation.apply(inputIterator, new Transformation<UnfilteredRowIterator>()
-                {
-                    @Override
-                    protected UnfilteredRowIterator applyToPartition(UnfilteredRowIterator partition)
-                    {
-                        SimpleBTreePartition materialized = data.computeIfAbsent(partition.partitionKey(), key -> new SimpleBTreePartition(key, partition.metadata(), UpdateTransaction.NO_OP));
-                        materialized.update(PartitionUpdate.fromIterator(partition, command.columnFilter()));
-                        shortReadSupport.lastPartitionKey = partition.partitionKey();
-                        shortReadSupport.partitionsFetched = true;
-                        return queryPartition(materialized);
-                    }
-                });
+                UnfilteredPartitionIterator materialized = Transformation.apply(inputIterator, this);
 
                 UnfilteredPartitionIterator filtered = filter(materialized);
 
                 try (UnfilteredPartitionIterator iterator = shortReadSupport.counter.applyTo(filtered))
                 {
-                    consume(iterator);
+                    UnfilteredPartitionIterators.consume(iterator);
                 }
 
                 return createRangePrepared();
-            }
-            finally
-            {
-                inputIterator.close();
             }
         }
 
@@ -336,25 +318,13 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
                                             command.clusteringIndexFilter(partition.partitionKey()).isReversed());
     }
 
-    private static void consume(UnfilteredPartitionIterator iterator)
-    {
-        while (iterator.hasNext())
-        {
-            try (UnfilteredRowIterator partition = iterator.next())
-            {
-                while (partition.hasNext())
-                    partition.next();
-            }
-        }
-    }
-
     public AbstractBounds<PartitionPosition> followUpBounds()
     {
         RangeCompleted completed = (RangeCompleted) state().asCompleted();
         return completed.followUpBounds();
     }
 
-    protected static TrackedRead.Range makeFollowUpRead(PartitionRangeReadCommand command, AbstractBounds<PartitionPosition> followUpBounds, int toQuery, ConsistencyLevel consistencyLevel, long expiresAtNanos)
+    protected static TrackedRead.Range makeFollowUpRead(PartitionRangeReadCommand command, AbstractBounds<PartitionPosition> followUpBounds, int toQuery, ConsistencyLevel consistencyLevel)
     {
         DataLimits newLimits = command.limits().forShortReadRetry(toQuery);
 
@@ -521,7 +491,7 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
             }
         }
 
-        class FilteredCompletedRead extends ExtendingCompletedRead.RangeRead
+        static class FilteredCompletedRead extends ExtendingCompletedRead.RangeRead
         {
             private final DecoratedKey lastMatchingKey;
             private final SortedMap<DecoratedKey, FollowUpReadInfo> followUpReadInfo;
@@ -535,7 +505,6 @@ public abstract class PartialTrackedRangeRead extends AbstractPartialTrackedRead
             /**
              * Even if we reached the limit during materialization, if there are keys ahead of the first materialized key
              * or interleaved with them, then we need to read them
-             * @return
              */
             private boolean hasInterleavedFollowupKeys()
             {

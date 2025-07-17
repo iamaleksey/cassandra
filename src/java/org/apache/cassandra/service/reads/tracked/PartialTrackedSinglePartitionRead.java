@@ -38,7 +38,7 @@ import org.apache.cassandra.index.transactions.UpdateTransaction;
 
 import static org.apache.cassandra.db.partitions.UnfilteredPartitionIterators.MergeListener.NOOP;
 
-public class PartialTrackedSinglePartitionRead extends AbstractPartialTrackedRead
+public class PartialTrackedSinglePartitionRead extends PartialTrackedRead
 {
     private final Index.Searcher searcher;
     private final SinglePartitionReadCommand command;
