@@ -15,7 +15,7 @@
 # limitations under the License.
 
 FROM almalinux:8
-LABEL org.opencontainers.image.authors="Apache Cassandra <dev@cassandra.apache.org>"
+MAINTAINER Apache Cassandra <dev@cassandra.apache.org>
 
 # CONTEXT is expected to be cassandra/.build
 
