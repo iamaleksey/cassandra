@@ -20,9 +20,6 @@ package org.apache.cassandra.repair.autorepair;
 
 import com.google.common.annotations.VisibleForTesting;
 
-import org.apache.cassandra.db.ColumnFamilyStore;
-import org.apache.cassandra.db.Keyspace;
-import org.apache.cassandra.db.view.TableViews;
 import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.metrics.AutoRepairMetricsManager;
@@ -30,11 +27,8 @@ import org.apache.cassandra.metrics.AutoRepairMetrics;
 import org.apache.cassandra.repair.RepairCoordinator;
 import org.apache.cassandra.repair.autorepair.AutoRepairConfig.RepairType;
 import org.apache.cassandra.repair.autorepair.AutoRepairUtils.AutoRepairHistory;
-import org.apache.cassandra.repair.RepairParallelism;
 import org.apache.cassandra.repair.messages.RepairOption;
-import org.apache.cassandra.service.AutoRepairService;
 import org.apache.cassandra.service.StorageService;
-import org.apache.cassandra.streaming.PreviewKind;
 import org.apache.cassandra.utils.Clock;
 
 import org.slf4j.Logger;
@@ -45,7 +39,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
  * AutoRepairState represents the state of automated repair for a given repair type.
@@ -297,70 +290,6 @@ public abstract class AutoRepairState
     public int getKeyspaceRepairPlansAlreadyRepaired()
     {
         return keyspaceRepairPlansAlreadyRepaired;
-    }
-}
-
-class PreviewRepairedState extends AutoRepairState
-{
-    public PreviewRepairedState(AutoRepairConfig config)
-    {
-        super(RepairType.PREVIEW_REPAIRED, config);
-    }
-
-    @Override
-    public RepairCoordinator getRepairRunnable(String keyspace, List<String> tables, Set<Range<Token>> ranges, boolean primaryRangeOnly)
-    {
-        RepairOption option = new RepairOption(RepairParallelism.PARALLEL, primaryRangeOnly, false, false,
-                                               AutoRepairService.instance.getAutoRepairConfig().getRepairThreads(repairType), ranges, false, false, PreviewKind.REPAIRED, false, true, true, false, false, false);
-
-        option.getColumnFamilies().addAll(tables);
-
-        return getRepairRunnable(keyspace, option);
-    }
-}
-
-class IncrementalRepairState extends AutoRepairState
-{
-    public IncrementalRepairState(AutoRepairConfig config)
-    {
-        super(RepairType.INCREMENTAL, config);
-    }
-
-    @Override
-    public RepairCoordinator getRepairRunnable(String keyspace, List<String> tables, Set<Range<Token>> ranges, boolean primaryRangeOnly)
-    {
-        RepairOption option = new RepairOption(RepairParallelism.PARALLEL, primaryRangeOnly, true, false,
-                                               AutoRepairService.instance.getAutoRepairConfig().getRepairThreads(repairType), ranges,
-                                               false, false, PreviewKind.NONE, true, true, true, false, false, false);
-
-        option.getColumnFamilies().addAll(filterOutUnsafeTables(keyspace, tables));
-
-        return getRepairRunnable(keyspace, option);
-    }
-
-    @VisibleForTesting
-    protected List<String> filterOutUnsafeTables(String keyspaceName, List<String> tables)
-    {
-        Keyspace keyspace = Keyspace.open(keyspaceName);
-
-        return tables.stream()
-                     .filter(table -> {
-                         ColumnFamilyStore cfs = keyspace.getColumnFamilyStore(table);
-                         TableViews views = keyspace.viewManager.forTable(cfs.metadata());
-                         if (views != null && !views.isEmpty())
-                         {
-                             logger.debug("Skipping incremental repair for {}.{} as it has materialized views", keyspaceName, table);
-                             return false;
-                         }
-
-                         if (cfs.metadata().params != null && cfs.metadata().params.cdc)
-                         {
-                             logger.debug("Skipping incremental repair for {}.{} as it has CDC enabled", keyspaceName, table);
-                             return false;
-                         }
-
-                         return true;
-                     }).collect(Collectors.toList());
     }
 }
 
