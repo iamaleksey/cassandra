@@ -510,4 +510,10 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             delegate.shutdown();
         }
     }
+
+    @VisibleForTesting
+    public int syncingCount()
+    {
+        return syncingTasks.size();
+    }
 }
