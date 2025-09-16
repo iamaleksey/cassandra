@@ -191,6 +191,7 @@ public class CounterMutation implements IMutation
 
             Mutation result = resultBuilder.build();
             result.apply();
+
             return result;
         }
         finally

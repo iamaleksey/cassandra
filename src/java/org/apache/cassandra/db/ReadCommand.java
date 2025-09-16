@@ -506,6 +506,25 @@ public abstract class ReadCommand extends AbstractReadQuery
         selectOptions.validate(metadata(), IndexRegistry.obtain(metadata()), indexQueryPlan());
     }
 
+    // TODO: clean up/remove, use immediate completer or something?
+    // ClusterMetadata is null on startup when there are local reads from system tables before it's initialized
+    private UnfilteredPartitionIterator beginRead2(ReadExecutionController executionController, @Nullable ClusterMetadata cm)
+    {
+        COMMAND.set(this);
+        try
+        {
+            ColumnFamilyStore cfs = Keyspace.openAndGetStore(metadata());
+            if (!potentialTxnConflicts.allowed)
+                ConsensusRequestRouter.validateSafeToReadNonTransactionally(this, cm);
+            // TODO: searcher
+            return queryStorage(cfs, executionController);
+        }
+        finally
+        {
+            COMMAND.set(null);
+        }
+    }
+
     // ClusterMetadata is null on startup when there are local reads from system tables before it's initialized
     private <T> T beginRead(ReadExecutionController executionController, @Nullable ClusterMetadata cm, ReadCompleter<T> completer)
     {
@@ -563,7 +582,7 @@ public abstract class ReadCommand extends AbstractReadQuery
         return rowFilter(searcher).filter(iterator, nowInSec());
     }
 
-    private UnfilteredPartitionIterator completeRead(UnfilteredPartitionIterator iterator, ReadExecutionController executionController, Index.Searcher searcher, ColumnFamilyStore cfs, long startTimeNanos)
+    public UnfilteredPartitionIterator completeRead(UnfilteredPartitionIterator iterator, ReadExecutionController executionController, Index.Searcher searcher, ColumnFamilyStore cfs, long startTimeNanos)
     {
         COMMAND.set(this);
         try
@@ -623,6 +642,11 @@ public abstract class ReadCommand extends AbstractReadQuery
     public PartialTrackedRead beginTrackedRead(ReadExecutionController executionController)
     {
         return beginRead(executionController, null, ReadCompleter.TRACKED);
+    }
+
+    public UnfilteredPartitionIterator beginTrackedRead2(ReadExecutionController executionController)
+    {
+        return beginRead2(executionController, null);
     }
 
     public UnfilteredPartitionIterator completeTrackedRead(UnfilteredPartitionIterator iterator, PartialTrackedRead read)

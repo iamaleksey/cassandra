@@ -22,6 +22,7 @@ import java.nio.ByteBuffer;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -48,12 +49,15 @@ import org.apache.cassandra.concurrent.Stage;
 import org.apache.cassandra.config.Config;
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.config.DurationSpec;
+import org.apache.cassandra.db.DecoratedKey;
+import org.apache.cassandra.db.EmptyIterators;
 import org.apache.cassandra.db.Keyspace;
 import org.apache.cassandra.db.Mutation;
 import org.apache.cassandra.db.TypeSizes;
 import org.apache.cassandra.db.commitlog.CommitLogPosition;
 import org.apache.cassandra.db.partitions.PartitionUpdate;
 import org.apache.cassandra.exceptions.UnknownTableException;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.io.util.File;
@@ -79,6 +83,7 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.TableId;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tcm.ClusterMetadata;
+import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.Crc;
 import org.apache.cassandra.utils.concurrent.OpOrder;
 import org.apache.cassandra.utils.concurrent.Semaphore;
@@ -425,6 +430,36 @@ public class MutationJournal
             Preconditions.checkState(mutation != null);
             into.add(mutation);
         }
+    }
+
+    /**
+     * Returns an iterator over a {@link PartitionUpdate} in a mutation specified by the arguments.
+     * Filters out unwanted partition keys (in case of a token collision) and table ids (in case of a batched
+     * mutation).
+     * TODO (consider): turn into a lazy iterator
+     */
+    public UnfilteredRowIterator rowIterator(ShortMutationId mutationId, DecoratedKey partitionKey, TableMetadata metadata)
+    {
+        Mutation mutation = read(mutationId);
+        if (mutation == null)
+            return null;
+        PartitionUpdate partition = mutation.getPartitionUpdate(metadata);
+        if (partition == null || !partition.partitionKey().equals(partitionKey))
+            return EmptyIterators.unfilteredRow(metadata, partitionKey, false);
+        return partition.unfilteredIterator();
+    }
+
+    /**
+     * Returns a {@link PartitionUpdate} in the mutation specified by {@code mutationId}.
+     * Returns {@code null} if the mutation has no partition update for the specified {@code table}.
+     */
+    @Nullable
+    public PartitionUpdate fetchPartitionUpdate(ShortMutationId mutationId, TableMetadata table)
+    {
+        Mutation mutation = read(mutationId);
+        if (mutation == null)
+            throw new NoSuchElementException("Mutation with id " + mutationId + " was not found in mutation journal");
+        return mutation.getPartitionUpdate(table);
     }
 
     public void replayStaticSegments()

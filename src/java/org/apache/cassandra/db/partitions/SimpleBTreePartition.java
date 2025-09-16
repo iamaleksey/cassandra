@@ -25,6 +25,7 @@ import org.apache.cassandra.db.rows.ColumnData;
 import org.apache.cassandra.db.rows.EncodingStats;
 import org.apache.cassandra.db.rows.Row;
 import org.apache.cassandra.db.rows.Rows;
+import org.apache.cassandra.db.rows.UnfilteredRowIterator;
 import org.apache.cassandra.index.transactions.UpdateTransaction;
 import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.utils.btree.BTree;
@@ -69,6 +70,12 @@ public class SimpleBTreePartition extends AbstractBTreePartition implements Upda
     public void onAllocatedOnHeap(long heapSize)
     {
 
+    }
+
+    // TODO (expected): check that everything that needs to be cloned is cloned
+    public static BTreePartitionData makePartitionDataFromIterator(UnfilteredRowIterator iterator)
+    {
+        return build(iterator, 16);
     }
 
     protected BTreePartitionData makeMergedPartition(BTreePartitionData current, PartitionUpdate update)
