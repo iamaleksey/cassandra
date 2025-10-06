@@ -323,6 +323,8 @@
         <string>--add-opens java.base/java.lang=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
+        <!-- Needed for in-jvm dtests straddling 6.0+ -->
+        <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
 
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
     </resources>
