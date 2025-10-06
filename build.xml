@@ -325,6 +325,7 @@
         <string>--add-opens java.base/java.nio=ALL-UNNAMED</string>
         <!-- Needed for in-jvm dtests straddling 6.0+ -->
         <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
+        <string>-Dorg.github.jamm.strategies.LogInfoAtStartup-true</string>
 
         <string>--add-opens java.rmi/sun.rmi.transport.tcp=ALL-UNNAMED</string>
     </resources>
@@ -343,7 +344,7 @@
         <string>-XX:-UseCompressedOops</string>
 
         <!-- Have jamm tell us what it sees for memory layout on start for debugging purposes -->
-        <!-- <string>-Dorg.github.jamm.strategies.LogInfoAtStartup-true</string> -->
+        <string>-Dorg.github.jamm.strategies.LogInfoAtStartup-true</string>
 
         <!-- <string>-XX:+UseLargePages</string> -->
 
