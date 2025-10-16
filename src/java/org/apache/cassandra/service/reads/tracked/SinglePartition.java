@@ -30,22 +30,22 @@ abstract class SinglePartition
     /**
      * Initialized single partition read object, ready to perform a local read.
      */
-    static final class Initialized implements LeaderReads.Initialized
+    static final class Created implements LeaderReads.Created
     {
         private final Id id;
         private final ReadCommand command;
         private final int[] summaryNodes;
 
-        private Initialized(Id id, ReadCommand command, int[] summaryNodes)
+        private Created(Id id, ReadCommand command, int[] summaryNodes)
         {
             this.id = id;
             this.command = command;
             this.summaryNodes = summaryNodes;
         }
 
-        static Initialized initialize(Id id, ReadCommand command, int[] summaryNodes)
+        static Created initialize(Id id, ReadCommand command, int[] summaryNodes)
         {
-            return new SinglePartition.Initialized(id, command, summaryNodes);
+            return new Created(id, command, summaryNodes);
         }
 
         @Override
@@ -61,7 +61,7 @@ abstract class SinglePartition
         }
 
         @Override
-        public Read read(AsyncPromise<TrackedDataResponse> promise)
+        public Launched launch(AsyncPromise<TrackedDataResponse> promise)
         {
             MutationSummary initialSummary, secondarySummary;
             initialSummary = command.createMutationSummary(false);
@@ -74,17 +74,18 @@ abstract class SinglePartition
             }
             catch (Throwable t)
             {
+                // TODO: error out on the promise
                 controller.close();
                 throw t;
             }
-            return new SinglePartition.Read(id, promise, initialSummary, secondarySummary, summaryNodes);
+            return new Launched(id, promise, initialSummary, secondarySummary, summaryNodes);
         }
     }
 
     /**
      * Local read is completed, now waiting for reconciliation results for augmentation.
      */
-    static final class Read implements LeaderReads.Read
+    static final class Launched implements LeaderReads.Launched
     {
         private final Id id;
         private final AsyncPromise<TrackedDataResponse> promise;
@@ -92,7 +93,7 @@ abstract class SinglePartition
         private final MutationSummary secondarySummary;
         private final int[] summaryNodes;
 
-        private Read(Id id, AsyncPromise<TrackedDataResponse> promise, MutationSummary initialSummary, MutationSummary secondaySummary, int[] summaryNodes)
+        private Launched(Id id, AsyncPromise<TrackedDataResponse> promise, MutationSummary initialSummary, MutationSummary secondaySummary, int[] summaryNodes)
         {
             this.id = id;
             this.promise = promise;
@@ -166,18 +167,18 @@ abstract class SinglePartition
         }
 
         @Override
-        public Complete complete()
+        public Completed complete()
         {
-            return new Complete(id, promise);
+            return new Completed(id, promise);
         }
     }
 
-    static final class Complete implements LeaderReads.ShortOrComplete
+    static final class Completed implements LeaderReads.ShortOrCompleted
     {
         private final Id id;
         private final AsyncPromise<TrackedDataResponse> promise;
 
-        Complete(Id id, AsyncPromise<TrackedDataResponse> promise)
+        Completed(Id id, AsyncPromise<TrackedDataResponse> promise)
         {
             this.id = id;
             this.promise = promise;
@@ -208,7 +209,7 @@ abstract class SinglePartition
         }
 
         @Override
-        public LeaderReads.ShortOrComplete complete()
+        public LeaderReads.ShortOrCompleted complete()
         {
             return this;
         }

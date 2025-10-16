@@ -37,12 +37,12 @@ class LeaderReads
         Stage stage();
     }
 
-    interface Initialized extends LeaderRead
+    interface Created extends LeaderRead
     {
-        Read read(AsyncPromise<TrackedDataResponse> promise);
+        Launched launch(AsyncPromise<TrackedDataResponse> promise);
     }
 
-    interface Read extends LeaderRead
+    interface Launched extends LeaderRead
     {
         Augmented augment(Log2OffsetsMap<?> augmentingOffsets);
         Id id();
@@ -56,14 +56,14 @@ class LeaderReads
         /*
          * At this point, we either have it all or we may need SRP
          */
-        ShortOrComplete complete();
+        ShortOrCompleted complete();
     }
 
-    interface ShortOrComplete extends LeaderRead
+    interface ShortOrCompleted extends LeaderRead
     {
         boolean isShort();
         boolean isComplete();
-        ShortOrComplete complete();
+        ShortOrCompleted complete();
         void respond();
     }
 
@@ -74,14 +74,15 @@ class LeaderReads
      * and the secondary mutation summaries, and feed the summary
      * to the reconciliation process.
      */
-    AsyncPromise<TrackedDataResponse> read(Initialized initialized)
+    AsyncPromise<TrackedDataResponse> launch(Created created)
     {
         AsyncPromise<TrackedDataResponse> promise = new AsyncPromise<>();
-        Read read = initialized.read(promise);
-        if (reads.put(read.id(), read) != null)
+        Launched launched = created.launch(promise);
+        if (reads.put(launched.id(), launched) != null)
             throw new IllegalStateException();
+        // TODO: special path for CL.ONE
         ReadReconciliations.instance.acceptLocalSummary(
-            read.id(), read.secondarySummary(), read.summaryNodes()
+            launched.id(), launched.secondarySummary(), launched.summaryNodes()
         );
         return promise;
     }
@@ -102,15 +103,15 @@ class LeaderReads
 
         if (prev.stage() != Stage.READ)
             throw new IllegalStateException();
-        Read read = (Read) prev;
+        Launched launched = (Launched) prev;
 
         // TODO (required): ensure this runs in the appropriate executor Stage
-        Augmented augmented = read.augment(augmentingOffsets);
-        ShortOrComplete shortOrComplete = augmented.complete();
+        Augmented augmented = launched.augment(augmentingOffsets);
+        ShortOrCompleted shortOrCompleted = augmented.complete();
 
-        if (shortOrComplete.isShort())
+        if (shortOrCompleted.isShort())
         {
-            shortOrComplete.complete();
+            shortOrCompleted.complete();
         }
         else
         {
