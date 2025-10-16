@@ -46,8 +46,9 @@ public class ObjectSizes
      *   -Dorg.github.jamm.strategies.LogInfoAtStartup-true
      *
      */
-    private static final MemoryMeter meter = MemoryMeter.builder().withGuessing(Guess.INSTRUMENTATION_AND_SPECIFICATION,
-                                                                                Guess.UNSAFE)
+//    private static final MemoryMeter meter = MemoryMeter.builder().withGuessing(Guess.INSTRUMENTATION_AND_SPECIFICATION,
+    // TODO: Flip based on env var in build.xml for tests if this makes things work on in-jvm dtests on JDK17
+    private static final MemoryMeter meter = MemoryMeter.builder().withGuessing(Guess.INSTRUMENTATION)
                                                                   .build();
 
     private static final long HEAP_BUFFER_SHALLOW_SIZE = measure(ByteBufferUtil.EMPTY_BYTE_BUFFER);
