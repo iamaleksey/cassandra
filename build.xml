@@ -328,7 +328,6 @@
         <!-- Needed for in-jvm dtests straddling 6.0+ -->
         <string>--add-opens java.base/java.util.concurrent=ALL-UNNAMED</string>
         <string>--add-opens java.base/java.util.concurrent.atomic=ALL-UNNAMED</string>
-        <string>-Dorg.github.jamm.strategies.LogInfoAtStartup=true</string>
     </resources>
     <pathconvert property="_jvm17_args_concat" refid="_jvm17_arg_items" pathsep=" "/>
     <condition property="java-jvmargs" value="${_jvm17_args_concat}">
@@ -343,10 +342,6 @@
 
         <!-- Temporary workaround for jamm having incorrect default CompressedOops for JDK21 -->
         <string>-XX:-UseCompressedOops</string>
-
-        <!-- Have jamm tell us what it sees for memory layout on start for debugging purposes -->
-        <string>-Dorg.github.jamm.strategies.LogInfoAtStartup=true</string>
-        <!-- return Boolean.parseBoolean(System.getProperty("org.github.jamm.strategies.LogInfoAtStartup", "false")); -->
 
         <!-- <string>-XX:+UseLargePages</string> -->
 

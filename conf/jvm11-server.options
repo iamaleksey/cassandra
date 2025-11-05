@@ -65,9 +65,6 @@
 -XX:MaxTenuringThreshold=2
 -XX:G1HeapRegionSize=16m
 
-## jamm debugging
--Dorg.github.jamm.strategies.LogInfoAtStartup=true
-
 # Floor the young generation size to 50% of the heap size
 -XX:+UnlockExperimentalVMOptions
 -XX:G1NewSizePercent=50

@@ -62,9 +62,6 @@
 #-XX:ParallelGCThreads=16
 #-XX:ConcGCThreads=16
 
-## jamm debugging
--Dorg.github.jamm.strategies.LogInfoAtStartup=true
-
 ### JPMS
 
 -Djdk.attach.allowAttachSelf=true

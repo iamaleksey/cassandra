@@ -97,9 +97,6 @@
 # -XX:+PrintPromotionFailure            maps to 'promotion' with level 'trace'
 # -XX:PrintFLSStatistics=1              maps to 'freelist' with level 'trace'
 
-## jamm debugging
--Dorg.github.jamm.strategies.LogInfoAtStartup=true
-
 ### Netty Options
 
 # On Java >= 9 Netty requires the io.netty.tryReflectionSetAccessible system property to be set to true to enable
