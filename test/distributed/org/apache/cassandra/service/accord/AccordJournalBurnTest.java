@@ -93,13 +93,8 @@ public class AccordJournalBurnTest extends BurnTestBase
 {
     private static final Logger logger = LoggerFactory.getLogger(AccordJournalBurnTest.class);
 
-    public static void setUp() throws Throwable
+    private static void setupFields()
     {
-        StorageService.instance.registerMBeans();
-        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
-        ServerTestUtils.prepareServerNoRegister();
-
-        Keyspace.setInitialized();
         FieldUtil.transferFields(new KeySerializers.Impl(BurnTestKeySerializers.key,
                                                          BurnTestKeySerializers.routingKey,
                                                          BurnTestKeySerializers.range),
@@ -127,6 +122,18 @@ public class AccordJournalBurnTest extends BurnTestBase
         FieldUtil.setInstanceUnsafe(TopologySerializers.class,
                                     TopologySerializers.topology,
                                     "compactTopology");
+    }
+
+    public static void setUp() throws Throwable
+    {
+        setupFields();
+        StorageService.instance.registerMBeans();
+        StorageService.instance.setPartitionerUnsafe(Murmur3Partitioner.instance);
+        ServerTestUtils.prepareServerNoRegister();
+
+        Keyspace.setInitialized();
+        if (KeySerializers.key != BurnTestKeySerializers.key)
+            throw new AssertionError("KeySerializers.key was not overwritten: " + KeySerializers.key);
     }
 
     private static final AtomicInteger counter = new AtomicInteger();
