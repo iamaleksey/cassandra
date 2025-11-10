@@ -165,6 +165,11 @@ public class MockMessagingSpy
         return mockedMessageResponses.get();
     }
 
+    public void printMessageCounts()
+    {
+        logger.info("Messages intercepted: {}. Mocked Message responses: {}", messagesIntercepted(), mockedMessageResponses());
+    }
+
     void matchingMessage(Message<?> message)
     {
         int count = messagesIntercepted.incrementAndGet();
