@@ -22,6 +22,8 @@ import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,6 +42,7 @@ import org.apache.cassandra.schema.TableMetadata;
 import org.apache.cassandra.service.StorageService;
 import org.awaitility.Awaitility;
 import org.jboss.byteman.contrib.bmunit.BMRule;
+import org.jboss.byteman.contrib.bmunit.BMUnitConfig;
 import org.jboss.byteman.contrib.bmunit.BMUnitRunner;
 
 import org.apache.cassandra.utils.MockFailureDetector;
@@ -91,12 +94,14 @@ public class HintServiceBytemanTest
         HintsService.instance.startDispatch();
     }
 
-    @Test
+    // Some issues on JDK21 w/this test hanging; this is a temporary stopgap to protect against that
+    @Test (timeout = 300000)
+    @BMUnitConfig(bmunitVerbose=true, verbose=true)
     @BMRule(name = "Delay delivering hints",
     targetClass = "DispatchHintsTask",
     targetMethod = "run",
     action = "Thread.sleep(DatabaseDescriptor.getHintsFlushPeriodInMS() * 3L)")
-    public void testListPendingHints() throws InterruptedException, ExecutionException
+    public void testListPendingHints() throws InterruptedException, ExecutionException, TimeoutException
     {
         HintsService.instance.resumeDispatch();
         MockMessagingSpy spy = sendHintsAndResponses(metadata, 20000, -1);
@@ -111,7 +116,8 @@ public class HintServiceBytemanTest
         assertEquals(1, info.totalFiles);
         assertEquals(info.oldestTimestamp, info.newestTimestamp); // there is 1 descriptor with only 1 timestamp
 
-        spy.interceptMessageOut(20000).get();
+        // JDK21 genZGC uncovered some flakiness / hanging here waiting on Condition
+        spy.interceptMessageOut(20000).get(60, TimeUnit.SECONDS);
         assertEquals(Collections.emptyList(), HintsService.instance.getPendingHints());
     }
 }
