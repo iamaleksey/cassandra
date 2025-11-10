@@ -42,7 +42,7 @@ import static org.apache.cassandra.utils.concurrent.BlockingQueues.newBlockingQu
  *
  * <h2>Debug logging</h2>
  * <p>The internal {@code debugLog} method writes detailed information about the spy’s
- * activity. By default the logger uses TRACE level; to make the output visible at INFO
+ * activity. By default, the logger uses TRACE level; to make the output visible at INFO
  * level, set the environment variable {@code MOCK_MESSAGING_SPY_DEBUG=true} before starting
  * the JVM.
  *
@@ -53,7 +53,7 @@ public class MockMessagingSpy
 {
     private static final Logger logger = LoggerFactory.getLogger(MockMessagingSpy.class);
 
-    private static final boolean DEBUG_ENABLED = Boolean.parseBoolean(System.getenv("MOCK_MESSAGING_SPY_DEBUG"));
+    private static boolean DEBUG_ENABLED = Boolean.parseBoolean(System.getenv("MOCK_MESSAGING_SPY_DEBUG"));
     private void debugLog(String format, Object... args)
     {
         if (DEBUG_ENABLED)
@@ -61,6 +61,9 @@ public class MockMessagingSpy
         else
             logger.trace(format, args);
     }
+
+    public static void enableDebug() {DEBUG_ENABLED = true; }
+    public static void disableDebug() {DEBUG_ENABLED = false; }
 
     private final AtomicInteger messagesIntercepted = new AtomicInteger();
     private final AtomicInteger mockedMessageResponses = new AtomicInteger();
@@ -164,15 +167,15 @@ public class MockMessagingSpy
 
     void matchingMessage(Message<?> message)
     {
-        messagesIntercepted.incrementAndGet();
-        debugLog("Received matching message: {}", message);
+        int count = messagesIntercepted.incrementAndGet();
+        debugLog("messagesInterceptedCount: {}. Received matching message: {}", count, message);
         interceptedMessages.add(message);
     }
 
     void matchingResponse(Message<?> response)
     {
-        mockedMessageResponses.incrementAndGet();
-        debugLog("Responding to intercepted message: {}", response);
+        int count = mockedMessageResponses.incrementAndGet();
+        debugLog("mockedMessageResponseCount: {}. Responding to intercepted message: {}", count, response);
         deliveredResponses.add(response);
     }
 

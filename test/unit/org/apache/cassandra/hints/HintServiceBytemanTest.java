@@ -103,6 +103,7 @@ public class HintServiceBytemanTest
     action = "Thread.sleep(DatabaseDescriptor.getHintsFlushPeriodInMS() * 3L)")
     public void testListPendingHints() throws InterruptedException, ExecutionException, TimeoutException
     {
+        MockMessagingSpy.enableDebug();
         HintsService.instance.resumeDispatch();
         MockMessagingSpy spy = sendHintsAndResponses(metadata, 20000, -1);
         Awaitility.await("For the hints file to flush")
