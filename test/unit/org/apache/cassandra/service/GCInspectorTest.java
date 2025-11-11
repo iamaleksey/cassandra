@@ -81,7 +81,11 @@ public class GCInspectorTest
     @Test(expected=IllegalArgumentException.class)
     public void ensureLogLessThanWarn()
     {
-        Assert.assertEquals(20000, gcInspector.getGcLogThresholdInMs());
+        if (CassandraRelevantProperties.JAVA_VERSION.getString().compareTo("21") > 0)
+            Assert.assertEquals(20000, gcInspector.getGcLogThresholdInMs());
+        else
+            Assert.assertEquals(200, gcInspector.getGcLogThresholdInMs());
+
         gcInspector.setGcWarnThresholdInMs(1000);
         Assert.assertEquals(1000, gcInspector.getGcWarnThresholdInMs());
         gcInspector.setGcLogThresholdInMs(gcInspector.getGcWarnThresholdInMs() + 1);
