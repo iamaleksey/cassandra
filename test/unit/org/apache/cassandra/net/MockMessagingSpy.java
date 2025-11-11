@@ -53,6 +53,7 @@ public class MockMessagingSpy
 {
     private static final Logger logger = LoggerFactory.getLogger(MockMessagingSpy.class);
 
+    // checkstyle: suppress below 'blockSystemPropertyUsage'
     private static boolean DEBUG_ENABLED = Boolean.parseBoolean(System.getenv("MOCK_MESSAGING_SPY_DEBUG"));
     private void debugLog(String format, Object... args)
     {
