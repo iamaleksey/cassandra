@@ -1323,8 +1323,6 @@ public class StorageProxy implements StorageProxyMBean
         boolean isTracked = Schema.instance.getKeyspaceMetadata(mutations.get(0).getKeyspaceName()).params.replicationType.isTracked();
         if (isTracked)
         {
-            if (mutations.stream().anyMatch(m -> m instanceof CounterMutation))
-                throw new InvalidRequestException("Mutation tracking is currently unsupported with counters");
             if (augmented != null)
                 throw new InvalidRequestException("Mutation tracking is currently unsupported with triggers");
             if (mutateAtomically)
@@ -1367,7 +1365,7 @@ public class StorageProxy implements StorageProxyMBean
                 {
                     for (IMutation trackedMutation : trackedMutations)
                     {
-                        trackedHandlers.add(TrackedWriteRequest.perform((Mutation) trackedMutation, consistencyLevel, requestTime));
+                        trackedHandlers.add(TrackedWriteRequest.perform(trackedMutation, consistencyLevel, requestTime));
                     }
                 }
 
