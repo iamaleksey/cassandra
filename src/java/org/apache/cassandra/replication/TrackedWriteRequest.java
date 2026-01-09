@@ -136,14 +136,17 @@ public class TrackedWriteRequest
      *
      * @param mutation the mutation with assigned ID to send to replicas
      * @param plan the replica plan
-     * @param handler the response handler
+     * @param handler the response handler (can be TrackedWriteResponseHandler or LeaderCallback)
      * @param coordinatorAckInfo optional coordinator info for forwarded writes (null for local coordinator)
      */
     public static void sendToReplicas(Mutation mutation,
                                       ReplicaPlan.ForWrite plan,
-                                      TrackedWriteResponseHandler handler,
+                                      RequestCallback<NoPayload> handler,
                                       ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo)
     {
+        Preconditions.checkArgument(handler instanceof TrackedWriteResponseHandler || handler instanceof ForwardedWrite.LeaderCallback,
+                                    "Handler must be TrackedWriteResponseHandler or LeaderCallback");
+
         String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
 
         // this DC replicas
@@ -164,6 +167,12 @@ public class TrackedWriteRequest
         // the current version, but it's just an optimization, and we're ok not optimizing for mixed-version clusters.
         Mutation.serializer.prepareSerializedBuffer(mutation, MessagingService.current_version);
 
+        // Extract request time from handler
+        Dispatcher.RequestTime requestTime;
+        if (handler instanceof TrackedWriteResponseHandler)
+            requestTime = ((TrackedWriteResponseHandler) handler).getRequestTime();
+        else requestTime = ((ForwardedWrite.LeaderCallback) handler).getRequestTime();
+
         boolean foundSelf = false;
         for (Replica destination : plan.contacts())
         {
@@ -171,7 +180,9 @@ public class TrackedWriteRequest
             {
                 if (logger.isTraceEnabled())
                     logger.trace("Skipping dead replica {} for mutation {}", destination, mutation.id());
-                handler.expired(); // immediately mark the response as expired since the request will not be sent
+                // Only call expired() for AbstractWriteResponseHandler (not for LeaderCallback)
+                if (handler instanceof AbstractWriteResponseHandler)
+                    ((AbstractWriteResponseHandler<?>) handler).expired(); // immediately mark the response as expired since the request will not be sent
                 continue;
             }
 
@@ -184,8 +195,8 @@ public class TrackedWriteRequest
             if (message == null)
             {
                 Message.Builder<Mutation> builder = Message.builder(MUTATION_REQ, mutation)
-                        .withRequestTime(handler.getRequestTime())
-                        .withFlag(MessageFlag.CALL_BACK_ON_FAILURE);
+                                                           .withRequestTime(requestTime)
+                                                           .withFlag(MessageFlag.CALL_BACK_ON_FAILURE);
 
                 // If this is a forwarded write, include coordinator ack info so replicas
                 // know to respond to the original coordinator, not this leader
@@ -227,7 +238,10 @@ public class TrackedWriteRequest
             {
                 if (logger.isTraceEnabled())
                     logger.trace("Sending mutation {} to local replica {}", mutation.id(), replica);
-                MessagingService.instance().sendWriteWithCallback(message, replica, handler);
+                // Use appropriate send method based on handler type
+                if (handler instanceof AbstractWriteResponseHandler)
+                    MessagingService.instance().sendWriteWithCallback(message, replica, (AbstractWriteResponseHandler<?>) handler);
+                else MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
                 remoteReplicas.add(ClusterMetadata.current().directory.peerId(replica.endpoint()).id());
             }
         }

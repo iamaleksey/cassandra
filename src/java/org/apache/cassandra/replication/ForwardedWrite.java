@@ -49,7 +49,6 @@ import org.apache.cassandra.net.ParamType;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
 import org.apache.cassandra.service.AbstractWriteResponseHandler;
-import org.apache.cassandra.service.TrackedWriteResponseHandler;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.transport.Dispatcher;
@@ -322,9 +321,10 @@ public class ForwardedWrite
      *
      * This method:
      * 1. Creates CoordinatorAckInfo from the incoming message
-     * 2. Applies counter mutation locally with generated mutation ID
-     * 3. Forwards result (Mutation not CounterMutation) to other replicas with CoordinatorAckInfo
-     * 4. Sends leader's response back to coordinator
+     * 2. Creates a LeaderCallback to track responses from replicas
+     * 3. Applies counter mutation locally with generated mutation ID
+     * 4. Forwards result (Mutation not CounterMutation) to other replicas with CoordinatorAckInfo and LeaderCallback
+     * 5. Sends leader's response back to coordinator
      *
      * @param counterMutation the counter mutation to apply
      * @param message the original message (contains coordinator address and message ID)
@@ -342,25 +342,26 @@ public class ForwardedWrite
             Token token = counterMutation.key().getToken();
             Keyspace ks = Keyspace.open(keyspaceName);
             ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(ks, counterMutation.consistency(), token, ReplicaPlans.writeAll);
-            AbstractReplicationStrategy rs = plan.replicationStrategy();
 
             MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
 
             logger.trace("Forwarded counter mutation {}: applying locally with ID and forwarding to other replicas", id);
 
-            TrackedWriteResponseHandler handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.COUNTER, null, Dispatcher.RequestTime.forImmediateExecution()), id);
+            // Create LeaderCallback to track when replicas respond, allowing the leader
+            // to mark the mutation ID as witnessed on each replica proactively
+            LeaderCallback leaderCallback = new LeaderCallback(id, coordinatorAckInfo);
 
             // Apply counter mutation with ID to get result
             Mutation result = counterMutation.applyCounterMutation(id);
 
-            // Send result to other replicas with CoordinatorAckInfo
-            // They will respond to the coordinator, not to this leader
-            TrackedWriteRequest.sendToReplicas(result, plan, handler, coordinatorAckInfo);
+            // Apply locally using the leader callback
+            TrackedWriteRequest.applyMutationLocally(result, leaderCallback);
 
-            // Send this leader's response back to coordinator
-            MessagingService.instance().send(message.emptyResponse(), respondToAddress);
+            // Send result to other replicas with CoordinatorAckInfo and LeaderCallback
+            // Replicas will respond to both the leader (for witnessing) and the coordinator (for CL)
+            TrackedWriteRequest.sendToReplicas(result, plan, leaderCallback, coordinatorAckInfo);
 
-            logger.trace("Tracked counter mutation {} processed, response sent to {}", id, respondToAddress);
+            logger.trace("Tracked counter mutation {} processed, local application and replication initiated", id);
         }
         catch (Exception e)
         {
