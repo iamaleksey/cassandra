@@ -246,10 +246,7 @@ public class ForwardedWrite
      * Forward a tracked counter mutation to a replica leader for processing.
      * The leader will apply the counter mutation, assign a mutation ID, and replicate to other replicas.
      */
-    public static AbstractWriteResponseHandler<Object> forwardCounterMutation(CounterMutation counterMutation,
-                                                                               ReplicaPlan.ForWrite plan,
-                                                                               AbstractReplicationStrategy strategy,
-                                                                               Dispatcher.RequestTime requestTime)
+    public static AbstractWriteResponseHandler<Object> forwardCounterMutation(CounterMutation counterMutation, ReplicaPlan.ForWrite plan, AbstractReplicationStrategy strategy, Dispatcher.RequestTime requestTime)
     {
         Preconditions.checkArgument(counterMutation.id().isNone(), "CounterMutation should not have an ID when forwarding");
 
@@ -261,8 +258,9 @@ public class ForwardedWrite
         try
         {
             leader = ReplicaPlans.findCounterLeaderReplica(cm, counterMutation.getKeyspaceName(),
-                                                          counterMutation.key(), localDataCenter,
-                                                          counterMutation.consistency());
+                                                           counterMutation.key(),
+                                                           localDataCenter,
+                                                           counterMutation.consistency());
         }
         catch (Exception e)
         {
@@ -299,6 +297,23 @@ public class ForwardedWrite
     }
 
     /**
+     * Forward a mutation to a replica leader for processing.
+     * Dispatches to the appropriate method based on mutation type.
+     *
+     * @param mutation    the mutation to forward (can be Mutation or CounterMutation)
+     * @param plan        the replica plan
+     * @param strategy    the replication strategy
+     * @param requestTime the request time
+     * @return the write response handler
+     */
+    public static AbstractWriteResponseHandler<Object> forward(IMutation mutation, ReplicaPlan.ForWrite plan, AbstractReplicationStrategy strategy, Dispatcher.RequestTime requestTime)
+    {
+        if (mutation instanceof CounterMutation)
+            return forwardCounterMutation((CounterMutation) mutation, plan, strategy, requestTime);
+        else return forwardMutation((Mutation) mutation, plan, strategy, requestTime);
+    }
+
+    /**
      * Apply a forwarded tracked counter mutation on the leader replica.
      * Called by CounterMutationVerbHandler when receiving a forwarded counter write.
      *
@@ -313,8 +328,8 @@ public class ForwardedWrite
      * @param respondToAddress the address to send the response to (coordinator)
      */
     public static void applyForwardedCounterMutation(CounterMutation counterMutation,
-                                                      Message<CounterMutation> message,
-                                                      InetAddressAndPort respondToAddress)
+                                                     Message<CounterMutation> message,
+                                                     InetAddressAndPort respondToAddress)
     {
         try
         {
@@ -328,14 +343,9 @@ public class ForwardedWrite
 
             MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
 
-            if (logger.isTraceEnabled())
-                logger.trace("Forwarded counter mutation {}: applying locally with ID and forwarding to other replicas", id);
+            logger.trace("Forwarded counter mutation {}: applying locally with ID and forwarding to other replicas", id);
 
-            TrackedWriteResponseHandler handler =
-                TrackedWriteResponseHandler.wrap(
-                    rs.getWriteResponseHandler(plan, null, WriteType.COUNTER, null, Dispatcher.RequestTime.forImmediateExecution()),
-                    id
-                );
+            TrackedWriteResponseHandler handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.COUNTER, null, Dispatcher.RequestTime.forImmediateExecution()), id);
 
             // Apply counter mutation with ID to get result
             Mutation result = counterMutation.applyCounterMutation(id);

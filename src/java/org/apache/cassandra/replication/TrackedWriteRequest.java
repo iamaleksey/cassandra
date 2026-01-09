@@ -98,10 +98,7 @@ public class TrackedWriteRequest
                 logger.trace("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
 
-            if (mutation instanceof CounterMutation)
-                return ForwardedWrite.forwardCounterMutation((CounterMutation) mutation, plan, rs, requestTime);
-            else
-                return ForwardedWrite.forwardMutation((Mutation) mutation, plan, rs, requestTime);
+            return ForwardedWrite.forward(mutation, plan, rs, requestTime);
         }
 
         if (logger.isTraceEnabled())
