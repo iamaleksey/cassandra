@@ -246,7 +246,10 @@ public class ForwardedWrite
      * Forward a tracked counter mutation to a replica leader for processing.
      * The leader will apply the counter mutation, assign a mutation ID, and replicate to other replicas.
      */
-    public static AbstractWriteResponseHandler<Object> forwardCounterMutation(CounterMutation counterMutation, ReplicaPlan.ForWrite plan, AbstractReplicationStrategy strategy, Dispatcher.RequestTime requestTime)
+    public static AbstractWriteResponseHandler<Object> forwardCounterMutation(CounterMutation counterMutation,
+                                                                              ReplicaPlan.ForWrite plan,
+                                                                              AbstractReplicationStrategy strategy,
+                                                                              Dispatcher.RequestTime requestTime)
     {
         Preconditions.checkArgument(counterMutation.id().isNone(), "CounterMutation should not have an ID when forwarding");
 
@@ -284,10 +287,7 @@ public class ForwardedWrite
                 logger.trace("Adding forwarding callback for tracked counter response from {} id {}", replica, forwardMessage.id());
                 MessagingService.instance().callbacks.addWithExpiration(handler, forwardMessage, replica);
             }
-            else
-            {
-                handler.expired();
-            }
+            else handler.expired();
         }
 
         // Send the counter mutation to the leader
@@ -306,7 +306,10 @@ public class ForwardedWrite
      * @param requestTime the request time
      * @return the write response handler
      */
-    public static AbstractWriteResponseHandler<Object> forward(IMutation mutation, ReplicaPlan.ForWrite plan, AbstractReplicationStrategy strategy, Dispatcher.RequestTime requestTime)
+    public static AbstractWriteResponseHandler<Object> forward(IMutation mutation,
+                                                               ReplicaPlan.ForWrite plan,
+                                                               AbstractReplicationStrategy strategy,
+                                                               Dispatcher.RequestTime requestTime)
     {
         if (mutation instanceof CounterMutation)
             return forwardCounterMutation((CounterMutation) mutation, plan, strategy, requestTime);

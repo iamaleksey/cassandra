@@ -97,7 +97,6 @@ public class TrackedWriteRequest
             if (logger.isTraceEnabled())
                 logger.trace("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
-
             return ForwardedWrite.forward(mutation, plan, rs, requestTime);
         }
 
@@ -106,20 +105,19 @@ public class TrackedWriteRequest
         writeMetrics.localRequests.mark();
 
         MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
-
+        mutation = mutation.withMutationId(id);
         final TrackedWriteResponseHandler handler;
         if (logger.isTraceEnabled())
             logger.trace("Write replication plan for mutation {}: live={}, pending={}, all={}",
-                    id, plan.live(), plan.pending(), plan.contacts());
+                         id, plan.live(), plan.pending(), plan.contacts());
 
         if (mutation instanceof CounterMutation)
         {
             handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.COUNTER, null, requestTime), id);
-            applyCounterMutationLocally((CounterMutation) mutation, id, plan, handler);
+            applyCounterMutationLocally((CounterMutation) mutation, plan, handler);
         }
         else
         {
-            mutation = mutation.withMutationId(id);
             handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.SIMPLE, null, requestTime), id);
             applyLocallyAndSendToReplicas((Mutation) mutation, plan, handler);
         }
@@ -132,7 +130,10 @@ public class TrackedWriteRequest
         sendToReplicasInternal(mutation, plan, handler, null, false);
     }
 
-    public static void sendToReplicasOnly(Mutation mutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler, ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo)
+    public static void sendToReplicasOnly(Mutation mutation,
+                                          ReplicaPlan.ForWrite plan,
+                                          TrackedWriteResponseHandler handler,
+                                          ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo)
     {
         sendToReplicasInternal(mutation, plan, handler, coordinatorAckInfo, true);
     }
@@ -271,10 +272,11 @@ public class TrackedWriteRequest
         Stage.MUTATION.maybeExecuteImmediately(new LocalMutationRunnable(mutation, handler));
     }
 
-    static void applyCounterMutationLocally(CounterMutation counterMutation, MutationId mutationId,
-                                            ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
+    static void applyCounterMutationLocally(CounterMutation counterMutation,
+                                            ReplicaPlan.ForWrite plan,
+                                            TrackedWriteResponseHandler handler)
     {
-        Stage.COUNTER_MUTATION.maybeExecuteImmediately(new LocalCounterMutationRunnable(counterMutation, mutationId, plan, handler));
+        Stage.COUNTER_MUTATION.maybeExecuteImmediately(new LocalCounterMutationRunnable(counterMutation, plan, handler));
     }
 
     private static class LocalMutationRunnable implements DebuggableTask.RunnableDebuggableTask
@@ -348,14 +350,12 @@ public class TrackedWriteRequest
     private static class LocalCounterMutationRunnable implements DebuggableTask.RunnableDebuggableTask
     {
         private final CounterMutation counterMutation;
-        private final MutationId mutationId;
         private final ReplicaPlan.ForWrite plan;
         private final TrackedWriteResponseHandler handler;
 
-        LocalCounterMutationRunnable(CounterMutation counterMutation, MutationId mutationId, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
+        LocalCounterMutationRunnable(CounterMutation counterMutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
         {
             this.counterMutation = counterMutation;
-            this.mutationId = mutationId;
             this.plan = plan;
             this.handler = handler;
         }
@@ -380,7 +380,7 @@ public class TrackedWriteRequest
 
             try
             {
-                Mutation result = counterMutation.applyCounterMutation((mutationId));
+                Mutation result = counterMutation.applyCounterMutation((counterMutation.id()));
                 sendToReplicasOnly(result, plan, handler, null);
             }
             catch (Exception ex)
