@@ -355,7 +355,7 @@ public class ForwardedWrite
 
             // Send result to other replicas with CoordinatorAckInfo
             // They will respond to the coordinator, not to this leader
-            TrackedWriteRequest.sendToReplicasOnly(result, plan, handler, coordinatorAckInfo);
+            TrackedWriteRequest.sendToReplicas(result, plan, handler, coordinatorAckInfo);
 
             // Send this leader's response back to coordinator
             MessagingService.instance().send(message.emptyResponse(), respondToAddress);

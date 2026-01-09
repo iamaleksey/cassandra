@@ -127,31 +127,22 @@ public class TrackedWriteRequest
     public static void applyLocallyAndSendToReplicas(Mutation mutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
     {
         applyMutationLocally(mutation, handler);
-        sendToReplicasInternal(mutation, plan, handler, null, false);
-    }
-
-    public static void sendToReplicasOnly(Mutation mutation,
-                                          ReplicaPlan.ForWrite plan,
-                                          TrackedWriteResponseHandler handler,
-                                          ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo)
-    {
-        sendToReplicasInternal(mutation, plan, handler, coordinatorAckInfo, true);
+        sendToReplicas(mutation, plan, handler, null);
     }
 
     /**
-     * Internal method to send a mutation to all replicas.
+     * Sends a mutation to all replicas.
      * Handles grouping replicas by DC, sending messages, and tracking remote replicas.
      *
      * @param mutation the mutation with assigned ID to send to replicas
      * @param plan the replica plan
      * @param handler the response handler
      * @param coordinatorAckInfo optional coordinator info for forwarded writes (null for local coordinator)
-     * @param notifyHandlerForLocal if true, notify handler for local replica (used when mutation already applied)
      */
-    private static void sendToReplicasInternal(Mutation mutation, ReplicaPlan.ForWrite plan,
-                                               TrackedWriteResponseHandler handler,
-                                               ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo,
-                                               boolean notifyHandlerForLocal)
+    public static void sendToReplicas(Mutation mutation,
+                                      ReplicaPlan.ForWrite plan,
+                                      TrackedWriteResponseHandler handler,
+                                      ForwardedWrite.CoordinatorAckInfo coordinatorAckInfo)
     {
         String localDataCenter = DatabaseDescriptor.getLocator().local().datacenter;
 
@@ -225,10 +216,6 @@ public class TrackedWriteRequest
         }
 
         Preconditions.checkState(foundSelf, "Coordinator must be a replica");
-
-        // Notify handler that local write succeeded (mutation was already applied before calling this method)
-        if (notifyHandlerForLocal)
-            handler.onResponse(null);
 
         IntHashSet remoteReplicas = null;
         if (localDCReplicas != null || remoteDCReplicas != null)
@@ -381,7 +368,8 @@ public class TrackedWriteRequest
             try
             {
                 Mutation result = counterMutation.applyCounterMutation((counterMutation.id()));
-                sendToReplicasOnly(result, plan, handler, null);
+                handler.onResponse(null);
+                sendToReplicas(result, plan, handler, null);
             }
             catch (Exception ex)
             {
