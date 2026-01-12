@@ -94,23 +94,24 @@ public class TrackedWriteRequest
 
         if (plan.lookup(FBUtilities.getBroadcastAddressAndPort()) == null)
         {
-            if (logger.isTraceEnabled())
-                logger.trace("Remote tracked request {} {}", mutation, plan);
+            logger.trace("Remote tracked request {} {}", mutation, plan);
             writeMetrics.remoteRequests.mark();
             return ForwardedWrite.forward(mutation, plan, rs, requestTime);
         }
 
-        if (logger.isTraceEnabled())
-            logger.trace("Local tracked request {} {}", mutation, plan);
+        logger.trace("Local tracked request {} {}", mutation, plan);
         writeMetrics.localRequests.mark();
 
         MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
         mutation = mutation.withMutationId(id);
-        final TrackedWriteResponseHandler handler;
+
         if (logger.isTraceEnabled())
+        {
             logger.trace("Write replication plan for mutation {}: live={}, pending={}, all={}",
                          id, plan.live(), plan.pending(), plan.contacts());
+        }
 
+        final TrackedWriteResponseHandler handler;
         if (mutation instanceof CounterMutation)
         {
             handler = TrackedWriteResponseHandler.wrap(rs.getWriteResponseHandler(plan, null, WriteType.COUNTER, null, requestTime), id);
@@ -168,18 +169,14 @@ public class TrackedWriteRequest
         Mutation.serializer.prepareSerializedBuffer(mutation, MessagingService.current_version);
 
         // Extract request time from handler
-        Dispatcher.RequestTime requestTime;
-        if (handler instanceof TrackedWriteResponseHandler)
-            requestTime = ((TrackedWriteResponseHandler) handler).getRequestTime();
-        else requestTime = ((ForwardedWrite.LeaderCallback) handler).getRequestTime();
+        Dispatcher.RequestTime requestTime = getRequestTime(handler);
 
         boolean foundSelf = false;
         for (Replica destination : plan.contacts())
         {
             if (!plan.isAlive(destination))
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("Skipping dead replica {} for mutation {}", destination, mutation.id());
+                logger.trace("Skipping dead replica {} for mutation {}", destination, mutation.id());
                 // Only call expired() for AbstractWriteResponseHandler (not for LeaderCallback)
                 if (handler instanceof AbstractWriteResponseHandler)
                     ((AbstractWriteResponseHandler<?>) handler).expired(); // immediately mark the response as expired since the request will not be sent
@@ -218,11 +215,8 @@ public class TrackedWriteRequest
             {
                 if (remoteDCReplicas == null)
                     remoteDCReplicas = new HashMap<>();
-
-                List<Replica> replicas = remoteDCReplicas.get(dc);
-                if (replicas == null)
-                    replicas = remoteDCReplicas.computeIfAbsent(dc, ignore -> new ArrayList<>(3)); // most DCs will have <= 3 replicas
-                replicas.add(destination);
+                remoteDCReplicas.computeIfAbsent(dc, ignore -> new ArrayList<>(3)) // most DCs will have <= 3 replicas
+                                .add(destination);
             }
         }
 
@@ -236,12 +230,13 @@ public class TrackedWriteRequest
         {
             for (Replica replica : localDCReplicas)
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("Sending mutation {} to local replica {}", mutation.id(), replica);
+                logger.trace("Sending mutation {} to local replica {}", mutation.id(), replica);
                 // Use appropriate send method based on handler type
                 if (handler instanceof AbstractWriteResponseHandler)
                     MessagingService.instance().sendWriteWithCallback(message, replica, (AbstractWriteResponseHandler<?>) handler);
-                else MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
+                else
+                    MessagingService.instance().sendWithCallback(message, replica.endpoint(), handler);
+
                 remoteReplicas.add(ClusterMetadata.current().directory.peerId(replica.endpoint()).id());
             }
         }
@@ -251,8 +246,7 @@ public class TrackedWriteRequest
             // for each datacenter, send the message to one node to relay the write to other replicas
             for (List<Replica> dcReplicas : remoteDCReplicas.values())
             {
-                if (logger.isTraceEnabled())
-                    logger.trace("Sending mutation {} to remote dc replicas {}", mutation.id(), dcReplicas);
+                logger.trace("Sending mutation {} to remote dc replicas {}", mutation.id(), dcReplicas);
                 sendMessagesToRemoteDC(message, EndpointsForToken.copyOf(mutation.key().getToken(), dcReplicas), handler, coordinatorAckInfo);
                 for (Replica replica : dcReplicas)
                     remoteReplicas.add(ClusterMetadata.current().directory.peerId(replica.endpoint()).id());
@@ -260,156 +254,7 @@ public class TrackedWriteRequest
         }
 
         if (remoteReplicas != null)
-        {
-            if (logger.isTraceEnabled())
-                logger.trace("Sending mutation {} to remote replicas {}", mutation.id(), remoteReplicas);
             MutationTrackingService.instance.sentWriteRequest(mutation, remoteReplicas);
-        }
-    }
-
-    static void applyMutationLocally(Mutation mutation, RequestCallback<NoPayload> handler)
-    {
-        Preconditions.checkArgument(handler instanceof TrackedWriteResponseHandler || handler instanceof ForwardedWrite.LeaderCallback);
-        Stage.MUTATION.maybeExecuteImmediately(new LocalMutationRunnable(mutation, handler));
-    }
-
-    static void applyCounterMutationLocally(CounterMutation counterMutation,
-                                            ReplicaPlan.ForWrite plan,
-                                            TrackedWriteResponseHandler handler)
-    {
-        Stage.COUNTER_MUTATION.maybeExecuteImmediately(new LocalCounterMutationRunnable(counterMutation, plan, handler));
-    }
-
-    private static class LocalMutationRunnable implements DebuggableTask.RunnableDebuggableTask
-    {
-        private final Mutation mutation;
-        private final RequestCallback<NoPayload> handler;
-
-        LocalMutationRunnable(Mutation mutation, RequestCallback<NoPayload> handler)
-        {
-            Preconditions.checkArgument(handler instanceof TrackedWriteResponseHandler || handler instanceof ForwardedWrite.LeaderCallback);
-            this.mutation = mutation;
-            this.handler = handler;
-        }
-
-        private Dispatcher.RequestTime getRequestTime()
-        {
-            if (handler instanceof TrackedWriteResponseHandler)
-                return ((TrackedWriteResponseHandler) handler).getRequestTime();
-            if (handler instanceof ForwardedWrite.LeaderCallback)
-                return ((ForwardedWrite.LeaderCallback) handler).getRequestTime();
-            throw new IllegalStateException();
-        }
-
-        @Override
-        public final void run()
-        {
-            long now = MonotonicClock.Global.approxTime.now();
-            long deadline = getRequestTime().computeDeadline(MUTATION_REQ.expiresAfterNanos());
-
-            if (now > deadline)
-            {
-                long timeTakenNanos = now - startTimeNanos();
-                MessagingService.instance().metrics.recordSelfDroppedMessage(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
-                return;
-            }
-
-            try
-            {
-                mutation.apply();
-                handler.onResponse(null);
-            }
-            catch (Exception ex)
-            {
-                if (!(ex instanceof WriteTimeoutException))
-                    logger.error("Failed to apply mutation locally : ", ex);
-                handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailure.forException(ex));
-            }
-        }
-
-        @Override
-        public long creationTimeNanos()
-        {
-            return getRequestTime().enqueuedAtNanos();
-        }
-
-        @Override
-        public long startTimeNanos()
-        {
-            return getRequestTime().startedAtNanos();
-        }
-
-        @Override
-        public String description()
-        {
-            // description is an Object and toString() called so we do not have to evaluate the Mutation.toString()
-            // unless expliclitly checked
-            return mutation.toString();
-        }
-    }
-
-    private static class LocalCounterMutationRunnable implements DebuggableTask.RunnableDebuggableTask
-    {
-        private final CounterMutation counterMutation;
-        private final ReplicaPlan.ForWrite plan;
-        private final TrackedWriteResponseHandler handler;
-
-        LocalCounterMutationRunnable(CounterMutation counterMutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
-        {
-            this.counterMutation = counterMutation;
-            this.plan = plan;
-            this.handler = handler;
-        }
-
-        private Dispatcher.RequestTime getReqestTime()
-        {
-            return handler.getRequestTime();
-        }
-
-        @Override
-        public void run()
-        {
-            long now = MonotonicClock.Global.approxTime.now();
-            long deadline = getReqestTime().computeDeadline(COUNTER_MUTATION_REQ.expiresAfterNanos());
-
-            if (now > deadline)
-            {
-                long timeTakenNanos = now - startTimeNanos();
-                MessagingService.instance().metrics.recordSelfDroppedMessage(COUNTER_MUTATION_REQ, timeTakenNanos, NANOSECONDS);
-                return;
-            }
-
-            try
-            {
-                Mutation result = counterMutation.applyCounterMutation((counterMutation.id()));
-                handler.onResponse(null);
-                sendToReplicas(result, plan, handler, null);
-            }
-            catch (Exception ex)
-            {
-                if(!(ex instanceof WriteTimeoutException))
-                    logger.error("Failed to apply counter mutation locally:  ", ex);
-                handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailure.forException(ex));
-            }
-        }
-
-        @Override
-        public long creationTimeNanos()
-        {
-            return getReqestTime().enqueuedAtNanos();
-        }
-
-        @Override
-        public long startTimeNanos()
-        {
-            return getReqestTime().startedAtNanos();
-        }
-
-        @Override
-        public String description()
-        {
-            return counterMutation.toString();
-        }
     }
 
     /*
@@ -464,5 +309,150 @@ public class TrackedWriteRequest
         EndpointsForToken healthy = targets.filter(r -> DynamicEndpointSnitch.getSeverity(r.endpoint()) == 0);
         EndpointsForToken select = healthy.isEmpty() ? targets : healthy;
         return select.get(ThreadLocalRandom.current().nextInt(0, select.size()));
+    }
+
+    static void applyMutationLocally(Mutation mutation, RequestCallback<NoPayload> handler)
+    {
+        Preconditions.checkArgument(handler instanceof TrackedWriteResponseHandler || handler instanceof ForwardedWrite.LeaderCallback);
+        Stage.MUTATION.maybeExecuteImmediately(new LocalMutationRunnable(mutation, handler));
+    }
+
+    static void applyCounterMutationLocally(CounterMutation counterMutation,
+                                            ReplicaPlan.ForWrite plan,
+                                            TrackedWriteResponseHandler handler)
+    {
+        Stage.COUNTER_MUTATION.maybeExecuteImmediately(new LocalCounterMutationRunnable(counterMutation, plan, handler));
+    }
+
+    private static class LocalMutationRunnable implements DebuggableTask.RunnableDebuggableTask
+    {
+        private final Mutation mutation;
+        private final RequestCallback<NoPayload> handler;
+
+        LocalMutationRunnable(Mutation mutation, RequestCallback<NoPayload> handler)
+        {
+            Preconditions.checkArgument(handler instanceof TrackedWriteResponseHandler || handler instanceof ForwardedWrite.LeaderCallback);
+            this.mutation = mutation;
+            this.handler = handler;
+        }
+
+        @Override
+        public final void run()
+        {
+            long now = MonotonicClock.Global.approxTime.now();
+            long deadline = getRequestTime(handler).computeDeadline(MUTATION_REQ.expiresAfterNanos());
+
+            if (now > deadline)
+            {
+                long timeTakenNanos = now - startTimeNanos();
+                MessagingService.instance().metrics.recordSelfDroppedMessage(Verb.MUTATION_REQ, timeTakenNanos, NANOSECONDS);
+                return;
+            }
+
+            try
+            {
+                mutation.apply();
+                handler.onResponse(null);
+            }
+            catch (Exception ex)
+            {
+                if (!(ex instanceof WriteTimeoutException))
+                    logger.error("Failed to apply mutation locally : ", ex);
+                handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailure.forException(ex));
+            }
+        }
+
+        @Override
+        public long creationTimeNanos()
+        {
+            return getRequestTime(handler).enqueuedAtNanos();
+        }
+
+        @Override
+        public long startTimeNanos()
+        {
+            return getRequestTime(handler).startedAtNanos();
+        }
+
+        @Override
+        public String description()
+        {
+            // description is an Object and toString() called so we do not have to evaluate the Mutation.toString()
+            // unless expliclitly checked
+            return mutation.toString();
+        }
+    }
+
+    private static class LocalCounterMutationRunnable implements DebuggableTask.RunnableDebuggableTask
+    {
+        private final CounterMutation counterMutation;
+        private final ReplicaPlan.ForWrite plan;
+        private final TrackedWriteResponseHandler handler;
+
+        LocalCounterMutationRunnable(CounterMutation counterMutation, ReplicaPlan.ForWrite plan, TrackedWriteResponseHandler handler)
+        {
+            this.counterMutation = counterMutation;
+            this.plan = plan;
+            this.handler = handler;
+        }
+
+        private Dispatcher.RequestTime getReqestTime()
+        {
+            return handler.getRequestTime();
+        }
+
+        @Override
+        public void run()
+        {
+            long now = MonotonicClock.Global.approxTime.now();
+            long deadline = getReqestTime().computeDeadline(COUNTER_MUTATION_REQ.expiresAfterNanos());
+
+            if (now > deadline)
+            {
+                long timeTakenNanos = now - startTimeNanos();
+                MessagingService.instance().metrics.recordSelfDroppedMessage(COUNTER_MUTATION_REQ, timeTakenNanos, NANOSECONDS);
+                return;
+            }
+
+            try
+            {
+                Mutation result = counterMutation.applyCounterMutation(counterMutation.id());
+                handler.onResponse(null);
+                sendToReplicas(result, plan, handler, null);
+            }
+            catch (Exception ex)
+            {
+                if(!(ex instanceof WriteTimeoutException))
+                    logger.error("Failed to apply counter mutation locally:  ", ex);
+                handler.onFailure(FBUtilities.getBroadcastAddressAndPort(), RequestFailure.forException(ex));
+            }
+        }
+
+        @Override
+        public long creationTimeNanos()
+        {
+            return getReqestTime().enqueuedAtNanos();
+        }
+
+        @Override
+        public long startTimeNanos()
+        {
+            return getReqestTime().startedAtNanos();
+        }
+
+        @Override
+        public String description()
+        {
+            return counterMutation.toString();
+        }
+    }
+
+    private static Dispatcher.RequestTime getRequestTime(RequestCallback<?> callback)
+    {
+        if (callback instanceof TrackedWriteResponseHandler)
+            return ((TrackedWriteResponseHandler) callback).getRequestTime();
+        if (callback instanceof ForwardedWrite.LeaderCallback)
+            return ((ForwardedWrite.LeaderCallback) callback).getRequestTime();
+        throw new IllegalStateException();
     }
 }

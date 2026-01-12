@@ -173,11 +173,8 @@ public class ForwardedWrite
                 {
                     if (remoteDCReplicas == null)
                         remoteDCReplicas = new HashMap<>();
-
-                    List<Replica> messages = remoteDCReplicas.get(dc);
-                    if (messages == null)
-                        messages = remoteDCReplicas.computeIfAbsent(dc, ignore -> new ArrayList<>(3)); // most DCs will have <= 3 replicas
-                    messages.add(replica);
+                    remoteDCReplicas.computeIfAbsent(dc, ignore -> new ArrayList<>(3)) // most DCs will have <= 3 replicas
+                                    .add(replica);
                 }
             }
 
@@ -278,7 +275,6 @@ public class ForwardedWrite
 
         // Add callbacks for all live replicas to respond directly to coordinator
         Message<CounterMutation> forwardMessage = Message.outWithRequestTime(Verb.COUNTER_MUTATION_REQ, counterMutation, requestTime);
-
         for (Replica replica : plan.contacts())
         {
             if (plan.isAlive(replica))
@@ -286,7 +282,10 @@ public class ForwardedWrite
                 logger.trace("Adding forwarding callback for tracked counter response from {} id {}", replica, forwardMessage.id());
                 MessagingService.instance().callbacks.addWithExpiration(handler, forwardMessage, replica);
             }
-            else handler.expired();
+            else
+            {
+                handler.expired();
+            }
         }
 
         // Send the counter mutation to the leader
@@ -312,13 +311,14 @@ public class ForwardedWrite
     {
         if (mutation instanceof CounterMutation)
             return forwardCounterMutation((CounterMutation) mutation, plan, strategy, requestTime);
-        else return forwardMutation((Mutation) mutation, plan, strategy, requestTime);
+        else
+            return forwardMutation((Mutation) mutation, plan, strategy, requestTime);
     }
 
     /**
      * Apply a forwarded tracked counter mutation on the leader replica.
      * Called by CounterMutationVerbHandler when receiving a forwarded counter write.
-     *
+     * <p>
      * This method:
      * 1. Creates CoordinatorAckInfo from the incoming message
      * 2. Creates a LeaderCallback to track responses from replicas
@@ -328,45 +328,35 @@ public class ForwardedWrite
      *
      * @param counterMutation the counter mutation to apply
      * @param message the original message (contains coordinator address and message ID)
-     * @param respondToAddress the address to send the response to (coordinator)
      */
-    public static void applyForwardedCounterMutation(CounterMutation counterMutation,
-                                                     Message<CounterMutation> message,
-                                                     InetAddressAndPort respondToAddress)
+    public static void applyForwardedCounterMutation(CounterMutation counterMutation, Message<CounterMutation> message)
     {
-        try
-        {
-            CoordinatorAckInfo coordinatorAckInfo = CoordinatorAckInfo.toCoordinator(message.from(), message.id());
+        CoordinatorAckInfo coordinatorAckInfo = CoordinatorAckInfo.toCoordinator(message.from(), message.id());
 
-            String keyspaceName = counterMutation.getKeyspaceName();
-            Token token = counterMutation.key().getToken();
-            Keyspace ks = Keyspace.open(keyspaceName);
-            ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(ks, counterMutation.consistency(), token, ReplicaPlans.writeAll);
+        String keyspaceName = counterMutation.getKeyspaceName();
+        Token token = counterMutation.key().getToken();
+        Keyspace ks = Keyspace.open(keyspaceName);
+        ReplicaPlan.ForWrite plan = ReplicaPlans.forWrite(ks, counterMutation.consistency(), token, ReplicaPlans.writeAll);
 
-            MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
+        MutationId id = MutationTrackingService.instance.nextMutationId(keyspaceName, token);
 
-            logger.trace("Forwarded counter mutation {}: applying locally with ID and forwarding to other replicas", id);
+        logger.trace("Forwarded counter mutation {}: applying locally with ID and forwarding to other replicas", id);
 
-            // Create LeaderCallback to track when replicas respond, allowing the leader
-            // to mark the mutation ID as witnessed on each replica proactively
-            LeaderCallback leaderCallback = new LeaderCallback(id, coordinatorAckInfo);
+        // Create LeaderCallback to track when replicas respond, allowing the leader
+        // to mark the mutation ID as witnessed on each replica proactively
+        LeaderCallback leaderCallback = new LeaderCallback(id, coordinatorAckInfo);
 
-            // Apply counter mutation with ID to get result
-            Mutation result = counterMutation.applyCounterMutation(id);
+        // Apply counter mutation with ID to get result
+        Mutation result = counterMutation.applyCounterMutation(id);
 
-            // Apply locally using the leader callback
-            TrackedWriteRequest.applyMutationLocally(result, leaderCallback);
+        // Apply locally using the leader callback
+        TrackedWriteRequest.applyMutationLocally(result, leaderCallback);
 
-            // Send result to other replicas with CoordinatorAckInfo and LeaderCallback
-            // Replicas will respond to both the leader (for witnessing) and the coordinator (for CL)
-            TrackedWriteRequest.sendToReplicas(result, plan, leaderCallback, coordinatorAckInfo);
+        // Send result to other replicas with CoordinatorAckInfo and LeaderCallback
+        // Replicas will respond to both the leader (for witnessing) and the coordinator (for CL)
+        TrackedWriteRequest.sendToReplicas(result, plan, leaderCallback, coordinatorAckInfo);
 
-            logger.trace("Tracked counter mutation {} processed, local application and replication initiated", id);
-        }
-        catch (Exception e)
-        {
-            logger.error("Error applying forwarded tracked counter mutation {}", counterMutation, e);
-        }
+        logger.trace("Tracked counter mutation {} processed, local application and replication initiated", id);
     }
 
     public static final IVersionedSerializer<MutationRequest> serializer = new IVersionedSerializer<>()

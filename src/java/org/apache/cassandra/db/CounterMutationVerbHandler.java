@@ -44,7 +44,7 @@ public class CounterMutationVerbHandler extends AbstractMutationVerbHandler<Coun
         if (keyspace.getMetadata().useMutationTracking())
         {
             logger.trace("Applying tracked forwarded counter mutation {}", cm);
-            ForwardedWrite.applyForwardedCounterMutation(cm, message, respondToAddress);
+            ForwardedWrite.applyForwardedCounterMutation(cm, message);
             return;
         }
 
