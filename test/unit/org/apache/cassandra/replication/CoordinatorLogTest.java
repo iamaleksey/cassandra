@@ -179,7 +179,7 @@ public class CoordinatorLogTest
         MutationJournal.instance().write(mutation2.id(), mutation2);
 
         CoordinatorLog log =
-            CoordinatorLog.recreate(KEYSPACE, 0L, range, LOCAL_HOST_ID, logId, PARTICIPANTS, witnessed, witnessed, unreconciled);
+            CoordinatorLog.recreate(KEYSPACE, 0L, range, LOCAL_HOST_ID, logId, PARTICIPANTS, witnessed, witnessed, unreconciled, null);
 
         Offsets.Mutable reconciled = new Offsets.Mutable(logId);
         reconciled.add(3, 4);

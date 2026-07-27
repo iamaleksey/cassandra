@@ -36,6 +36,8 @@ import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.utils.AbstractIterator;
 
+import static java.lang.String.format;
+
 public abstract class Offsets implements Iterable<ShortMutationId>
 {
     private static final int INITIAL_CAPACITY = 16;
@@ -299,6 +301,16 @@ public abstract class Offsets implements Iterable<ShortMutationId>
         public void addAll(Offsets other)
         {
             addAll(other, RangeConsumer.NONE);
+        }
+
+        public void set(Offsets other)
+        {
+            if (!logId.equals(other.logId))
+                throw new IllegalArgumentException(format("Log id mismatch: %s vs %s", logId, other.logId));
+            if (bounds.length < other.size)
+                bounds = new int[Math.max(other.size, INITIAL_CAPACITY)];
+            System.arraycopy(other.bounds, 0, bounds, 0, other.size);
+            this.size = other.size;
         }
 
         public boolean add(int offset, RangeConsumer onAdded)

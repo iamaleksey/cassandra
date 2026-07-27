@@ -33,6 +33,7 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
 import com.google.common.base.Preconditions;
+import com.google.common.collect.Maps;
 
 import org.apache.cassandra.config.DatabaseDescriptor;
 import org.apache.cassandra.db.ColumnFamilyStore;
@@ -479,10 +480,11 @@ public final class SealingCoordinator
 
     private static void seal(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
     {
-        initiate(shards, withoutNode);  // ACTIVE -> SEALING for each Shard
-        drain(shards, withoutNode);     // drain in-flight local writes
-        reconcile(shards, withoutNode); // wait for logs to reconcile
-        complete(shards, withoutNode);  // SEALING-> SEALED for each Shard + journal flush
+        initiate(shards, withoutNode);      // ACTIVE -> SEALING for each Shard
+        drain(shards, withoutNode);         // drain in-flight local writes
+        Map<ShardMetadata, Log2OffsetsMap.Mutable> reconciled =
+            reconcile(shards, withoutNode); // wait for logs to reconcile; capture the sealed set per shard
+        complete(reconciled, withoutNode);  // SEALING-> SEALED for each Shard + journal flush
     }
 
     private static void initiate(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
@@ -551,19 +553,23 @@ public final class SealingCoordinator
      * For each of the shards, capture the witnessed union then poll each participant until it has
      * caught up and witnessed the entire offset union itself.
      */
-    private static void reconcile(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
+    private static Map<ShardMetadata, Log2OffsetsMap.Mutable> reconcile(
+        Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
     {
+        Map<ShardMetadata, Log2OffsetsMap.Mutable> reconciled = Maps.newHashMapWithExpectedSize(shards.size());
         for (ShardMetadata shard : shards)
-            reconcile(shard, withoutNode);
+            reconciled.put(shard, reconcile(shard, withoutNode));
+        return reconciled;
     }
 
-    private static void reconcile(ShardMetadata shard, @Nullable NodeId withoutNode)
+    private static Log2OffsetsMap.Mutable reconcile(ShardMetadata shard, @Nullable NodeId withoutNode)
     {
         // capture shard's witnessed offsets once
         Log2OffsetsMap.Mutable offsets = captureWitnessedOffsets(shard, withoutNode);
         // poll every participant until they've each witnessed the union of offsets
         for (InetAddressAndPort endpoint : toEndpoints(shard.participants, withoutNode))
             pollUntilWitnesses(shard, offsets, endpoint);
+        return offsets;
     }
 
     private static Log2OffsetsMap.Mutable captureWitnessedOffsets(ShardMetadata shard, @Nullable NodeId withoutNode)
@@ -606,11 +612,11 @@ public final class SealingCoordinator
         }
     }
 
-    private static void complete(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
+    private static void complete(Map<ShardMetadata, Log2OffsetsMap.Mutable> reconciled, @Nullable NodeId withoutNode)
     {
-        List<Future<Void>> futures = new ArrayList<>(shards.size());
-        for (ShardMetadata shard : shards)
-            futures.add(complete(shard, withoutNode));
+        List<Future<Void>> futures = new ArrayList<>(reconciled.size());
+        for (Map.Entry<ShardMetadata, Log2OffsetsMap.Mutable> entry : reconciled.entrySet())
+            futures.add(complete(entry.getKey(), entry.getValue(), withoutNode));
 
         try
         {
@@ -625,9 +631,9 @@ public final class SealingCoordinator
     /**
      * Promote every participant of the (drained and reconciled) shard from SEALING to SEALED.
      */
-    private static AsyncPromise<Void> complete(ShardMetadata shard, @Nullable NodeId withoutNode)
+    private static AsyncPromise<Void> complete(ShardMetadata shard, Log2OffsetsMap<?> reconciled, @Nullable NodeId withoutNode)
     {
-        return CompleteSealing.complete(shard.keyspace, shard.sinceEpoch, shard.range, toEndpoints(shard.participants, withoutNode));
+        return CompleteSealing.complete(shard.keyspace, shard.sinceEpoch, shard.range, reconciled, toEndpoints(shard.participants, withoutNode));
     }
 
     /**
@@ -1274,12 +1280,14 @@ public final class SealingCoordinator
             final String keyspace;
             final long sinceEpoch;
             final Range<Token> range;
+            final Log2OffsetsMap<?> reconciled;
 
-            Request(String keyspace, long sinceEpoch, Range<Token> range)
+            Request(String keyspace, long sinceEpoch, Range<Token> range, Log2OffsetsMap<?> reconciled)
             {
                 this.keyspace = keyspace;
                 this.sinceEpoch = sinceEpoch;
                 this.range = range;
+                this.reconciled = reconciled;
             }
         }
 
@@ -1290,10 +1298,11 @@ public final class SealingCoordinator
         }
 
         /**
-         * Tell every participant of a sealing shard to promote it from SEALING to SEALED.
+         * Tell every participant of a sealing shard to promote it from SEALING to SEALED, propagating the
+         * authoritative reconciled set produced by {@link #reconcile}.
          */
         public static AsyncPromise<Void> complete(
-            String keyspace, long sinceEpoch, Range<Token> range, List<InetAddressAndPort> endpoints)
+            String keyspace, long sinceEpoch, Range<Token> range, Log2OffsetsMap<?> reconciled, List<InetAddressAndPort> endpoints)
         {
             AsyncPromise<Void> promise = new AsyncPromise<>();
 
@@ -1321,7 +1330,7 @@ public final class SealingCoordinator
                 }
             };
 
-            Message<Request> message = Message.out(Verb.MT_COMPLETE_SEALING_REQ, new Request(keyspace, sinceEpoch, range));
+            Message<Request> message = Message.out(Verb.MT_COMPLETE_SEALING_REQ, new Request(keyspace, sinceEpoch, range, reconciled));
             for (InetAddressAndPort peer : endpoints)
                 MessagingService.instance().sendWithCallback(message, peer, callback);
 
@@ -1338,7 +1347,7 @@ public final class SealingCoordinator
                 flushes.add(cfs.forceFlush(ColumnFamilyStore.FlushReason.INTERNALLY_FORCED));
             FBUtilities.waitOnFutures(flushes);
 
-            MutationTrackingService.instance().markShardSealed(request.keyspace, request.sinceEpoch, request.range);
+            MutationTrackingService.instance().markShardSealed(request.keyspace, request.sinceEpoch, request.range, request.reconciled);
             MessagingService.instance().send(message.responseWith(Response.instance), message.from());
         };
 
@@ -1350,6 +1359,7 @@ public final class SealingCoordinator
                 out.writeUTF(r.keyspace);
                 out.writeLong(r.sinceEpoch);
                 AbstractBounds.tokenSerializer.serialize(r.range, out, version.messagingVersion());
+                Log2OffsetsMap.serializer.serialize(r.reconciled, out);
             }
 
             @Override
@@ -1358,7 +1368,8 @@ public final class SealingCoordinator
                 String keyspace = in.readUTF();
                 long sinceEpoch = in.readLong();
                 Range<Token> range = (Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, IPartitioner.global(), version.messagingVersion());
-                return new Request(keyspace, sinceEpoch, range);
+                Log2OffsetsMap.Immutable reconciled = Log2OffsetsMap.serializer.deserialize(in);
+                return new Request(keyspace, sinceEpoch, range, reconciled);
             }
 
             @Override
@@ -1367,6 +1378,7 @@ public final class SealingCoordinator
                 long size = TypeSizes.sizeof(r.keyspace);
                 size += TypeSizes.sizeof(r.sinceEpoch);
                 size += AbstractBounds.tokenSerializer.serializedSize(r.range, version.messagingVersion());
+                size += Log2OffsetsMap.serializer.serializedSize(r.reconciled);
                 return size;
             }
         };

@@ -73,8 +73,13 @@ public abstract class CoordinatorLog
     protected final Node2OffsetsMap persistedOffsets;
 
     protected final UnreconciledMutations unreconciledMutations;
+
+    // these are recomputed, not persisted
     protected final Offsets.Mutable reconciledOffsets;
     protected final Offsets.Mutable reconciledPersistedOffsets;
+
+    @Nullable
+    protected Offsets sealedOffsets;
 
     protected final ReadWriteLock lock = new ReentrantReadWriteLock();
 
@@ -88,7 +93,8 @@ public abstract class CoordinatorLog
                    Participants participants,
                    Node2OffsetsMap witnessedOffsets,
                    Node2OffsetsMap persistedOffsets,
-                   UnreconciledMutations unreconciledMutations)
+                   UnreconciledMutations unreconciledMutations,
+                   @Nullable Offsets sealedOffsets)
     {
         this.localNodeId = localNodeId;
         this.sinceEpoch = sinceEpoch;
@@ -98,14 +104,23 @@ public abstract class CoordinatorLog
         this.participants = participants;
         this.unreconciledMutations = unreconciledMutations;
         this.witnessedOffsets = witnessedOffsets;
-        this.reconciledOffsets = witnessedOffsets.intersection();
         this.persistedOffsets = persistedOffsets;
-        this.reconciledPersistedOffsets = persistedOffsets.intersection();
+        this.sealedOffsets = sealedOffsets;
+        if (sealedOffsets != null)
+        {
+            this.reconciledOffsets = Offsets.Mutable.copy(sealedOffsets);
+            this.reconciledPersistedOffsets = Offsets.Mutable.copy(sealedOffsets);
+        }
+        else
+        {
+            this.reconciledOffsets = witnessedOffsets.intersection();
+            this.reconciledPersistedOffsets = persistedOffsets.intersection();
+        }
     }
 
     CoordinatorLog(String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId logId, Participants participants)
     {
-        this(keyspace, sinceEpoch, range, localNodeId, logId, participants, forParticipants(logId, participants), forParticipants(logId, participants), new UnreconciledMutations());
+        this(keyspace, sinceEpoch, range, localNodeId, logId, participants, forParticipants(logId, participants), forParticipants(logId, participants), new UnreconciledMutations(), null);
     }
 
     static CoordinatorLog create(String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId id, Participants participants)
@@ -116,10 +131,11 @@ public abstract class CoordinatorLog
 
     static CoordinatorLog recreate(
         String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId id, Participants participants,
-        Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations)
+        Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations,
+        @Nullable Offsets sealedOffsets)
     {
-        return id.hostId == localNodeId ? new CoordinatorLogPrimary(keyspace, sinceEpoch, range, localNodeId, id, participants, witnessedOffsets, persistedOffsets, unreconciledMutations)
-                                        : new CoordinatorLogReplica(keyspace, sinceEpoch, range, localNodeId, id, participants, witnessedOffsets, persistedOffsets, unreconciledMutations);
+        return id.hostId == localNodeId ? new CoordinatorLogPrimary(keyspace, sinceEpoch, range, localNodeId, id, participants, witnessedOffsets, persistedOffsets, unreconciledMutations, sealedOffsets)
+                                        : new CoordinatorLogReplica(keyspace, sinceEpoch, range, localNodeId, id, participants, witnessedOffsets, persistedOffsets, unreconciledMutations, sealedOffsets);
     }
 
     void updateReplicatedOffsets(Offsets offsets, boolean persisted, int onNodeId)
@@ -170,10 +186,11 @@ public abstract class CoordinatorLog
 
     private void updatePersistedReplicatedOffsets(Offsets offsets, int onNodeId)
     {
-        persistedOffsets.get(onNodeId).addAll(offsets);
-        logger.debug("done applying PO, now {}", persistedOffsets);
-        reconciledPersistedOffsets.addAll(persistedOffsets.intersection());
-        logger.debug("done applying PRO, now {}", reconciledPersistedOffsets);
+        if (sealedOffsets == null)
+        {
+            persistedOffsets.get(onNodeId).addAll(offsets);
+            reconciledPersistedOffsets.addAll(persistedOffsets.intersection());
+        }
     }
 
     @Nullable
@@ -231,7 +248,7 @@ public abstract class CoordinatorLog
         lock.readLock().lock();
         try
         {
-            return Offsets.Immutable.copy(reconciledOffsets);
+            return Offsets.Immutable.copy(reconciledOrSealedOffsets());
         }
         finally
         {
@@ -454,7 +471,7 @@ public abstract class CoordinatorLog
         lock.readLock().lock();
         try
         {
-            reconciledInto.addAll(reconciledOffsets);
+            reconciledInto.addAll(reconciledOrSealedOffsets());
             unreconciledMutations.collect(token, tableId, includePending, unreconciledInto);
         }
         finally
@@ -472,7 +489,7 @@ public abstract class CoordinatorLog
         lock.readLock().lock();
         try
         {
-            reconciledInto.addAll(reconciledOffsets);
+            reconciledInto.addAll(reconciledOrSealedOffsets());
             unreconciledMutations.collect(range, tableId, includePending, unreconciledInto);
         }
         finally
@@ -517,7 +534,33 @@ public abstract class CoordinatorLog
 
     void collectDurablyReconciledOffsets(Log2OffsetsMap.Mutable into)
     {
-        into.add(reconciledPersistedOffsets);
+        into.add(reconciledPersistedOrSealedOffsets());
+    }
+
+    private Offsets reconciledOrSealedOffsets()
+    {
+        return sealedOffsets == null ? reconciledOffsets : sealedOffsets;
+    }
+
+    private Offsets reconciledPersistedOrSealedOffsets()
+    {
+        return sealedOffsets == null ? reconciledPersistedOffsets : sealedOffsets;
+    }
+
+    void markSealed(Offsets sealed)
+    {
+        lock.writeLock().lock();
+        try
+        {
+            reconciledOffsets.set(sealed);
+            reconciledPersistedOffsets.set(sealed);
+            unreconciledMutations.clear();
+            sealedOffsets = Offsets.Mutable.copy(sealed);
+        }
+        finally
+        {
+            lock.writeLock().unlock();
+        }
     }
 
     boolean isDurablyReconciled(ShortMutationId id)
@@ -525,10 +568,7 @@ public abstract class CoordinatorLog
         lock.readLock().lock();
         try
         {
-            boolean contains = reconciledPersistedOffsets.contains(id.offset);
-            if (!contains)
-                logger.debug("Offset {} is not contained in durably reconciled offsets {}", id.offset, reconciledPersistedOffsets);
-            return contains;
+            return reconciledPersistedOrSealedOffsets().contains(id.offset);
         }
         finally
         {
@@ -556,7 +596,8 @@ public abstract class CoordinatorLog
         lock.readLock().lock();
         try
         {
-            Offsets.RangeIterator durablyReconciled = reconciledPersistedOffsets.rangeIterator();
+            Offsets.RangeIterator durablyReconciled = reconciledPersistedOrSealedOffsets().rangeIterator();
+
             // Mutations only
             Offsets.RangeIterator offsets = logOffsets.mutations().offsets(logId.asLong()).rangeIterator();
             Offsets.RangeIterator unreconciledMutations = Offsets.difference(offsets, durablyReconciled);
@@ -627,9 +668,10 @@ public abstract class CoordinatorLog
 
         CoordinatorLogPrimary(
             String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId logId, Participants participants,
-            Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations)
+            Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations,
+            @Nullable Offsets sealedOffsets)
         {
-            super(keyspace, sinceEpoch, range, localNodeId, logId, participants, witnessedOffsets, persistedOffsets, unreconciledMutations);
+            super(keyspace, sinceEpoch, range, localNodeId, logId, participants, witnessedOffsets, persistedOffsets, unreconciledMutations, sealedOffsets);
         }
 
         CoordinatorLogPrimary(String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId logId, Participants participants)
@@ -701,9 +743,10 @@ public abstract class CoordinatorLog
     {
         CoordinatorLogReplica(
             String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId logId, Participants participants,
-            Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations)
+            Node2OffsetsMap witnessedOffsets, Node2OffsetsMap persistedOffsets, UnreconciledMutations unreconciledMutations,
+            @Nullable Offsets sealedOffsets)
         {
-            super(keyspace, sinceEpoch, range, localNodeId, logId, participants, witnessedOffsets, persistedOffsets, unreconciledMutations);
+            super(keyspace, sinceEpoch, range, localNodeId, logId, participants, witnessedOffsets, persistedOffsets, unreconciledMutations, sealedOffsets);
         }
 
         CoordinatorLogReplica(String keyspace, long sinceEpoch, Range<Token> range, int localNodeId, CoordinatorLogId logId, Participants participants)
@@ -723,34 +766,37 @@ public abstract class CoordinatorLog
      */
 
     private static final String INSERT_QUERY =
-        format("INSERT INTO %s.%s (keyspace_name, since_epoch, range_start, range_end, host_id, host_log_id, participants, witnessed_offsets, persisted_offsets) "
-               + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        format("INSERT INTO %s.%s (keyspace_name, since_epoch, range_start, range_end, host_id, host_log_id, participants, witnessed_offsets, persisted_offsets, sealed_offsets) "
+               + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                SchemaConstants.SYSTEM_KEYSPACE_NAME, SystemKeyspace.COORDINATOR_LOGS);
 
     private static void persistToSystemTable(
             String keyspace, long sinceEpoch, Range<Token> range, CoordinatorLogId logId, Participants participants,
-            Map<Integer, List<Integer>> witnessedOffsets, Map<Integer, List<Integer>> persistedOffsets)
+            Map<Integer, List<Integer>> witnessedOffsets, Map<Integer, List<Integer>> persistedOffsets,
+            @Nullable List<Integer> sealedOffsets)
     {
         executeInternal(INSERT_QUERY, keyspace, sinceEpoch, range.left.toString(), range.right.toString(), logId.hostId,
-                        logId.hostLogId, participants.asSet(), witnessedOffsets, persistedOffsets);
+                        logId.hostLogId, participants.asSet(), witnessedOffsets, persistedOffsets, sealedOffsets);
     }
 
     void persistToSystemTable()
     {
         Map<Integer, List<Integer>> witnessed = new Int2ObjectHashMap<>();
         Map<Integer, List<Integer>> persisted = new Int2ObjectHashMap<>();
+        List<Integer> sealed;
 
         lock.readLock().lock();
         try
         {
             witnessedOffsets.convertToPrimitiveMap(witnessed);
             persistedOffsets.convertToPrimitiveMap(persisted);
+            sealed = sealedOffsets != null ? sealedOffsets.asList() : null;
         }
         finally
         {
             lock.readLock().unlock();
         }
-        persistToSystemTable(keyspace, sinceEpoch, range, logId, participants, witnessed, persisted);
+        persistToSystemTable(keyspace, sinceEpoch, range, logId, participants, witnessed, persisted, sealed);
     }
 
     void updateLogsInSystemTable()
@@ -758,6 +804,7 @@ public abstract class CoordinatorLog
         Offsets.Mutable localWitnessed;
         Map<Integer, List<Integer>> witnessed = new Int2ObjectHashMap<>();
         Map<Integer, List<Integer>> persisted = new Int2ObjectHashMap<>();
+        List<Integer> sealed;
 
         lock.readLock().lock();
         try
@@ -768,19 +815,23 @@ public abstract class CoordinatorLog
             persistedOffsets.convertToPrimitiveMap(persisted);
 
             persisted.put(localNodeId, witnessed.get(localNodeId));
+            sealed = sealedOffsets != null ? sealedOffsets.asList() : null;
         }
         finally
         {
             lock.readLock().unlock();
         }
 
-        persistToSystemTable(keyspace, sinceEpoch, range, logId, participants, witnessed, persisted);
+        persistToSystemTable(keyspace, sinceEpoch, range, logId, participants, witnessed, persisted, sealed);
 
         lock.writeLock().lock();
         try
         {
-            persistedOffsets.set(localNodeId, localWitnessed);
-            reconciledPersistedOffsets.addAll(persistedOffsets.intersection());
+            if (sealedOffsets == null)
+            {
+                persistedOffsets.set(localNodeId, localWitnessed);
+                reconciledPersistedOffsets.addAll(persistedOffsets.intersection());
+            }
         }
         finally
         {
@@ -807,9 +858,16 @@ public abstract class CoordinatorLog
                 row.getMap("persisted_offsets", Int32Type.instance, ListType.getInstance(Int32Type.instance, false));
             Node2OffsetsMap witnessed = fromPrimitiveMap(logId, witnessedOffsets);
             Node2OffsetsMap persisted = fromPrimitiveMap(logId, persistedOffsets);
-            UnreconciledMutations unreconciled = UnreconciledMutations.loadFromJournal(witnessed, localNodeId);
+            // sealed_offsets is only populated for sealed logs (via markSealed); null for active/sealing.
+            List<Integer> sealedList = row.has("sealed_offsets")
+                                     ? row.getList("sealed_offsets", Int32Type.instance)
+                                     : null;
+            Offsets sealedOffsets = sealedList != null ? Offsets.fromList(logId, sealedList) : null;
+            UnreconciledMutations unreconciled = sealedOffsets != null
+                                               ? new UnreconciledMutations()
+                                               : UnreconciledMutations.loadFromJournal(witnessed, localNodeId);
             CoordinatorLog log =
-                CoordinatorLog.recreate(keyspace, sinceEpoch, range, localNodeId, logId, new Participants(participants), witnessed, persisted, unreconciled);
+                CoordinatorLog.recreate(keyspace, sinceEpoch, range, localNodeId, logId, new Participants(participants), witnessed, persisted, unreconciled, sealedOffsets);
             logs.add(log);
         }
         return logs;

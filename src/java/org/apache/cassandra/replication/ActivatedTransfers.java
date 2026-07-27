@@ -184,6 +184,11 @@ public class ActivatedTransfers implements Iterable<ShortMutationId>
         return transfers.isEmpty();
     }
 
+    public void clear()
+    {
+        transfers.clear();
+    }
+
     public static Bounds<Token> covering(Collection<SSTableReader> sstables)
     {
         Preconditions.checkArgument(!sstables.isEmpty());

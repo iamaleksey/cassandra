@@ -514,13 +514,25 @@ public class Shard
         return true;
     }
 
-    void markSealed()
+    void markSealed(Log2OffsetsMap<?> reconciled)
     {
         if (state == State.ACTIVE)
             throw new IllegalStateException(format("%s cannot transition to SEALED from %s", this, state));
 
         if (state != State.SEALED)
         {
+            for (Offsets offsets : reconciled.offsets())
+            {
+                CoordinatorLog log = logs.get(offsets.logId().asLong());
+                if (log == null)
+                {
+                    String msg =
+                        format("Coordinator log %s is missing on a live sealing participant for %s",
+                               offsets.logId(), this);
+                    throw new IllegalStateException(msg);
+                }
+                log.markSealed(offsets);
+            }
             state = State.SEALED;
             persistToSystemTables();
         }

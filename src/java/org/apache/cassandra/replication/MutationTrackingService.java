@@ -1551,12 +1551,12 @@ public class MutationTrackingService implements MutationTrackingServiceMBean
     /**
      * Promote an obsoleted shard from SEALING to SEALED.
      */
-    void markShardSealed(String keyspace, long sinceEpoch, Range<Token> range)
+    void markShardSealed(String keyspace, long sinceEpoch, Range<Token> range, Log2OffsetsMap<?> reconciled)
     {
         shardLock.readLock().lock();
         try
         {
-            getShard(keyspace, sinceEpoch, range).markSealed();
+            getShard(keyspace, sinceEpoch, range).markSealed(reconciled);
         }
         finally
         {

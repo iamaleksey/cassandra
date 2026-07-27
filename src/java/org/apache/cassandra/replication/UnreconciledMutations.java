@@ -253,6 +253,13 @@ public class UnreconciledMutations
         return statesMap.size();
     }
 
+    public void clear()
+    {
+        statesMap.clear();
+        statesSet.clear();
+        transfers.clear();
+    }
+
     static UnreconciledMutations loadFromJournal(Node2OffsetsMap witnessedOffsets, int localNodeId)
     {
         UnreconciledMutations result = new UnreconciledMutations();

@@ -583,6 +583,7 @@ public final class SystemKeyspace
               + "participants frozen<set<int>>,"
               + "witnessed_offsets map<int, frozen<list<int>>>,"
               + "persisted_offsets map<int, frozen<list<int>>>,"
+              + "sealed_offsets frozen<list<int>>,"
               + "PRIMARY KEY ((keyspace_name, range_start, range_end, since_epoch), host_id, host_log_id))")
               .build();
 
