@@ -86,7 +86,6 @@ public class KeyspaceMigrationInfoTest
     public void testWithRangesRepairedForTable()
     {
         List<Range<Token>> ranges = createTestRanges();
-        Epoch epoch1 = Epoch.create(1);
         Epoch epoch2 = Epoch.create(2);
 
         // Start with full ring as pending
@@ -100,19 +99,19 @@ public class KeyspaceMigrationInfoTest
             epoch2
         );
 
-        // info should be unchanged if a repair started before migration started
-        KeyspaceMigrationInfo noop = info.withRangesRepairedForTable(epoch1, testTableId, Collections.singleton(ranges.get(0)));
+        // info should be unchanged if the table has no pending ranges
+        KeyspaceMigrationInfo noop = info.withRangesRepairedForTable(TableId.generate(), Collections.singleton(ranges.get(0)));
         assertSame(info, noop);
 
         // Subtract first range
-        KeyspaceMigrationInfo updated = info.withRangesRepairedForTable(epoch2, testTableId, Collections.singleton(ranges.get(0)));
+        KeyspaceMigrationInfo updated = info.withRangesRepairedForTable(testTableId, Collections.singleton(ranges.get(0)));
 
         assertFalse(updated.pendingRangesPerTable.get(testTableId).intersects(ranges.get(0).right));
         assertTrue(updated.pendingRangesPerTable.get(testTableId).intersects(ranges.get(1).right));
         assertFalse(updated.isComplete());
 
         // Subtract second range
-        KeyspaceMigrationInfo updated2 = updated.withRangesRepairedForTable(epoch2, testTableId, Collections.singleton(ranges.get(1)));
+        KeyspaceMigrationInfo updated2 = updated.withRangesRepairedForTable(testTableId, Collections.singleton(ranges.get(1)));
 
         assertFalse(updated2.pendingRangesPerTable.get(testTableId).intersects(ranges.get(0).right));
         assertFalse(updated2.pendingRangesPerTable.get(testTableId).intersects(ranges.get(1).right));
@@ -165,7 +164,7 @@ public class KeyspaceMigrationInfoTest
 
         // Repair one range
         Range<Token> completedRange = ranges.get(0);
-        KeyspaceMigrationInfo afterRepair = info.withRangesRepairedForTable(epoch1, testTableId, Collections.singleton(completedRange));
+        KeyspaceMigrationInfo afterRepair = info.withRangesRepairedForTable(testTableId, Collections.singleton(completedRange));
 
         // Verify the range was removed
         Token tokenInCompletedRange = completedRange.right;
@@ -229,7 +228,7 @@ public class KeyspaceMigrationInfoTest
 
         // Repair one range
         Range<Token> repairedRange = ranges.get(0);
-        KeyspaceMigrationInfo afterRepair = info.withRangesRepairedForTable(epoch1, testTableId, Collections.singleton(repairedRange));
+        KeyspaceMigrationInfo afterRepair = info.withRangesRepairedForTable(testTableId, Collections.singleton(repairedRange));
 
         // reverse migration direction with new table
         TableId newTableId = TableId.generate();

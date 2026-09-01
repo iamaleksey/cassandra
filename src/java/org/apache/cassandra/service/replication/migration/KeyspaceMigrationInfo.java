@@ -170,18 +170,9 @@ public class KeyspaceMigrationInfo
      * Subtract repaired ranges from table's pending set.
      * Automatically removes table if all ranges repaired.
      */
-    public KeyspaceMigrationInfo withRangesRepairedForTable(@Nonnull Epoch repairStartedEpoch,
-                                                            @Nonnull TableId tableId,
+    public KeyspaceMigrationInfo withRangesRepairedForTable(@Nonnull TableId tableId,
                                                             @Nonnull Collection<Range<Token>> repairedRanges)
     {
-        // TODO (expected): do something about this? nuke or serialize the correct epoch alongised the transformation?
-        //      this was dead code; repairStartedEpoch as passed was always next transformation's epoch,
-        //      and it was always > startedAtEpoch, guarding against nothing;
-        //      there is an epoch eligibility check in MutationTrackingRepairHandler in onSuccess(), but it is
-        //      insufficient in face of potential race conditions (AY)
-        // if (repairStartedEpoch.isBefore(startedAtEpoch))
-        //    return this;
-
         NormalizedRanges<Token> currentPendingForTable = pendingRangesPerTable.get(tableId);
         if (currentPendingForTable == null)
             return this;
@@ -397,7 +388,7 @@ public class KeyspaceMigrationInfo
                              keyspace, pendingRangesPerTable.size(), startedAtEpoch);
     }
 
-    private static final MetadataSerializer<NormalizedRanges<Token>> normalizedRangesSerializer = new MetadataSerializer<NormalizedRanges<Token>>()
+    public static final MetadataSerializer<NormalizedRanges<Token>> normalizedRangesSerializer = new MetadataSerializer<NormalizedRanges<Token>>()
     {
         @Override
         public void serialize(NormalizedRanges<Token> ranges, DataOutputPlus out, Version version) throws IOException

@@ -365,7 +365,7 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
 
             // Repairs can advance progress for consensus and mutation tracking migration so always check
             job.addCallback(ConsensusTableMigration.completedRepairJobHandler);
-            job.addCallback(MutationTrackingRepairHandler.completedRepairJobHandler);
+            // job.addCallback(MutationTrackingRepairHandler.completedRepairJobHandler);
 
             state.register(job.state);
             executor.execute(job);
@@ -379,6 +379,9 @@ public class RepairSession extends AsyncFuture<RepairSessionResult> implements I
             public void onSuccess(List<RepairResult> results)
             {
                 state.phase.success();
+
+                MutationTrackingRepairHandler.onRepairSessionSuccess(results);
+
                 // this repair session is completed
                 logger.info("{} {}", previewKind.logPrefix(getId()), "Session completed successfully");
                 Tracing.traceRepair("Completed sync of range {}", state.commonRange);
