@@ -542,7 +542,32 @@ public final class SealingCoordinator
         if (withoutNode != null)
             participants.remove(withoutNode.id());
 
-        // TODO
+        if (participants.isEmpty())
+            return;
+
+        ClusterMetadata metadata = ClusterMetadata.current();
+        Set<InetAddressAndPort> pending = new HashSet<>(participants.size());
+        participants.forEach(id -> pending.add(metadata.directory.endpoint(new NodeId(id))));
+
+        long deadlineNanos = nanoTime() + DatabaseDescriptor.getCmsAwaitTimeout().to(NANOSECONDS);
+        while (true)
+        {
+            try
+            {
+                pending.removeAll(AcquiesceShards.poll(epoch, pending)
+                                                 .get(DatabaseDescriptor.getRpcTimeout(MILLISECONDS), MILLISECONDS));
+            }
+            catch (InterruptedException | ExecutionException | TimeoutException e)
+            {
+                throw new RuntimeException(format("Failed to poll acquiesce at epoch %s; still pending: %s", epoch, pending), e);
+            }
+
+            if (pending.isEmpty())
+                return;
+            if (nanoTime() >= deadlineNanos)
+                throw new RuntimeException(format("Timed out acquiescing at epoch %s; still pending: %s", epoch, pending));
+            LockSupport.parkNanos(SECONDS.toNanos(1));
+        }
     }
 
     private static void initiate(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
@@ -846,6 +871,46 @@ public final class SealingCoordinator
             {
                 this.applied = applied;
             }
+        }
+
+        public static AsyncPromise<Set<InetAddressAndPort>> poll(Epoch epoch, List<InetAddressAndPort> endpoints)
+        {
+            checkArgument(!endpoints.isEmpty());
+
+            AsyncPromise<Set<InetAddressAndPort>> promise = new AsyncPromise<>();
+            Set<InetAddressAndPort> applied = ConcurrentHashMap.newKeySet();
+
+            RequestCallback<Response> callback = new RequestCallback<>()
+            {
+                private final AtomicInteger remaining = new AtomicInteger(endpoints.size());
+
+                @Override
+                public void onResponse(Message<Response> msg)
+                {
+                    if (msg.payload.applied)
+                        applied.add(msg.from());
+                    if (remaining.decrementAndGet() == 0)
+                        promise.trySuccess(applied);
+                }
+
+                @Override
+                public void onFailure(InetAddressAndPort from, RequestFailure failure)
+                {
+                    promise.tryFailure(new RuntimeException(format("Failed to poll acquiesce on %s at epoch %s: %s", from, epoch, failure)));
+                }
+
+                @Override
+                public boolean invokeOnFailure()
+                {
+                    return true;
+                }
+            };
+
+            Message<Request> message = Message.out(Verb.MT_ACQUIESCE_REQ, new Request(epoch));
+            for (InetAddressAndPort peer : endpoints)
+                MessagingService.instance().sendWithCallback(message, peer, callback);
+
+            return promise;
         }
 
         public static final IVerbHandler<Request> verbHandler = message -> {
