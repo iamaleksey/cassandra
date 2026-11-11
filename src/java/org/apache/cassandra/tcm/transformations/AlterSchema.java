@@ -48,6 +48,7 @@ import org.apache.cassandra.exceptions.InvalidRequestException;
 import org.apache.cassandra.exceptions.SyntaxException;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.schema.DistributedSchema;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceMetadata.KeyspaceDiff;
@@ -238,6 +239,7 @@ public class AlterSchema implements Transformation
 
         DistributedSchema snapshotAfter = new DistributedSchema(newKeyspaces);
         ClusterMetadata.Transformer next = prev.transformer().with(snapshotAfter);
+        DataPlacements placementsAfter = prev.placements;
         if (!affectsPlacements.isEmpty())
         {
             // state.schema is a DistributedSchema, so doesn't include local keyspaces. If we don't explicitly include those
@@ -256,9 +258,11 @@ public class AlterSchema implements Transformation
                 else
                     newPlacementsBuilder.with(params, newPlacement);
             });
-            next = next.with(newPlacementsBuilder.build());
+            placementsAfter = newPlacementsBuilder.build();
+            next = next.with(placementsAfter);
         }
         next = maybeUpdateConsensusMigrationState(prev.consensusMigrationState, next, diff.altered, diff.dropped);
+        next = maybeAddMutationTrackingShards(nextEpoch, prev, placementsAfter, next, diff.created);
         next = maybeUpdateMutationTrackingMigrationState(nextEpoch, prev.mutationTrackingMigrationState, next, diff.altered, diff.dropped);
         return Transformation.success(next, LockedRanges.AffectedRanges.EMPTY);
     }
@@ -342,6 +346,15 @@ public class AlterSchema implements Transformation
             next = next.with(migrationState);
 
         return next;
+    }
+
+    private static Transformer maybeAddMutationTrackingShards(Epoch epoch, ClusterMetadata prev, DataPlacements placements, Transformer next, Keyspaces created)
+    {
+        MutationTrackingShards shards = prev.mutationTrackingShards;
+        for (KeyspaceMetadata keyspace : created)
+            if (keyspace.params.replicationType.isTracked())
+                shards = shards.withKeyspace(keyspace.name, placements.get(keyspace.params.replication).writes, prev.directory, epoch);
+        return shards == prev.mutationTrackingShards ? next : next.with(shards);
     }
 
     /**
