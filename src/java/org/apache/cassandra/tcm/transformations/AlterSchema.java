@@ -262,7 +262,7 @@ public class AlterSchema implements Transformation
             next = next.with(placementsAfter);
         }
         next = maybeUpdateConsensusMigrationState(prev.consensusMigrationState, next, diff.altered, diff.dropped);
-        next = maybeAddMutationTrackingShards(nextEpoch, prev, placementsAfter, next, diff.created);
+        next = maybeUpdateMutationTrackingShards(nextEpoch, prev, placementsAfter, next, diff.created, diff.dropped);
         next = maybeUpdateMutationTrackingMigrationState(nextEpoch, prev.mutationTrackingMigrationState, next, diff.altered, diff.dropped);
         return Transformation.success(next, LockedRanges.AffectedRanges.EMPTY);
     }
@@ -348,12 +348,18 @@ public class AlterSchema implements Transformation
         return next;
     }
 
-    private static Transformer maybeAddMutationTrackingShards(Epoch epoch, ClusterMetadata prev, DataPlacements placements, Transformer next, Keyspaces created)
+    private static Transformer maybeUpdateMutationTrackingShards(Epoch epoch, ClusterMetadata prev, DataPlacements placements, Transformer next, Keyspaces created, Keyspaces dropped)
     {
         MutationTrackingShards shards = prev.mutationTrackingShards;
+
+        for (KeyspaceMetadata keyspace : dropped)
+            if (keyspace.params.replicationType.isTracked())
+                shards = shards.withoutKeyspace(keyspace.name);
+
         for (KeyspaceMetadata keyspace : created)
             if (keyspace.params.replicationType.isTracked())
                 shards = shards.withKeyspace(keyspace.name, placements.get(keyspace.params.replication).writes, prev.directory, epoch);
+
         return shards == prev.mutationTrackingShards ? next : next.with(shards);
     }
 
