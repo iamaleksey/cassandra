@@ -56,6 +56,7 @@ import org.apache.cassandra.locator.MetaStrategy;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.CMSIdentifierMismatchException;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.schema.DistributedSchema;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.KeyspaceParams;
@@ -92,6 +93,7 @@ import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static org.apache.cassandra.config.CassandraRelevantProperties.LINE_SEPARATOR;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.tcm.serialization.Version.MIN_ACCORD_VERSION;
+import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_SHARDS_VERSION;
 import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_VERSION;
 
 public class ClusterMetadata
@@ -112,6 +114,7 @@ public class ClusterMetadata
     public final LockedRanges lockedRanges;
     public final InProgressSequences inProgressSequences;
     public final ConsensusMigrationState consensusMigrationState;
+    public final MutationTrackingShards mutationTrackingShards;
     public final MutationTrackingMigrationState mutationTrackingMigrationState;
     public final ImmutableMap<ExtensionKey<?,?>, ExtensionValue<?>> extensions;
     public final AccordStaleReplicas accordStaleReplicas;
@@ -151,6 +154,7 @@ public class ClusterMetadata
              LockedRanges.EMPTY,
              InProgressSequences.EMPTY,
              ConsensusMigrationState.EMPTY,
+             MutationTrackingShards.EMPTY,
              MutationTrackingMigrationState.EMPTY,
              ImmutableMap.of(),
              AccordStaleReplicas.EMPTY);
@@ -170,6 +174,37 @@ public class ClusterMetadata
                            Map<ExtensionKey<?, ?>, ExtensionValue<?>> extensions,
                            AccordStaleReplicas accordStaleReplicas)
     {
+        this(epoch,
+             partitioner,
+             schema,
+             directory,
+             tokenMap,
+             placements,
+             accordFastPath,
+             lockedRanges,
+             inProgressSequences,
+             consensusMigrationState,
+             MutationTrackingShards.EMPTY,
+             mutationTrackingMigrationState,
+             extensions,
+             accordStaleReplicas);
+    }
+
+    public ClusterMetadata(Epoch epoch,
+                           IPartitioner partitioner,
+                           DistributedSchema schema,
+                           Directory directory,
+                           TokenMap tokenMap,
+                           DataPlacements placements,
+                           AccordFastPath accordFastPath,
+                           LockedRanges lockedRanges,
+                           InProgressSequences inProgressSequences,
+                           ConsensusMigrationState consensusMigrationState,
+                           MutationTrackingShards mutationTrackingShards,
+                           MutationTrackingMigrationState mutationTrackingMigrationState,
+                           Map<ExtensionKey<?, ?>, ExtensionValue<?>> extensions,
+                           AccordStaleReplicas accordStaleReplicas)
+    {
         this(EMPTY_METADATA_IDENTIFIER,
              epoch,
              partitioner,
@@ -181,6 +216,7 @@ public class ClusterMetadata
              lockedRanges,
              inProgressSequences,
              consensusMigrationState,
+             mutationTrackingShards,
              mutationTrackingMigrationState,
              extensions,
              accordStaleReplicas);
@@ -197,6 +233,7 @@ public class ClusterMetadata
                            LockedRanges lockedRanges,
                            InProgressSequences inProgressSequences,
                            ConsensusMigrationState consensusMigrationState,
+                           MutationTrackingShards mutationTrackingShards,
                            MutationTrackingMigrationState mutationTrackingMigrationState,
                            Map<ExtensionKey<?, ?>, ExtensionValue<?>> extensions,
                            AccordStaleReplicas accordStaleReplicas)
@@ -216,6 +253,7 @@ public class ClusterMetadata
         this.lockedRanges = lockedRanges;
         this.inProgressSequences = inProgressSequences;
         this.consensusMigrationState = consensusMigrationState;
+        this.mutationTrackingShards = mutationTrackingShards;
         this.mutationTrackingMigrationState = mutationTrackingMigrationState;
         this.extensions = ImmutableMap.copyOf(extensions);
         this.locator = Locator.usingDirectory(directory);
@@ -275,6 +313,7 @@ public class ClusterMetadata
                                    capLastModified(lockedRanges, epoch),
                                    capLastModified(inProgressSequences, epoch),
                                    capLastModified(consensusMigrationState, epoch),
+                                   capLastModified(mutationTrackingShards, epoch),
                                    capLastModified(mutationTrackingMigrationState, epoch),
                                    capLastModified(extensions, epoch),
                                    capLastModified(accordStaleReplicas, epoch));
@@ -299,6 +338,7 @@ public class ClusterMetadata
                                    lockedRanges,
                                    inProgressSequences,
                                    consensusMigrationState,
+                                   mutationTrackingShards,
                                    mutationTrackingMigrationState,
                                    extensions,
                                    accordStaleReplicas);
@@ -479,6 +519,7 @@ public class ClusterMetadata
         private LockedRanges lockedRanges;
         private InProgressSequences inProgressSequences;
         private ConsensusMigrationState consensusMigrationState;
+        private MutationTrackingShards mutationTrackingShards;
         private MutationTrackingMigrationState mutationTrackingMigrationState;
         private final Map<ExtensionKey<?, ?>, ExtensionValue<?>> extensions;
         private final Set<MetadataKey> modifiedKeys;
@@ -497,6 +538,7 @@ public class ClusterMetadata
             this.lockedRanges = metadata.lockedRanges;
             this.inProgressSequences = metadata.inProgressSequences;
             this.consensusMigrationState = metadata.consensusMigrationState;
+            this.mutationTrackingShards = metadata.mutationTrackingShards;
             this.mutationTrackingMigrationState = metadata.mutationTrackingMigrationState;
             extensions = new HashMap<>(metadata.extensions);
             modifiedKeys = new HashSet<>();
@@ -699,6 +741,12 @@ public class ClusterMetadata
             return this;
         }
 
+        public Transformer with(MutationTrackingShards mutationTrackingShards)
+        {
+            this.mutationTrackingShards = mutationTrackingShards;
+            return this;
+        }
+
         public Transformer with(MutationTrackingMigrationState mutationTrackingMigrationState)
         {
             this.mutationTrackingMigrationState = mutationTrackingMigrationState;
@@ -812,6 +860,12 @@ public class ClusterMetadata
                 consensusMigrationState = consensusMigrationState.withLastModified(epoch);
             }
 
+            if (mutationTrackingShards != base.mutationTrackingShards)
+            {
+                modifiedKeys.add(MetadataKeys.MUTATION_TRACKING_SHARDS);
+                mutationTrackingShards = mutationTrackingShards.withLastModified(epoch);
+            }
+
             if (mutationTrackingMigrationState != base.mutationTrackingMigrationState)
             {
                 modifiedKeys.add(MetadataKeys.MUTATION_TRACKING_MIGRATION_STATE);
@@ -839,6 +893,7 @@ public class ClusterMetadata
                                                        lockedRanges,
                                                        inProgressSequences,
                                                        consensusMigrationState,
+                                                       mutationTrackingShards,
                                                        mutationTrackingMigrationState,
                                                        extensions,
                                                        accordStaleReplicas),
@@ -858,9 +913,10 @@ public class ClusterMetadata
                                        lockedRanges,
                                        inProgressSequences,
                                        consensusMigrationState,
+                                       mutationTrackingShards,
                                        mutationTrackingMigrationState,
                                        extensions,
-                    accordStaleReplicas);
+                                       accordStaleReplicas);
         }
 
         @Override
@@ -878,6 +934,7 @@ public class ClusterMetadata
                    ", lockedRanges=" + lockedRanges +
                    ", inProgressSequences=" + inProgressSequences +
                    ", consensusMigrationState=" + consensusMigrationState +
+                   ", mutationTrackingShards=" + mutationTrackingShards +
                    ", mutationTrackingMigrationState=" + mutationTrackingMigrationState +
                    ", extensions=" + extensions +
                    ", modifiedKeys=" + modifiedKeys +
@@ -993,6 +1050,7 @@ public class ClusterMetadata
                lockedRanges.equals(that.lockedRanges) &&
                inProgressSequences.equals(that.inProgressSequences) &&
                consensusMigrationState.equals(that.consensusMigrationState) &&
+               mutationTrackingShards.equals(that.mutationTrackingShards) &&
                mutationTrackingMigrationState.equals(that.mutationTrackingMigrationState) &&
                accordStaleReplicas.equals(that.accordStaleReplicas) &&
                extensions.equals(that.extensions);
@@ -1034,6 +1092,10 @@ public class ClusterMetadata
         {
             logger.warn("In progress sequences differ: {} != {}", inProgressSequences, other.inProgressSequences);
         }
+        if (!mutationTrackingShards.equals(other.mutationTrackingShards))
+        {
+            logger.warn("Mutation tracking shards differ: {} != {}", mutationTrackingShards, other.mutationTrackingShards);
+        }
         if (!mutationTrackingMigrationState.equals(other.mutationTrackingMigrationState))
         {
             logger.warn("Mutation tracking migration states differ: {} != {}", mutationTrackingMigrationState, other.mutationTrackingMigrationState);
@@ -1047,7 +1109,7 @@ public class ClusterMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hash(epoch, schema, directory, tokenMap, placements, accordFastPath, lockedRanges, inProgressSequences, consensusMigrationState, mutationTrackingMigrationState, accordStaleReplicas, extensions);
+        return Objects.hash(epoch, schema, directory, tokenMap, placements, accordFastPath, lockedRanges, inProgressSequences, consensusMigrationState, mutationTrackingShards, mutationTrackingMigrationState, accordStaleReplicas, extensions);
     }
 
     public static ClusterMetadata current()
@@ -1130,6 +1192,10 @@ public class ClusterMetadata
                 ConsensusMigrationState.serializer.serialize(metadata.consensusMigrationState, out, version);
                 AccordStaleReplicas.serializer.serialize(metadata.accordStaleReplicas, out, version);
             }
+
+            if (version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION))
+                MutationTrackingShards.serializer.serialize(metadata.mutationTrackingShards, out, metadata.partitioner, version);
+
             if (version.isAtLeast(MIN_MUTATION_TRACKING_VERSION))
                 MutationTrackingMigrationState.serializer.serialize(metadata.mutationTrackingMigrationState, out, version);
 
@@ -1190,14 +1256,14 @@ public class ClusterMetadata
                 staleReplicas = AccordStaleReplicas.EMPTY;
             }
 
+            MutationTrackingShards mutationTrackingShards = version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION)
+                                                          ? MutationTrackingShards.serializer.deserialize(in, partitioner, version)
+                                                          : MutationTrackingShards.EMPTY;
+
             if (version.isAtLeast(MIN_MUTATION_TRACKING_VERSION))
-            {
                 mutationTrackingMigrationState = MutationTrackingMigrationState.serializer.deserialize(in, version);
-            }
             else
-            {
                 mutationTrackingMigrationState = MutationTrackingMigrationState.EMPTY;
-            }
 
             LockedRanges lockedRanges = LockedRanges.serializer.deserialize(in, version);
             InProgressSequences ips = InProgressSequences.serializer.deserialize(in, version);
@@ -1221,6 +1287,7 @@ public class ClusterMetadata
                                        lockedRanges,
                                        ips,
                                        consensusMigrationState,
+                                       mutationTrackingShards,
                                        mutationTrackingMigrationState,
                                        extensions,
                                        staleReplicas);
@@ -1268,6 +1335,9 @@ public class ClusterMetadata
 
                         AccordStaleReplicas.serializer.serializedSize(metadata.accordStaleReplicas, version);
             }
+
+            if (version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION))
+                size += MutationTrackingShards.serializer.serializedSize(metadata.mutationTrackingShards, metadata.partitioner, version);
 
             if (version.isAtLeast(MIN_MUTATION_TRACKING_VERSION))
                 size += MutationTrackingMigrationState.serializer.serializedSize(metadata.mutationTrackingMigrationState, version);

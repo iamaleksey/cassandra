@@ -84,6 +84,11 @@ public enum Version
      */
     V9(9),
 
+    /**
+     * - MutationTrackingShards
+     */
+    V10(10),
+
     UNKNOWN(Integer.MAX_VALUE);
 
     /**
@@ -93,6 +98,7 @@ public enum Version
 
     public static final Version MIN_MUTATION_TRACKING_VERSION = V8;
     public static final Version TBD_UNLOCK_STEP = V9;
+    public static final Version MIN_MUTATION_TRACKING_SHARDS_VERSION = V10;
 
     private static Map<Integer, Version> values = new HashMap<>();
 

@@ -36,15 +36,16 @@ public class MetadataKeys
 {
     public static final String CORE_NS = toLowerCaseLocalized(MetadataKeys.class.getPackage().getName(), Locale.ROOT);
 
-    public static final MetadataKey SCHEMA                  = make(CORE_NS, "schema", "dist_schema");
-    public static final MetadataKey NODE_DIRECTORY          = make(CORE_NS, "membership", "node_directory");
-    public static final MetadataKey TOKEN_MAP               = make(CORE_NS, "ownership", "token_map");
-    public static final MetadataKey DATA_PLACEMENTS         = make(CORE_NS, "ownership", "data_placements");
-    public static final MetadataKey ACCORD_FAST_PATH        = make(CORE_NS, "ownership", "accord_fast_path");
-    public static final MetadataKey ACCORD_STALE_REPLICAS   = make(CORE_NS, "ownership", "accord_stale_replicas");
-    public static final MetadataKey LOCKED_RANGES           = make(CORE_NS, "sequences", "locked_ranges");
-    public static final MetadataKey IN_PROGRESS_SEQUENCES   = make(CORE_NS, "sequences", "in_progress");
-    public static final MetadataKey CONSENSUS_MIGRATION_STATE = make(CORE_NS, "consensus", "migration_state");
+    public static final MetadataKey SCHEMA                            = make(CORE_NS, "schema", "dist_schema");
+    public static final MetadataKey NODE_DIRECTORY                    = make(CORE_NS, "membership", "node_directory");
+    public static final MetadataKey TOKEN_MAP                         = make(CORE_NS, "ownership", "token_map");
+    public static final MetadataKey DATA_PLACEMENTS                   = make(CORE_NS, "ownership", "data_placements");
+    public static final MetadataKey ACCORD_FAST_PATH                  = make(CORE_NS, "ownership", "accord_fast_path");
+    public static final MetadataKey ACCORD_STALE_REPLICAS             = make(CORE_NS, "ownership", "accord_stale_replicas");
+    public static final MetadataKey LOCKED_RANGES                     = make(CORE_NS, "sequences", "locked_ranges");
+    public static final MetadataKey IN_PROGRESS_SEQUENCES             = make(CORE_NS, "sequences", "in_progress");
+    public static final MetadataKey CONSENSUS_MIGRATION_STATE         = make(CORE_NS, "consensus", "migration_state");
+    public static final MetadataKey MUTATION_TRACKING_SHARDS          = make(CORE_NS, "mutation_tracking", "shards");
     public static final MetadataKey MUTATION_TRACKING_MIGRATION_STATE = make(CORE_NS, "mutation_tracking", "migration_state");
 
     public static final ImmutableMap<MetadataKey, Function<ClusterMetadata, MetadataValue<?>>> CORE_METADATA
@@ -58,6 +59,7 @@ public class MetadataKeys
                   .put(ACCORD_FAST_PATH, cm -> cm.accordFastPath)
                   .put(ACCORD_STALE_REPLICAS, cm -> cm.accordStaleReplicas)
                   .put(CONSENSUS_MIGRATION_STATE, cm -> cm.consensusMigrationState)
+                  .put(MUTATION_TRACKING_SHARDS, cm -> cm.mutationTrackingShards)
                   .put(MUTATION_TRACKING_MIGRATION_STATE, cm -> cm.mutationTrackingMigrationState)
                   .build();
 
