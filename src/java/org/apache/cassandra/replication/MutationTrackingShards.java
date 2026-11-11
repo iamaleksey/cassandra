@@ -154,6 +154,16 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
     }
 
+    public MutationTrackingShards withoutKeyspace(String keyspace)
+    {
+        if (!keyspaces.containsKey(keyspace))
+            throw new AssertionError("MutationTrackingShards doesn't contain shards for keyspace " + keyspace);
+
+        TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
+        updated.remove(keyspace);
+        return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
     private static Participants participants(String keyspace, VersionedEndpoints.ForRange endpoints, Directory directory)
     {
         int[] hosts = new int[endpoints.size()];
