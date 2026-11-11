@@ -871,13 +871,14 @@ public class ClusterMetadata
                    ", epoch=" + epoch +
                    ", partitioner=" + partitioner +
                    ", schema=" + schema +
-                   ", directory=" + schema +
+                   ", directory=" + directory +
                    ", tokenMap=" + tokenMap +
                    ", placement=" + placements +
                    ", availability=" + accordFastPath +
                    ", lockedRanges=" + lockedRanges +
                    ", inProgressSequences=" + inProgressSequences +
                    ", consensusMigrationState=" + consensusMigrationState +
+                   ", mutationTrackingMigrationState=" + mutationTrackingMigrationState +
                    ", extensions=" + extensions +
                    ", modifiedKeys=" + modifiedKeys +
                    '}';
@@ -992,6 +993,7 @@ public class ClusterMetadata
                lockedRanges.equals(that.lockedRanges) &&
                inProgressSequences.equals(that.inProgressSequences) &&
                consensusMigrationState.equals(that.consensusMigrationState) &&
+               mutationTrackingMigrationState.equals(that.mutationTrackingMigrationState) &&
                accordStaleReplicas.equals(that.accordStaleReplicas) &&
                extensions.equals(that.extensions);
     }
@@ -1032,6 +1034,10 @@ public class ClusterMetadata
         {
             logger.warn("In progress sequences differ: {} != {}", inProgressSequences, other.inProgressSequences);
         }
+        if (!mutationTrackingMigrationState.equals(other.mutationTrackingMigrationState))
+        {
+            logger.warn("Mutation tracking migration states differ: {} != {}", mutationTrackingMigrationState, other.mutationTrackingMigrationState);
+        }
         if (!extensions.equals(other.extensions))
         {
             logger.warn("Extensions differ: {} != {}", extensions, other.extensions);
@@ -1041,7 +1047,7 @@ public class ClusterMetadata
     @Override
     public int hashCode()
     {
-        return Objects.hash(epoch, schema, directory, tokenMap, placements, accordFastPath, lockedRanges, inProgressSequences, consensusMigrationState, accordStaleReplicas, extensions);
+        return Objects.hash(epoch, schema, directory, tokenMap, placements, accordFastPath, lockedRanges, inProgressSequences, consensusMigrationState, mutationTrackingMigrationState, accordStaleReplicas, extensions);
     }
 
     public static ClusterMetadata current()
