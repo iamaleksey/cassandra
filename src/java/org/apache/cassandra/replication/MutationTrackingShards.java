@@ -32,10 +32,17 @@ import org.apache.cassandra.dht.Range;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.MetadataValue;
+import org.apache.cassandra.tcm.membership.Directory;
+import org.apache.cassandra.tcm.membership.NodeId;
+import org.apache.cassandra.tcm.ownership.ReplicaGroups;
+import org.apache.cassandra.tcm.ownership.VersionedEndpoints;
 import org.apache.cassandra.tcm.serialization.PartitionerAwareMetadataSerializer;
 import org.apache.cassandra.tcm.serialization.Version;
+
+import static com.google.common.base.Preconditions.checkState;
 
 /**
  * TODO (expected): trim obsoleted shards at some point to keep TCM state manageable
@@ -132,6 +139,32 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
     public Epoch lastModified()
     {
         return lastModified;
+    }
+
+    public MutationTrackingShards withKeyspace(String keyspace, ReplicaGroups writes, Directory directory, Epoch epoch)
+    {
+        if (keyspaces.containsKey(keyspace))
+            throw new AssertionError("MutationTrackingShards already contains shards for keyspace " + keyspace);
+
+        TreeMap<ShardKey, ShardValue> shards = new TreeMap<>(KEY_COMPARATOR);
+        for (int i = 0; i < writes.ranges.size(); i++)
+            shards.put(new ShardKey(writes.ranges.get(i), epoch.getEpoch()), new ShardValue(participants(keyspace, writes.endpoints.get(i), directory)));
+        TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
+        updated.put(keyspace, ImmutableSortedMap.copyOfSorted(shards));
+        return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
+    private static Participants participants(String keyspace, VersionedEndpoints.ForRange endpoints, Directory directory)
+    {
+        int[] hosts = new int[endpoints.size()];
+        int i = 0;
+        for (InetAddressAndPort endpoint : endpoints.endpoints())
+        {
+            NodeId id = directory.peerId(endpoint);
+            checkState(id != null, "Write replica %s of keyspace %s is missing from the directory", endpoint, keyspace);
+            hosts[i++] = id.id();
+        }
+        return new Participants(hosts);
     }
 
     @Override
