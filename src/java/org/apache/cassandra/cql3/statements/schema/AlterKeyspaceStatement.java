@@ -50,7 +50,9 @@ import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.schema.SchemaConstants;
 import org.apache.cassandra.service.ClientState;
 import org.apache.cassandra.tcm.ClusterMetadata;
+import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.membership.NodeId;
+import org.apache.cassandra.tcm.ownership.ReplicaGroups;
 import org.apache.cassandra.tcm.serialization.Version;
 import org.apache.cassandra.transport.Event.SchemaChange;
 import org.apache.cassandra.transport.Event.SchemaChange.Change;
@@ -81,7 +83,12 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
     @Override
     public boolean compatibleWith(ClusterMetadata metadata)
     {
-        return metadata.directory.commonSerializationVersion.isAtLeast(Version.V0);
+        KeyspaceMetadata keyspace = metadata.schema.getKeyspaces().getNullable(keyspaceName);
+        boolean startsTracking = keyspace != null &&
+                                 !keyspace.params.replicationType.isTracked() &&
+                                 attrs.asAlteredKeyspaceParams(keyspace.params).replicationType.isTracked();
+        Version required = startsTracking ? Version.MIN_MUTATION_TRACKING_SHARDS_VERSION : Version.V0;
+        return metadata.directory.commonSerializationVersion.isAtLeast(required);
     }
 
     public Keyspaces apply(ClusterMetadata metadata)
@@ -118,7 +125,32 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
             logger.warn("Ignoring {}", e.getMessage());
         }
 
+        // TODO (expected): support further replication param changes
+        if (keyspace.params.replicationType.isTracked() && newKeyspace.params.replicationType.isTracked()
+            && !keyspace.params.replication.equals(newKeyspace.params.replication)
+            && !sameRangesAndParticipants(metadata, keyspace, newKeyspace))
+            throw ire("Changing replication of a tracked keyspace %s is currently not supported if it affects the keyspace's write replicas", keyspaceName);
+
         return schema.withAddedOrUpdated(newKeyspace);
+    }
+
+    private static boolean sameRangesAndParticipants(ClusterMetadata metadata, KeyspaceMetadata current, KeyspaceMetadata proposed)
+    {
+        ReplicaGroups before = metadata.placements.get(current.params.replication).writes;
+        ReplicaGroups after = ClusterMetadataService.instance()
+                                                    .placementProvider()
+                                                    .calculatePlacements(metadata.nextEpoch(), metadata.tokenMap.toRanges(), metadata, Keyspaces.of(proposed))
+                                                    .get(proposed.params.replication)
+                                                    .writes;
+
+        if (!before.ranges.equals(after.ranges))
+            return false;
+
+        for (int i = 0; i < before.ranges.size(); i++)
+            if (!before.endpoints.get(i).endpoints().equals(after.endpoints.get(i).endpoints()))
+                return false;
+
+        return true;
     }
 
     SchemaChange schemaChangeEvent(KeyspacesDiff diff)

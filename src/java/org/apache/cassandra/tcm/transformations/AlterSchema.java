@@ -262,7 +262,7 @@ public class AlterSchema implements Transformation
             next = next.with(placementsAfter);
         }
         next = maybeUpdateConsensusMigrationState(prev.consensusMigrationState, next, diff.altered, diff.dropped);
-        next = maybeUpdateMutationTrackingShards(nextEpoch, prev, placementsAfter, next, diff.created, diff.dropped);
+        next = maybeUpdateMutationTrackingShards(nextEpoch, prev, placementsAfter, next, diff.created, diff.altered, diff.dropped);
         next = maybeUpdateMutationTrackingMigrationState(nextEpoch, prev.mutationTrackingMigrationState, next, diff.altered, diff.dropped);
         return Transformation.success(next, LockedRanges.AffectedRanges.EMPTY);
     }
@@ -348,13 +348,25 @@ public class AlterSchema implements Transformation
         return next;
     }
 
-    private static Transformer maybeUpdateMutationTrackingShards(Epoch epoch, ClusterMetadata prev, DataPlacements placements, Transformer next, Keyspaces created, Keyspaces dropped)
+    private static Transformer maybeUpdateMutationTrackingShards(Epoch epoch, ClusterMetadata prev, DataPlacements placements, Transformer next, Keyspaces created, ImmutableList<KeyspaceDiff> altered, Keyspaces dropped)
     {
         MutationTrackingShards shards = prev.mutationTrackingShards;
 
         for (KeyspaceMetadata keyspace : dropped)
-            if (keyspace.params.replicationType.isTracked())
+            if (shards.keyspaces.containsKey(keyspace.name))
                 shards = shards.withoutKeyspace(keyspace.name);
+
+        for (KeyspaceDiff diff : altered)
+        {
+            boolean wasTracked = diff.before.params.replicationType.isTracked();
+            boolean isTracked = diff.after.params.replicationType.isTracked();
+            String name = diff.after.name;
+
+            // tracked -> untracked retains the keyspace's shards, so that the coordinator log ids of its tracked data
+            // written before the switch keep resolving; TODO (expected): clean them up (CASSANDRA-20955)
+            if (!wasTracked && isTracked)
+                shards = shards.withKeyspace(name, placements.get(diff.after.params.replication).writes, prev.directory, epoch);
+        }
 
         for (KeyspaceMetadata keyspace : created)
             if (keyspace.params.replicationType.isTracked())

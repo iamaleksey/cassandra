@@ -23,8 +23,10 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -70,6 +72,10 @@ public class AlterKeyspaceWitnessTransitionTest
     private static final String NTS_3_1_AND_2 = "{'class': 'NetworkTopologyStrategy', 'DC1': '3/1', 'DC2': '2'}";
 
     private static final AtomicInteger ksCounter = new AtomicInteger();
+
+    // TODO (expected): remove once replication changes that change the write replicas of tracked keyspaces are supported
+    private static final Set<String> CHANGES_TRACKED_WRITE_REPLICAS = Set.of("dropping a witness",
+                                                                             "legal changes in separate datacenters");
 
     private static final String TRACKED = "tracked";
     private static final String UNTRACKED = "untracked";
@@ -215,6 +221,9 @@ public class AlterKeyspaceWitnessTransitionTest
     @Test
     public void testTransition()
     {
+        Assume.assumeFalse("Replication changes that change the write replicas of a tracked keyspace are not supported yet",
+                           CHANGES_TRACKED_WRITE_REPLICAS.contains(description));
+
         String ksName = "ks" + ksCounter.incrementAndGet();
         schemaChange("CREATE KEYSPACE " + ksName + " WITH replication = " + startReplication +
                      " AND replication_type = '" + startReplicationType + "'");

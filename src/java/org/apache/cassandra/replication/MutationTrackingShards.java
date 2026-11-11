@@ -141,12 +141,19 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         return lastModified;
     }
 
+    /**
+     * Start tracking {@code keyspace} at {@code epoch}, with a new shard for every write replica group.
+     * Shards retained from an earlier tracked phase of the keyspace are carried over unchanged.
+     */
     public MutationTrackingShards withKeyspace(String keyspace, ReplicaGroups writes, Directory directory, Epoch epoch)
     {
-        if (keyspaces.containsKey(keyspace))
-            throw new AssertionError("MutationTrackingShards already contains shards for keyspace " + keyspace);
-
         TreeMap<ShardKey, ShardValue> shards = new TreeMap<>(KEY_COMPARATOR);
+
+        // if enabling MT after it was disabled earlier
+        ImmutableMap<ShardKey, ShardValue> retained = keyspaces.get(keyspace);
+        if (retained != null)
+            shards.putAll(retained);
+
         for (int i = 0; i < writes.ranges.size(); i++)
             shards.put(new ShardKey(writes.ranges.get(i), epoch.getEpoch()), new ShardValue(participants(keyspace, writes.endpoints.get(i), directory)));
         TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
