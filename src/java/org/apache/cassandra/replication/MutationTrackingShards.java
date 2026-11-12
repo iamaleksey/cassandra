@@ -33,10 +33,13 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.schema.DistributedSchema;
+import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.MetadataValue;
 import org.apache.cassandra.tcm.membership.Directory;
 import org.apache.cassandra.tcm.membership.NodeId;
+import org.apache.cassandra.tcm.ownership.DataPlacements;
 import org.apache.cassandra.tcm.ownership.ReplicaGroups;
 import org.apache.cassandra.tcm.ownership.VersionedEndpoints;
 import org.apache.cassandra.tcm.serialization.PartitionerAwareMetadataSerializer;
@@ -162,6 +165,46 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
         updated.remove(keyspace);
         return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
+    public MutationTrackingShards forUpdatedWritePlacements(
+        DistributedSchema schema, DataPlacements before, DataPlacements after, Directory directory, Epoch epoch)
+    {
+        TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = null;
+
+        for (Map.Entry<String, ImmutableMap<ShardKey, ShardValue>> entry : keyspaces.entrySet())
+        {
+            String keyspace = entry.getKey();
+            KeyspaceMetadata ksm = schema.getKeyspaceMetadata(keyspace);
+
+            ReplicaGroups writesBefore = before.get(ksm.params.replication).writes;
+            ReplicaGroups writesAfter = after.get(ksm.params.replication).writes;
+            if (writesBefore.equals(writesAfter))
+                continue;
+
+            TreeMap<ShardKey, ShardValue> shards = new TreeMap<>(KEY_COMPARATOR);
+            shards.putAll(entry.getValue());
+
+            for (int i = 0; i < writesAfter.ranges.size(); i++)
+            {
+                Range<Token> range = writesAfter.ranges.get(i);
+                VersionedEndpoints.ForRange endpoints = writesAfter.endpoints.get(i);
+
+                VersionedEndpoints.ForRange previousEndpoints = writesBefore.forRange(range);
+                if (previousEndpoints == null || !previousEndpoints.endpoints().equals(endpoints.endpoints()))
+                    shards.put(new ShardKey(range, epoch.getEpoch()),
+                               new ShardValue(participants(keyspace, endpoints, directory)));
+            }
+
+            if (!shards.equals(entry.getValue()))
+            {
+                if (updated == null)
+                    updated = new TreeMap<>(keyspaces);
+                updated.put(keyspace, ImmutableSortedMap.copyOfSorted(shards));
+            }
+        }
+
+        return updated == null ? this : new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
     }
 
     private static Participants participants(String keyspace, VersionedEndpoints.ForRange endpoints, Directory directory)

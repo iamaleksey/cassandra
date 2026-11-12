@@ -27,9 +27,11 @@ import org.apache.cassandra.exceptions.ExceptionCode;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.Transformation;
 import org.apache.cassandra.tcm.membership.NodeId;
+import org.apache.cassandra.tcm.ownership.DataPlacements;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
 import org.apache.cassandra.tcm.sequences.LockedRanges;
 import org.apache.cassandra.tcm.serialization.AsymmetricMetadataSerializer;
@@ -87,7 +89,15 @@ public abstract class ApplyPlacementDeltas implements Transformation
         ClusterMetadata.Transformer next = prev.transformer();
 
         if (!delta.isEmpty())
-            next = next.with(delta.apply(prev.nextEpoch(), prev.placements));
+        {
+            DataPlacements placements = delta.apply(prev.nextEpoch(), prev.placements);
+            next = next.with(placements);
+
+            MutationTrackingShards shards =
+                prev.mutationTrackingShards.forUpdatedWritePlacements(
+                    prev.schema, prev.placements, placements, prev.directory, prev.nextEpoch());
+            next = next.with(shards);
+        }
 
         next = transform(prev, next);
 
