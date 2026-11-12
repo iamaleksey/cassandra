@@ -20,9 +20,14 @@ package org.apache.cassandra.tcm.transformations;
 
 import java.util.Set;
 
+import com.google.common.collect.ImmutableSet;
+
 import org.apache.cassandra.dht.Token;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
+import org.apache.cassandra.tcm.MetadataKey;
+import org.apache.cassandra.tcm.MetadataKeys;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.DataPlacements;
 import org.apache.cassandra.tcm.ownership.PlacementProvider;
@@ -76,7 +81,27 @@ public class UnsafeJoin extends PrepareJoin
         Result res = plan.applyTo(metadata);
         metadata = res.success().metadata;
         assert metadata.epoch.isDirectlyAfter(prev.epoch);
-        return new Success(metadata, LockedRanges.AffectedRanges.EMPTY, res.success().affectedMetadata);
+        ImmutableSet<MetadataKey> affectedMetadata = res.success().affectedMetadata;
+
+        // recompute shards from prev in a single pass rather than reuse the ones produced by the individual steps:
+        // applyMultipleTransformations() forces the epoch after START_JOIN, so MID_JOIN and FINISH_JOIN execute at
+        // prev.epoch + 2 and would leave shards with sinceEpoch beyond the epoch actually committed
+        MutationTrackingShards shards =
+            prev.mutationTrackingShards.forUpdatedWritePlacements(
+                prev.schema, prev.placements, metadata.placements, metadata.directory, metadata.epoch);
+
+        if (shards != metadata.mutationTrackingShards)
+        {
+            metadata = metadata.transformer().with(shards).build().metadata.forceEpoch(metadata.epoch);
+
+            affectedMetadata =
+                ImmutableSet.<MetadataKey>builder()
+                            .addAll(affectedMetadata)
+                            .add(MetadataKeys.MUTATION_TRACKING_SHARDS)
+                            .build();
+        }
+
+        return new Success(metadata, LockedRanges.AffectedRanges.EMPTY, affectedMetadata);
     }
 
     public static void unsafeJoin(NodeId nodeId, Set<Token> tokens)

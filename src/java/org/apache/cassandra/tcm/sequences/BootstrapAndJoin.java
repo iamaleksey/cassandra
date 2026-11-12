@@ -49,6 +49,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.repair.autorepair.AutoRepairUtils;
 import org.apache.cassandra.replication.MutationTrackingService;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.replication.SealingCoordinator;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
@@ -377,10 +378,18 @@ public class BootstrapAndJoin extends MultiStepOperation<Epoch>
             default:
                 throw new IllegalStateException("Can't revert join from " + next);
         }
+
+        // cancelling a sequence creates new shards, superseding pre-existing ones as
+        // sharding machinery can only move forward: a sealed shard cannot be unsealed
+        MutationTrackingShards newShards =
+            metadata.mutationTrackingShards.forUpdatedWritePlacements(
+                metadata.schema, metadata.placements, placements, metadata.directory, metadata.nextEpoch());
+
         LockedRanges newLockedRanges = metadata.lockedRanges.unlock(lockKey);
         return metadata.transformer()
                        .withNodeState(startJoin.nodeId(), NodeState.REGISTERED)
                        .with(placements)
+                       .with(newShards)
                        .with(newLockedRanges);
     }
 

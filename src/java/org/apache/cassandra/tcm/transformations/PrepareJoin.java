@@ -33,6 +33,7 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.InetAddressAndPort;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Transformation;
@@ -173,9 +174,13 @@ public class PrepareJoin implements Transformation
 
         LockedRanges newLockedRanges = prev.lockedRanges.lock(lockKey, rangesToLock);
         DataPlacements startingPlacements = transitionPlan.toSplit.apply(prev.nextEpoch(), prev.placements);
+        MutationTrackingShards newShards =
+            prev.mutationTrackingShards.forUpdatedWritePlacements(
+                prev.schema, prev.placements, startingPlacements, prev.directory, prev.nextEpoch());
         ClusterMetadata.Transformer proposed = prev.transformer()
                                                    .with(newLockedRanges)
                                                    .with(startingPlacements)
+                                                   .with(newShards)
                                                    .with(prev.inProgressSequences.with(nodeId, plan));
 
         return Transformation.success(proposed, rangesToLock);
