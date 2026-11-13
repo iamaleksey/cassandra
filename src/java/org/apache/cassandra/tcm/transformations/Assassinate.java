@@ -26,10 +26,12 @@ import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.gms.Gossiper;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.replication.MutationTrackingService;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.MetadataKey;
+import org.apache.cassandra.tcm.MetadataKeys;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
 import org.apache.cassandra.tcm.ownership.PlacementProvider;
@@ -121,6 +123,16 @@ public class Assassinate extends PrepareLeave
         modifiedKeys.addAll(success.affectedMetadata);
 
         metadata = metadata.forceEpoch(forceEpoch);
+
+        MutationTrackingShards shards =
+            prev.mutationTrackingShards.forUpdatedWritePlacements(
+                prev.schema, prev.placements, metadata.placements, prev.directory, metadata.epoch);
+
+        if (shards != metadata.mutationTrackingShards)
+        {
+            metadata = metadata.transformer().with(shards).build().metadata.forceEpoch(metadata.epoch);
+            modifiedKeys.add(MetadataKeys.MUTATION_TRACKING_SHARDS);
+        }
 
         return new Success(metadata, LockedRanges.AffectedRanges.EMPTY, modifiedKeys.build());
     }

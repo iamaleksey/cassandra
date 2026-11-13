@@ -35,6 +35,7 @@ import org.apache.cassandra.io.util.DataOutputPlus;
 import org.apache.cassandra.locator.DynamicEndpointSnitch;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.replication.MutationTrackingService;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.replication.SealingCoordinator;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tcm.ClusterMetadata;
@@ -298,9 +299,15 @@ public class UnbootstrapAndLeave extends MultiStepOperation<Epoch>
             default:
                 throw new IllegalStateException("Can't revert leave from " + next);
         }
+
+        MutationTrackingShards newShards =
+            metadata.mutationTrackingShards.forUpdatedWritePlacements(
+                metadata.schema, metadata.placements, placements, metadata.directory, metadata.nextEpoch());
+
         LockedRanges newLockedRanges = metadata.lockedRanges.unlock(lockKey);
         return metadata.transformer()
                        .with(placements)
+                       .with(newShards)
                        .with(newLockedRanges)
                        .withNodeState(startLeave.nodeId(), NodeState.JOINED);
     }
