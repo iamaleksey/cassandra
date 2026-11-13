@@ -48,6 +48,7 @@ import org.apache.cassandra.locator.EndpointsByReplica;
 import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.repair.autorepair.AutoRepairUtils;
 import org.apache.cassandra.replication.MutationTrackingService;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.replication.SealingCoordinator;
 import org.apache.cassandra.schema.Schema;
 import org.apache.cassandra.service.StorageService;
@@ -374,10 +375,15 @@ public class BootstrapAndReplace extends MultiStepOperation<Epoch>
                 throw new IllegalStateException("Can't revert replacement from " + next);
         }
 
+        MutationTrackingShards newShards =
+            metadata.mutationTrackingShards.forUpdatedWritePlacements(
+                metadata.schema, metadata.placements, placements, metadata.directory, metadata.nextEpoch());
+
         LockedRanges newLockedRanges = metadata.lockedRanges.unlock(lockKey);
         return metadata.transformer()
                        .withNodeState(startReplace.replacement(), NodeState.REGISTERED)
                        .with(placements)
+                       .with(newShards)
                        .with(newLockedRanges);
     }
 
