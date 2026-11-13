@@ -32,11 +32,13 @@ import org.apache.cassandra.dht.IPartitioner;
 import org.apache.cassandra.dht.Token;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Transformation;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.membership.NodeState;
+import org.apache.cassandra.tcm.ownership.DataPlacements;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
 import org.apache.cassandra.tcm.ownership.PlacementProvider;
 import org.apache.cassandra.tcm.ownership.PlacementTransitionPlan;
@@ -121,10 +123,16 @@ public class PrepareMove implements Transformation
                                          finishMove,
                                          false);
 
+        DataPlacements startingPlacements = transitionPlan.toSplit.apply(prev.nextEpoch(), prev.placements);
+        MutationTrackingShards newShards =
+            prev.mutationTrackingShards.forUpdatedWritePlacements(
+                prev.schema, prev.placements, startingPlacements, prev.directory, prev.nextEpoch());
+
         return Transformation.success(prev.transformer()
                                           .withNodeState(nodeId, NodeState.MOVING)
                                           .with(prev.lockedRanges.lock(lockKey, rangesToLock))
-                                          .with(transitionPlan.toSplit.apply(prev.nextEpoch(), prev.placements))
+                                          .with(startingPlacements)
+                                          .with(newShards)
                                           .with(prev.inProgressSequences.with(nodeId, sequence)),
                                       rangesToLock);
     }
