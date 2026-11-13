@@ -48,6 +48,7 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.locator.RangesAtEndpoint;
 import org.apache.cassandra.locator.RangesByEndpoint;
 import org.apache.cassandra.locator.Replica;
+import org.apache.cassandra.replication.MutationTrackingShards;
 import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.schema.Keyspaces;
 import org.apache.cassandra.schema.ReplicationParams;
@@ -385,10 +386,15 @@ public class Move extends MultiStepOperation<Epoch>
                 throw new IllegalStateException("Can't revert move from " + next);
         }
 
+        MutationTrackingShards newShards =
+            metadata.mutationTrackingShards.forUpdatedWritePlacements(
+                metadata.schema, metadata.placements, placements, metadata.directory, metadata.nextEpoch());
+
         LockedRanges newLockedRanges = metadata.lockedRanges.unlock(lockKey);
         return metadata.transformer()
                        .withNodeState(startMove.nodeId(), NodeState.JOINED)
                        .with(placements)
+                       .with(newShards)
                        .with(newLockedRanges);
     }
 
