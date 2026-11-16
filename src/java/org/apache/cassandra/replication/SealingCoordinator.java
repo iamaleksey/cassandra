@@ -103,25 +103,6 @@ public final class SealingCoordinator
 {
     private static final Logger logger = LoggerFactory.getLogger(SealingCoordinator.class);
 
-    private static final int MAX_RETRIES = CassandraRelevantProperties.SHARD_SEALING_RETRIES.getInt();
-    private static final long INITIAL_BACKOFF_MS = 200;
-    private static final long MAX_BACKOFF_MS = 2000;
-
-    private static long sleepWithBackoff(long currentBackoffMs)
-    {
-        if (currentBackoffMs > 0)
-        {
-            try
-            {
-                Thread.sleep(currentBackoffMs);
-            }
-            catch (InterruptedException e)
-            {
-                throw new UncheckedInterruptedException(e);
-            }
-        }
-        return Math.min(MAX_BACKOFF_MS, (long) (currentBackoffMs * 1.5));
-    }
     /*
      * BOOTSTRAP sequence illustrated. Stages in which write placements
      * remain unchanged, and only read placements change, are skipped
@@ -646,6 +627,10 @@ public final class SealingCoordinator
         }
     }
 
+    private static final int MAX_RETRIES = CassandraRelevantProperties.SHARD_SEALING_RETRIES.getInt();
+    private static final long INITIAL_BACKOFF_MS = 200;
+    private static final long MAX_BACKOFF_MS = 2000;
+
     private static void executeWithRetry(
         String operationName,
         Set<ShardMetadata> shards,
@@ -714,6 +699,22 @@ public final class SealingCoordinator
 
             backoffMs = sleepWithBackoff(backoffMs);
         }
+    }
+
+    private static long sleepWithBackoff(long currentBackoffMs)
+    {
+        if (currentBackoffMs > 0)
+        {
+            try
+            {
+                Thread.sleep(currentBackoffMs);
+            }
+            catch (InterruptedException e)
+            {
+                throw new UncheckedInterruptedException(e);
+            }
+        }
+        return Math.min(MAX_BACKOFF_MS, (long) (currentBackoffMs * 1.5));
     }
 
     /**
