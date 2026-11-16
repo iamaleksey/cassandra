@@ -131,28 +131,35 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         public final State state;
         /** The epoch at which the shard transitioned to SEALING */
         public final long sealingEpoch;
+        public final long sealedEpoch;
         public final Participants participants;
 
         ShardValue(Participants participants)
         {
-            this(State.ACTIVE, UNSET, participants);
+            this(State.ACTIVE, UNSET, UNSET, participants);
         }
 
-        ShardValue(State state, long sealingEpoch, Participants participants)
+        ShardValue(State state, long sealingEpoch, long sealedEpoch, Participants participants)
         {
             this.state = state;
             this.sealingEpoch = sealingEpoch;
+            this.sealedEpoch = sealedEpoch;
             this.participants = participants;
         }
 
         ShardValue asDisabled()
         {
-            return new ShardValue(State.DISABLED, UNSET, participants);
+            return new ShardValue(State.DISABLED, UNSET, UNSET, participants);
         }
 
         ShardValue asSealing(long sealingEpoch)
         {
-            return new ShardValue(State.SEALING, sealingEpoch, participants);
+            return new ShardValue(State.SEALING, sealingEpoch, UNSET, participants);
+        }
+
+        ShardValue asSealed(long sealedEpoch)
+        {
+            return new ShardValue(State.SEALED, sealingEpoch, sealedEpoch, participants);
         }
 
         @Override
@@ -161,19 +168,22 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
             if (this == o) return true;
             if (!(o instanceof ShardValue)) return false;
             ShardValue that = (ShardValue) o;
-            return state == that.state && sealingEpoch == that.sealingEpoch && participants.equals(that.participants);
+            return state == that.state
+                && sealingEpoch == that.sealingEpoch
+                && sealedEpoch == that.sealedEpoch
+                && participants.equals(that.participants);
         }
 
         @Override
         public int hashCode()
         {
-            return Objects.hash(state, sealingEpoch, participants);
+            return Objects.hash(state, sealingEpoch, sealedEpoch, participants);
         }
 
         @Override
         public String toString()
         {
-            return "state=" + state + ", sealingEpoch=" + sealingEpoch + ", participants=" + participants;
+            return "state=" + state + ", sealingEpoch=" + sealingEpoch + ", sealedEpoch=" + sealedEpoch + ", participants=" + participants;
         }
     }
 
@@ -321,6 +331,47 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         return sealing;
     }
 
+    /**
+     * Marks the given SEALING shards as SEALED at {@code epoch}.
+     */
+    public MutationTrackingShards withSealed(Map<String, ? extends Set<ShardKey>> toSeal, Epoch epoch)
+    {
+        TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = null;
+
+        for (Map.Entry<String, ? extends Set<ShardKey>> entry : toSeal.entrySet())
+        {
+            String keyspace = entry.getKey();
+            ImmutableMap<ShardKey, ShardValue> current = keyspaces.get(keyspace);
+            if (current == null)
+                continue;
+
+            TreeMap<ShardKey, ShardValue> shards = null;
+            for (ShardKey key : entry.getValue())
+            {
+                ShardValue value = current.get(key);
+                if (value == null || value.state == ShardValue.State.SEALED || value.state == ShardValue.State.DISABLED)
+                    continue;
+
+                checkState(value.state == ShardValue.State.SEALING, "Shard %s of keyspace %s cannot be SEALED from %s", key, keyspace, value.state);
+                if (shards == null)
+                {
+                    shards = new TreeMap<>(KEY_COMPARATOR);
+                    shards.putAll(current);
+                }
+                shards.put(key, value.asSealed(epoch.getEpoch()));
+            }
+
+            if (shards != null)
+            {
+                if (updated == null)
+                    updated = new TreeMap<>(keyspaces);
+                updated.put(keyspace, ImmutableSortedMap.copyOfSorted(shards));
+            }
+        }
+
+        return updated == null ? this : new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
     private static Participants participants(String keyspace, VersionedEndpoints.ForRange endpoints, Directory directory)
     {
         int[] hosts = new int[endpoints.size()];
@@ -376,6 +427,7 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     out.writeVInt(shard.getKey().sinceEpoch);
                     out.writeByte(shard.getValue().state.id);
                     out.writeUnsignedVInt(shard.getValue().sealingEpoch);
+                    out.writeUnsignedVInt(shard.getValue().sealedEpoch);
                     Participants.serializer.serialize(shard.getValue().participants, out);
                 }
             }
@@ -399,8 +451,9 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     long sinceEpoch = in.readVInt();
                     ShardValue.State state = ShardValue.State.fromId(in.readByte());
                     long sealingEpoch = in.readUnsignedVInt();
+                    long sealedEpoch = in.readUnsignedVInt();
                     Participants participants = Participants.serializer.deserialize(in);
-                    shards.put(new ShardKey(range, sinceEpoch), new ShardValue(state, sealingEpoch, participants));
+                    shards.put(new ShardKey(range, sinceEpoch), new ShardValue(state, sealingEpoch, sealedEpoch, participants));
                 }
                 keyspaces.put(keyspace, shards.build());
             }
@@ -423,6 +476,7 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     size += TypeSizes.sizeofVInt(shard.getKey().sinceEpoch);
                     size += TypeSizes.BYTE_SIZE;
                     size += TypeSizes.sizeofUnsignedVInt(shard.getValue().sealingEpoch);
+                    size += TypeSizes.sizeofUnsignedVInt(shard.getValue().sealedEpoch);
                     size += Participants.serializer.serializedSize(shard.getValue().participants);
                 }
             }

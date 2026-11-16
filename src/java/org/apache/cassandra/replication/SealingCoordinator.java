@@ -55,11 +55,13 @@ import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
+import org.apache.cassandra.replication.MutationTrackingShards.ShardKey;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.sequences.LeaveStreams;
+import org.apache.cassandra.tcm.transformations.MarkShardsSealed;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
@@ -383,7 +385,7 @@ public final class SealingCoordinator
         awaitEpoch(shards, withoutNode, metadata.epoch); // wait for all involved replicas to catch up to the relevant TCM epoch
         drain(shards, withoutNode);                      // drain in-flight local writes
         reconcile(shards, withoutNode);                  // wait for logs to reconcile
-        complete(shards, withoutNode);                   // SEALING -> SEALED for each Shard
+        complete(shards);                                // SEALING -> SEALED for each Shard
     }
 
     /**
@@ -410,11 +412,6 @@ public final class SealingCoordinator
         private final Set<InetAddressAndPort> succeeded = ConcurrentHashMap.newKeySet();
         private final Map<InetAddressAndPort, RequestFailure> failures = new ConcurrentHashMap<>();
         private final Predicate<T> successCondition;
-
-        public StepCallback(Collection<InetAddressAndPort> endpoints, String operation)
-        {
-            this(endpoints, operation, payload -> true);
-        }
 
         public StepCallback(Collection<InetAddressAndPort> endpoints, String operation, Predicate<T> successCondition)
         {
@@ -652,12 +649,17 @@ public final class SealingCoordinator
     }
 
     /**
-     * Promote every participant of the (drained and reconciled) shard from SEALING to SEALED.
+     * Mark the (drained and reconciled) shards SEALED in cluster metadata.
      */
-    private static void complete(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
+    private static void complete(Set<ShardMetadata> shards)
     {
-        executeWithRetry("completing sealing", shards, withoutNode, (shard, endpoints) ->
-            CompleteSealing.complete(shard.keyspace, shard.sinceEpoch, shard.range, endpoints));
+        if (shards.isEmpty())
+            return;
+
+        Map<String, Set<ShardKey>> keys = new HashMap<>();
+        for (ShardMetadata shard : shards)
+            keys.computeIfAbsent(shard.keyspace, k -> new HashSet<>()).add(new ShardKey(shard.range, shard.sinceEpoch));
+        ClusterMetadataService.instance().commit(new MarkShardsSealed(keys));
     }
 
     public static final class AwaitEpoch
@@ -1096,102 +1098,6 @@ public final class SealingCoordinator
             public long serializedSize(Response r)
             {
                 return TypeSizes.sizeof(r.witnessed);
-            }
-        };
-    }
-
-    public static final class CompleteSealing
-    {
-        public static final class Request
-        {
-            final String keyspace;
-            final long sinceEpoch;
-            final Range<Token> range;
-
-            Request(String keyspace, long sinceEpoch, Range<Token> range)
-            {
-                this.keyspace = keyspace;
-                this.sinceEpoch = sinceEpoch;
-                this.range = range;
-            }
-        }
-
-        // cannot use NoPayload, because its serializer cannot be wrapped inside mtEmbedded()
-        public static final class Response
-        {
-            private static final Response instance = new Response();
-        }
-
-        /**
-         * Tell every participant of a sealing shard to promote it from SEALING to SEALED.
-         */
-        private static StepCallback<Response> complete(
-            String keyspace, long sinceEpoch, Range<Token> range, Collection<InetAddressAndPort> endpoints)
-        {
-            checkArgument(!endpoints.isEmpty());
-
-            StepCallback<Response> callback = new StepCallback<>(endpoints, "complete sealing for keyspace " + keyspace);
-            Message<Request> message = Message.out(Verb.MT_COMPLETE_SEALING_REQ, new Request(keyspace, sinceEpoch, range));
-            for (InetAddressAndPort peer : endpoints)
-                MessagingService.instance().sendWithCallback(message, peer, callback);
-
-            return callback;
-        }
-
-        public static final IVerbHandler<Request> verbHandler = message -> {
-            MutationTrackingService.ensureEnabled();
-            Request request = message.payload;
-
-            MutationTrackingService.instance().markShardSealed(request.keyspace, request.sinceEpoch, request.range);
-            MessagingService.instance().send(message.responseWith(Response.instance), message.from());
-        };
-
-        public static final VersionedSerializer<Request> requestSerializer = new VersionedSerializer<>()
-        {
-            @Override
-            public void serialize(Request r, DataOutputPlus out, Version version) throws IOException
-            {
-                out.writeUTF(r.keyspace);
-                out.writeLong(r.sinceEpoch);
-                AbstractBounds.tokenSerializer.serialize(r.range, out, version.messagingVersion());
-            }
-
-            @Override
-            public Request deserialize(DataInputPlus in, Version version) throws IOException
-            {
-                String keyspace = in.readUTF();
-                long sinceEpoch = in.readLong();
-                Range<Token> range = (Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, IPartitioner.global(), version.messagingVersion());
-                return new Request(keyspace, sinceEpoch, range);
-            }
-
-            @Override
-            public long serializedSize(Request r, Version version)
-            {
-                long size = TypeSizes.sizeof(r.keyspace);
-                size += TypeSizes.sizeof(r.sinceEpoch);
-                size += AbstractBounds.tokenSerializer.serializedSize(r.range, version.messagingVersion());
-                return size;
-            }
-        };
-
-        public static final UnversionedSerializer<Response> responseSerializer = new UnversionedSerializer<>()
-        {
-            @Override
-            public void serialize(Response r, DataOutputPlus out)
-            {
-            }
-
-            @Override
-            public Response deserialize(DataInputPlus in)
-            {
-                return Response.instance;
-            }
-
-            @Override
-            public long serializedSize(Response r)
-            {
-                return 0;
             }
         };
     }

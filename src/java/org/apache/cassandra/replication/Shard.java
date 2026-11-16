@@ -560,18 +560,6 @@ public class Shard
         return true;
     }
 
-    void markSealed()
-    {
-        if (state == State.ACTIVE)
-            throw new IllegalStateException(format("%s cannot transition to SEALED from %s", this, state));
-
-        if (state != State.SEALED)
-        {
-            state = State.SEALED;
-            persistToSystemTables();
-        }
-    }
-
     public boolean isSealed()
     {
         return state == State.SEALED;

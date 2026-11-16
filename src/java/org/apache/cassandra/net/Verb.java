@@ -84,7 +84,6 @@ import org.apache.cassandra.replication.ForwardedWrite;
 import org.apache.cassandra.replication.PullMutationsRequest;
 import org.apache.cassandra.replication.PushMutationRequest;
 import org.apache.cassandra.replication.SealingCoordinator.AwaitEpoch;
-import org.apache.cassandra.replication.SealingCoordinator.CompleteSealing;
 import org.apache.cassandra.replication.SealingCoordinator.Drain;
 import org.apache.cassandra.replication.SealingCoordinator.ReconcileCapture;
 import org.apache.cassandra.replication.SealingCoordinator.ReconcilePoll;
@@ -400,8 +399,6 @@ public enum Verb
     MT_RECONCILE_CAPTURE_REQ (927, P2, shardSealingTimeout,      ANTI_ENTROPY,     () -> mtEmbedded(ReconcileCapture.requestSerializer),      () -> ReconcileCapture.verbHandler,        MT_RECONCILE_CAPTURE_RSP),
     MT_RECONCILE_POLL_RSP    (928, P2, shardSealingTimeout,      REQUEST_RESPONSE, () -> mtEmbedded(ReconcilePoll.responseSerializer),        RESPONSE_HANDLER                                                   ),
     MT_RECONCILE_POLL_REQ    (929, P2, shardSealingTimeout,      ANTI_ENTROPY,     () -> mtEmbedded(ReconcilePoll.requestSerializer),         () -> ReconcilePoll.verbHandler,           MT_RECONCILE_POLL_RSP   ),
-    MT_COMPLETE_SEALING_RSP  (930, P2, shardSealingTimeout,      REQUEST_RESPONSE, () -> mtEmbedded(CompleteSealing.responseSerializer),      RESPONSE_HANDLER                                                   ),
-    MT_COMPLETE_SEALING_REQ  (931, P2, shardSealingTimeout,      ANTI_ENTROPY,     () -> mtEmbedded(CompleteSealing.requestSerializer),       () -> CompleteSealing.verbHandler,         MT_COMPLETE_SEALING_RSP ),
 
     // accord
     ACCORD_SIMPLE_RSP               (119, P2, writeTimeout, IMMEDIATE,          () -> accordEmbedded(EnumSerializer.simpleReply),           AccordService::responseHandlerOrNoop                                           ),

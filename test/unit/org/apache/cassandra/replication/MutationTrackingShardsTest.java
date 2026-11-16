@@ -46,12 +46,12 @@ public class MutationTrackingShardsTest
     public void markedSealingAt()
     {
         MutationTrackingShards shards = new MutationTrackingShards(Epoch.create(5), ImmutableMap.of(
-            "ks1", ImmutableMap.of(key(10, 20, 1), new ShardValue(SEALING, 3, participants(1, 2, 3)),
-                                   key(20, 30, 1), new ShardValue(SEALING, 4, participants(1, 2, 3)),
-                                   key(30, 40, 1), new ShardValue(SEALED, 3, participants(1, 2, 3)),
-                                   key(40, 50, 1), new ShardValue(DISABLED, ShardValue.UNSET, participants(1, 2, 3)),
+            "ks1", ImmutableMap.of(key(10, 20, 1), new ShardValue(SEALING, 3, ShardValue.UNSET, participants(1, 2, 3)),
+                                   key(20, 30, 1), new ShardValue(SEALING, 4, ShardValue.UNSET, participants(1, 2, 3)),
+                                   key(30, 40, 1), new ShardValue(SEALED, 3, 4, participants(1, 2, 3)),
+                                   key(40, 50, 1), new ShardValue(DISABLED, ShardValue.UNSET, ShardValue.UNSET, participants(1, 2, 3)),
                                    key(10, 20, 3), new ShardValue(participants(1, 2, 4))),
-            "ks2", ImmutableMap.of(key(10, 20, 2), new ShardValue(SEALING, 3, participants(4, 5, 6)),
+            "ks2", ImmutableMap.of(key(10, 20, 2), new ShardValue(SEALING, 3, ShardValue.UNSET, participants(4, 5, 6)),
                                    key(10, 20, 3), new ShardValue(participants(4, 5, 7)))));
 
         Set<ShardMetadata> sealing = shards.markedSealingAt(Epoch.create(3));

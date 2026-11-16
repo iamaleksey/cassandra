@@ -112,6 +112,7 @@ public class AlterSchemaMutationTrackingShardsTest
             assertEquals(expected, shard.participants.asSet());
             assertEquals(ShardValue.State.ACTIVE, shard.state);
             assertEquals(ShardValue.UNSET, shard.sealingEpoch);
+            assertEquals(ShardValue.UNSET, shard.sealedEpoch);
         }
     }
 
@@ -285,6 +286,7 @@ public class AlterSchemaMutationTrackingShardsTest
             assertEquals(value.participants, disabled.participants);
             assertEquals(ShardValue.State.DISABLED, disabled.state);
             assertEquals(ShardValue.UNSET, disabled.sealingEpoch);
+            assertEquals(ShardValue.UNSET, disabled.sealedEpoch);
         });
         assertEquals(metadata.epoch, metadata.mutationTrackingShards.lastModified);
     }

@@ -885,6 +885,7 @@ public class TopologyChangeMutationTrackingShardsTest
                 assertEquals("new shard " + key + " should be created at " + epoch, epoch.getEpoch(), key.sinceEpoch);
                 assertEquals("new shard " + key + " should start out ACTIVE", State.ACTIVE, value.state);
                 assertEquals("new shard " + key + " should have no sealing epoch", ShardValue.UNSET, value.sealingEpoch);
+                assertEquals("new shard " + key + " should have no sealed epoch", ShardValue.UNSET, value.sealedEpoch);
             }
         });
 
@@ -898,6 +899,7 @@ public class TopologyChangeMutationTrackingShardsTest
             {
                 assertEquals("shard " + key + " should be marked SEALING", State.SEALING, carried.state);
                 assertEquals("shard " + key + " should be marked SEALING at " + epoch, epoch.getEpoch(), carried.sealingEpoch);
+                assertEquals("shard " + key + " should have no sealed epoch", ShardValue.UNSET, carried.sealedEpoch);
             }
             else
             {
@@ -930,9 +932,18 @@ public class TopologyChangeMutationTrackingShardsTest
         shards.forEach((key, value) -> {
             assertEquals("unexpected state of shard " + key, latestKeys.contains(key), value.state == State.ACTIVE);
             if (value.state == State.ACTIVE || value.state == State.DISABLED)
+            {
                 assertEquals(value.state + " shard " + key + " should have no sealing epoch", ShardValue.UNSET, value.sealingEpoch);
+                assertEquals(value.state + " shard " + key + " should have no sealed epoch", ShardValue.UNSET, value.sealedEpoch);
+            }
             else
+            {
                 assertTrue("shard " + key + " should have been marked SEALING after creation", value.sealingEpoch > key.sinceEpoch);
+                if (value.state == State.SEALING)
+                    assertEquals("SEALING shard " + key + " should have no sealed epoch", ShardValue.UNSET, value.sealedEpoch);
+                else
+                    assertTrue("shard " + key + " should have been SEALED after being marked SEALING", value.sealedEpoch > value.sealingEpoch);
+            }
         });
     }
 

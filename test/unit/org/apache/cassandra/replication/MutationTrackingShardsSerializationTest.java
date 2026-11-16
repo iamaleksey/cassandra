@@ -63,15 +63,15 @@ public class MutationTrackingShardsSerializationTest
     public void testAllStates() throws IOException
     {
         ImmutableMap<ShardKey, ShardValue> ks1 = ImmutableMap.of(
-            key(-100, 0, 3),           new ShardValue(State.SEALED, 9, participants(1, 2, 3)),
-            key(-100, 0, 9),           new ShardValue(State.SEALING, 1_000_000, participants(1, 2, 4)),
+            key(-100, 0, 3),           new ShardValue(State.SEALED, 9, 1_000_001, participants(1, 2, 3)),
+            key(-100, 0, 9),           new ShardValue(State.SEALING, 1_000_000, ShardValue.UNSET, participants(1, 2, 4)),
             key(-100, 0, 1_000_000),   new ShardValue(participants(1, 4, 5)),
             key(0, Long.MIN_VALUE, 3), new ShardValue(participants(2, 3, 4)));
         ImmutableMap<ShardKey, ShardValue> ks2 = ImmutableMap.of(
             key(Long.MIN_VALUE, Long.MIN_VALUE, 7), new ShardValue(participants(1)),
-            key(Long.MIN_VALUE, Long.MIN_VALUE, 5), new ShardValue(State.DISABLED, ShardValue.UNSET, participants(1, 2)));
+            key(Long.MIN_VALUE, Long.MIN_VALUE, 5), new ShardValue(State.DISABLED, ShardValue.UNSET, ShardValue.UNSET, participants(1, 2)));
 
-        roundtrip(new MutationTrackingShards(Epoch.create(1_000_000), ImmutableMap.of("ks1", ks1, "ks2", ks2)));
+        roundtrip(new MutationTrackingShards(Epoch.create(1_000_001), ImmutableMap.of("ks1", ks1, "ks2", ks2)));
     }
 
     private static void roundtrip(MutationTrackingShards shards) throws IOException

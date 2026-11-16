@@ -50,6 +50,7 @@ import org.apache.cassandra.tcm.transformations.CancelInProgressSequence;
 import org.apache.cassandra.tcm.transformations.CustomTransformation;
 import org.apache.cassandra.tcm.transformations.FinishDropAccordTable;
 import org.apache.cassandra.tcm.transformations.ForceSnapshot;
+import org.apache.cassandra.tcm.transformations.MarkShardsSealed;
 import org.apache.cassandra.tcm.transformations.MaybeFinishConsensusMigrationForTableAndRange;
 import org.apache.cassandra.tcm.transformations.PrepareDropAccordTable;
 import org.apache.cassandra.tcm.transformations.PrepareJoin;
@@ -285,6 +286,8 @@ public interface Transformation
          * TODO (now): what should be the correct introducedIn version for these?
          */
         RETIRE_SINGLE_NODE_SEQUENCE(45, Version.TBD_UNLOCK_STEP, () -> RetireSingleNodeSequence.serializer),
+
+        MARK_SHARDS_SEALED(46, Version.MIN_MUTATION_TRACKING_SHARDS_VERSION, () -> MarkShardsSealed.serializer),
         ;
 
         /**
