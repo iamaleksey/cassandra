@@ -1824,22 +1824,6 @@ public class MutationTrackingService implements MutationTrackingServiceMBean
      */
 
     /**
-     * Fence id allocation on an obsoleted shard by transitioning state from ACTIVE to SEALING.
-     */
-    void markShardSealing(String keyspace, long sinceEpoch, Range<Token> range)
-    {
-        shardLock.readLock().lock();
-        try
-        {
-            getShard(keyspace, sinceEpoch, range).markSealing();
-        }
-        finally
-        {
-            shardLock.readLock().unlock();
-        }
-    }
-
-    /**
      * @return whether the obsoleted shard has drained its in-flight local writes
      */
     boolean isShardDrained(String keyspace, long sinceEpoch, Range<Token> range)

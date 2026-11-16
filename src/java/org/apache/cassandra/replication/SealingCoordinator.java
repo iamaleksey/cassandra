@@ -535,7 +535,6 @@ public final class SealingCoordinator
     private static void seal(Set<ShardMetadata> shards, @Nullable NodeId withoutNode, Epoch epoch)
     {
         awaitEpoch(shards, withoutNode, epoch); // wait for all involved replicas to catch up to the relevant TCM epoch
-        initiate(shards, withoutNode);          // ACTIVE -> SEALING for each Shard
         drain(shards, withoutNode);             // drain in-flight local writes
         reconcile(shards, withoutNode);         // wait for logs to reconcile
         complete(shards, withoutNode);          // SEALING -> SEALED for each Shard
@@ -715,15 +714,6 @@ public final class SealingCoordinator
             }
         }
         return Math.min(MAX_BACKOFF_MS, (long) (currentBackoffMs * 1.5));
-    }
-
-    /**
-     * Fence allocation on every participant of the obsoleted shard (ACTIVE -> SEALING).
-     */
-    private static void initiate(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
-    {
-        executeWithRetry("initiating sealing", shards, withoutNode, (shard, endpoints) ->
-            InitSealing.initiate(shard.keyspace, shard.sinceEpoch, shard.range, endpoints));
     }
 
     private static void drain(Set<ShardMetadata> shards, @Nullable NodeId withoutNode)
@@ -1049,101 +1039,6 @@ public final class SealingCoordinator
             public long serializedSize(Response r)
             {
                 return TypeSizes.sizeof(r.applied);
-            }
-        };
-    }
-
-    public static final class InitSealing
-    {
-        public static final class Request
-        {
-            final String keyspace;
-            final long sinceEpoch;
-            final Range<Token> range;
-
-            Request(String keyspace, long sinceEpoch, Range<Token> range)
-            {
-                this.keyspace = keyspace;
-                this.sinceEpoch = sinceEpoch;
-                this.range = range;
-            }
-        }
-
-        // cannot use NoPayload, because its serializer cannot be wrapped inside mtEmbedded()
-        public static final class Response
-        {
-            private static final Response instance = new Response();
-        }
-
-        /**
-         * Tell every participant of an obsoleted shard to fence id allocation (mark it SEALING)
-         */
-        private static StepCallback<Response> initiate(
-            String keyspace, long sinceEpoch, Range<Token> range, Collection<InetAddressAndPort> endpoints)
-        {
-            checkArgument(!endpoints.isEmpty());
-
-            StepCallback<Response> callback = new StepCallback<>(endpoints, "initiate sealing for keyspace " + keyspace);
-            Message<Request> message = Message.out(Verb.MT_INIT_SEALING_REQ, new Request(keyspace, sinceEpoch, range));
-            for (InetAddressAndPort peer : endpoints)
-                MessagingService.instance().sendWithCallback(message, peer, callback);
-
-            return callback;
-        }
-
-        public static final IVerbHandler<Request> verbHandler = message -> {
-            MutationTrackingService.ensureEnabled();
-            Request request = message.payload;
-            MutationTrackingService.instance().markShardSealing(request.keyspace, request.sinceEpoch, request.range);
-            MessagingService.instance().send(message.responseWith(Response.instance), message.from());
-        };
-
-        public static final VersionedSerializer<Request> requestSerializer = new VersionedSerializer<>()
-        {
-            @Override
-            public void serialize(Request r, DataOutputPlus out, Version version) throws IOException
-            {
-                out.writeUTF(r.keyspace);
-                out.writeLong(r.sinceEpoch);
-                AbstractBounds.tokenSerializer.serialize(r.range, out, version.messagingVersion());
-            }
-
-            @Override
-            public Request deserialize(DataInputPlus in, Version version) throws IOException
-            {
-                String keyspace = in.readUTF();
-                long sinceEpoch = in.readLong();
-                Range<Token> range = (Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, IPartitioner.global(), version.messagingVersion());
-                return new Request(keyspace, sinceEpoch, range);
-            }
-
-            @Override
-            public long serializedSize(Request r, Version version)
-            {
-                long size = TypeSizes.sizeof(r.keyspace);
-                size += TypeSizes.sizeof(r.sinceEpoch);
-                size += AbstractBounds.tokenSerializer.serializedSize(r.range, version.messagingVersion());
-                return size;
-            }
-        };
-
-        public static final UnversionedSerializer<Response> responseSerializer = new UnversionedSerializer<>()
-        {
-            @Override
-            public void serialize(Response r, DataOutputPlus out)
-            {
-            }
-
-            @Override
-            public Response deserialize(DataInputPlus in)
-            {
-                return Response.instance;
-            }
-
-            @Override
-            public long serializedSize(Response r)
-            {
-                return 0;
             }
         };
     }

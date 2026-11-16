@@ -523,19 +523,6 @@ public class Shard
      * Sealing
      */
 
-    void markSealing()
-    {
-        // TODO (expected): consider what can possibly go wrong with the no-op on SEALED
-        if (state == State.SEALED)
-            return;
-
-        if (state != State.SEALING)
-        {
-            state = State.SEALING;
-            persistToSystemTables();
-        }
-    }
-
     boolean isDrained()
     {
         return state != State.ACTIVE && pendingIdAllocations.get() == 0 && pendingLocalWrites.isEmpty();
