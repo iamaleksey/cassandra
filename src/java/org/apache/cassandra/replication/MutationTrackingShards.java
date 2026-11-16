@@ -18,7 +18,9 @@
 package org.apache.cassandra.replication;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
@@ -46,6 +48,7 @@ import org.apache.cassandra.tcm.serialization.PartitionerAwareMetadataSerializer
 import org.apache.cassandra.tcm.serialization.Version;
 
 import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.collect.Iterables.any;
 
 /**
  * TODO (expected): trim obsoleted shards at some point to keep TCM state manageable
@@ -97,11 +100,57 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
 
     public static final class ShardValue
     {
+        public enum State
+        {
+            ACTIVE(0), DISABLED(1), SEALING(2), SEALED(4);
+
+            public final int id;
+
+            State(int id)
+            {
+                this.id = id;
+            }
+
+            public static State fromId(int id)
+            {
+                switch (id)
+                {
+                    case 0: return ACTIVE;
+                    case 1: return DISABLED;
+                    case 2: return SEALING;
+                    case 4: return SEALED;
+                    default: throw new IllegalArgumentException("Unknown shard state id " + id);
+                }
+            }
+        }
+
+        public static final long UNSET = 0;
+
+        public final State state;
+        /** The epoch at which the shard transitioned to SEALING */
+        public final long sealingEpoch;
         public final Participants participants;
 
         ShardValue(Participants participants)
         {
+            this(State.ACTIVE, UNSET, participants);
+        }
+
+        ShardValue(State state, long sealingEpoch, Participants participants)
+        {
+            this.state = state;
+            this.sealingEpoch = sealingEpoch;
             this.participants = participants;
+        }
+
+        ShardValue asDisabled()
+        {
+            return new ShardValue(State.DISABLED, UNSET, participants);
+        }
+
+        ShardValue asSealing(long sealingEpoch)
+        {
+            return new ShardValue(State.SEALING, sealingEpoch, participants);
         }
 
         @Override
@@ -110,19 +159,19 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
             if (this == o) return true;
             if (!(o instanceof ShardValue)) return false;
             ShardValue that = (ShardValue) o;
-            return participants.equals(that.participants);
+            return state == that.state && sealingEpoch == that.sealingEpoch && participants.equals(that.participants);
         }
 
         @Override
         public int hashCode()
         {
-            return participants.hashCode();
+            return Objects.hash(state, sealingEpoch, participants);
         }
 
         @Override
         public String toString()
         {
-            return "participants=" + participants;
+            return "state=" + state + ", sealingEpoch=" + sealingEpoch + ", participants=" + participants;
         }
     }
 
@@ -145,7 +194,7 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
     }
 
     /**
-     * Start tracking {@code keyspace} at {@code epoch}, with a new shard for every write replica group.
+     * Start tracking {@code keyspace} at {@code epoch}, with a new ACTIVE shard for every write replica group.
      * Shards retained from an earlier tracked phase of the keyspace are carried over unchanged.
      */
     public MutationTrackingShards withKeyspace(String keyspace, ReplicaGroups writes, Directory directory, Epoch epoch)
@@ -159,6 +208,25 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
 
         for (int i = 0; i < writes.ranges.size(); i++)
             shards.put(new ShardKey(writes.ranges.get(i), epoch.getEpoch()), new ShardValue(participants(keyspace, writes.endpoints.get(i), directory)));
+        TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
+        updated.put(keyspace, ImmutableSortedMap.copyOfSorted(shards));
+        return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
+    /**
+     * DISABLE all ACTIVE shards of {@code keyspace}; SEALING and SEALED shards are left as they are.
+     */
+    public MutationTrackingShards withKeyspaceDisabled(String keyspace)
+    {
+        ImmutableMap<ShardKey, ShardValue> current = keyspaces.get(keyspace);
+        if (current == null)
+            return this;
+
+        TreeMap<ShardKey, ShardValue> shards = new TreeMap<>(KEY_COMPARATOR);
+        current.forEach((key, value) -> shards.put(key, value.state == ShardValue.State.ACTIVE ? value.asDisabled() : value));
+        if (shards.equals(current))
+            return this;
+
         TreeMap<String, ImmutableMap<ShardKey, ShardValue>> updated = new TreeMap<>(keyspaces);
         updated.put(keyspace, ImmutableSortedMap.copyOfSorted(shards));
         return new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
@@ -194,6 +262,7 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
             TreeMap<ShardKey, ShardValue> shards = new TreeMap<>(KEY_COMPARATOR);
             shards.putAll(entry.getValue());
 
+            List<ShardKey> newShardKeys = new ArrayList<>();
             for (int i = 0; i < writesAfter.ranges.size(); i++)
             {
                 Range<Token> range = writesAfter.ranges.get(i);
@@ -201,8 +270,27 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
 
                 VersionedEndpoints.ForRange previousEndpoints = writesBefore.forRange(range);
                 if (previousEndpoints == null || !previousEndpoints.endpoints().equals(endpoints.endpoints()))
-                    shards.put(new ShardKey(range, epoch.getEpoch()),
-                               new ShardValue(participants(keyspace, endpoints, directory)));
+                {
+                    ShardKey key = new ShardKey(range, epoch.getEpoch());
+                    shards.put(key, new ShardValue(participants(keyspace, endpoints, directory)));
+                    newShardKeys.add(key);
+                }
+            }
+
+            /*
+             * Where new shards supersede existing ACTIVE ones, atomically mark the
+             * superseded shards as SEALING;
+             * SealingCoordinator will then perform actual sealing.
+             */
+            for (Map.Entry<ShardKey, ShardValue> shard : entry.getValue().entrySet())
+            {
+                ShardKey key = shard.getKey();
+                ShardValue value = shard.getValue();
+
+                if (value.state == ShardValue.State.ACTIVE
+                    && key.sinceEpoch < epoch.getEpoch()
+                    && any(newShardKeys, k -> k.range.intersects(key.range)))
+                    shards.put(key, value.asSealing(epoch.getEpoch()));
             }
 
             if (!shards.equals(entry.getValue()))
@@ -269,6 +357,8 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     Token.metadataSerializer.serialize(shard.getKey().range.left, out, partitioner, version);
                     Token.metadataSerializer.serialize(shard.getKey().range.right, out, partitioner, version);
                     out.writeVInt(shard.getKey().sinceEpoch);
+                    out.writeByte(shard.getValue().state.id);
+                    out.writeUnsignedVInt(shard.getValue().sealingEpoch);
                     Participants.serializer.serialize(shard.getValue().participants, out);
                 }
             }
@@ -290,8 +380,10 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     Range<Token> range = new Range<>(Token.metadataSerializer.deserialize(in, partitioner, version),
                                                      Token.metadataSerializer.deserialize(in, partitioner, version));
                     long sinceEpoch = in.readVInt();
+                    ShardValue.State state = ShardValue.State.fromId(in.readByte());
+                    long sealingEpoch = in.readUnsignedVInt();
                     Participants participants = Participants.serializer.deserialize(in);
-                    shards.put(new ShardKey(range, sinceEpoch), new ShardValue(participants));
+                    shards.put(new ShardKey(range, sinceEpoch), new ShardValue(state, sealingEpoch, participants));
                 }
                 keyspaces.put(keyspace, shards.build());
             }
@@ -312,6 +404,8 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
                     size += Token.metadataSerializer.serializedSize(shard.getKey().range.left, partitioner, version);
                     size += Token.metadataSerializer.serializedSize(shard.getKey().range.right, partitioner, version);
                     size += TypeSizes.sizeofVInt(shard.getKey().sinceEpoch);
+                    size += TypeSizes.BYTE_SIZE;
+                    size += TypeSizes.sizeofUnsignedVInt(shard.getValue().sealingEpoch);
                     size += Participants.serializer.serializedSize(shard.getValue().participants);
                 }
             }

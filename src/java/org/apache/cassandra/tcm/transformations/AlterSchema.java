@@ -362,9 +362,11 @@ public class AlterSchema implements Transformation
             boolean isTracked = diff.after.params.replicationType.isTracked();
             String name = diff.after.name;
 
-            // tracked -> untracked retains the keyspace's shards, so that the coordinator log ids of its tracked data
-            // written before the switch keep resolving; TODO (expected): clean them up (CASSANDRA-20955)
-            if (!wasTracked && isTracked)
+            // tracked -> untracked disables the keyspace's ACTIVE shards, but retains them all, so that the coordinator log ids
+            // of its tracked data written before the switch keep resolving; TODO (expected): clean them up (CASSANDRA-20955)
+            if (wasTracked && !isTracked)
+                shards = shards.withKeyspaceDisabled(name);
+            else if (!wasTracked && isTracked)
                 shards = shards.withKeyspace(name, placements.get(diff.after.params.replication).writes, prev.directory, epoch);
         }
 

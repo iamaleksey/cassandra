@@ -110,6 +110,8 @@ public class AlterSchemaMutationTrackingShardsTest
             for (InetAddressAndPort endpoint : writes.endpoints.get(i).endpoints())
                 expected.add(metadata.directory.peerId(endpoint).id());
             assertEquals(expected, shard.participants.asSet());
+            assertEquals(ShardValue.State.ACTIVE, shard.state);
+            assertEquals(ShardValue.UNSET, shard.sealingEpoch);
         }
     }
 
@@ -195,14 +197,14 @@ public class AlterSchemaMutationTrackingShardsTest
     }
 
     @Test
-    public void alterTrackedToUntrackedRetainsShards()
+    public void alterTrackedToUntrackedDisablesShards()
     {
         String ks = createKeyspace("tracked");
         Map<ShardKey, ShardValue> before = ClusterMetadata.current().mutationTrackingShards.keyspaces.get(ks);
 
         schemaChange("ALTER KEYSPACE " + ks + " WITH replication_type = 'untracked'");
 
-        assertSame(before, ClusterMetadata.current().mutationTrackingShards.keyspaces.get(ks));
+        assertDisabled(before, ClusterMetadata.current(), ks);
     }
 
     @Test
@@ -255,7 +257,7 @@ public class AlterSchemaMutationTrackingShardsTest
     }
 
     @Test
-    public void alterTrackedToUntrackedWithReplicationChangeRetainsShards()
+    public void alterTrackedToUntrackedWithReplicationChangeDisablesShards()
     {
         String ks = createKeyspace("tracked");
         Map<ShardKey, ShardValue> before = ClusterMetadata.current().mutationTrackingShards.keyspaces.get(ks);
@@ -266,7 +268,25 @@ public class AlterSchemaMutationTrackingShardsTest
         KeyspaceMetadata ksm = metadata.schema.getKeyspaceMetadata(ks);
         assertEquals("2", ksm.params.replication.options.get("replication_factor"));
         assertFalse(ksm.params.replicationType.isTracked());
-        assertSame(before, metadata.mutationTrackingShards.keyspaces.get(ks));
+        assertDisabled(before, metadata, ks);
+    }
+
+    /**
+     * The keyspace's (all ACTIVE) shards are retained with unchanged keys and participants, all DISABLED.
+     */
+    private static void assertDisabled(Map<ShardKey, ShardValue> before, ClusterMetadata metadata, String ks)
+    {
+        Map<ShardKey, ShardValue> after = metadata.mutationTrackingShards.keyspaces.get(ks);
+        assertNotNull(after);
+        assertEquals(before.keySet(), after.keySet());
+        before.forEach((key, value) -> {
+            assertEquals(ShardValue.State.ACTIVE, value.state);
+            ShardValue disabled = after.get(key);
+            assertEquals(value.participants, disabled.participants);
+            assertEquals(ShardValue.State.DISABLED, disabled.state);
+            assertEquals(ShardValue.UNSET, disabled.sealingEpoch);
+        });
+        assertEquals(metadata.epoch, metadata.mutationTrackingShards.lastModified);
     }
 
     @Test

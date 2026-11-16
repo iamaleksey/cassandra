@@ -41,8 +41,10 @@ import org.apache.cassandra.locator.InetAddressAndPort;
 import org.apache.cassandra.replication.MutationJournal;
 import org.apache.cassandra.replication.MutationTrackingShards.ShardKey;
 import org.apache.cassandra.replication.MutationTrackingShards.ShardValue;
+import org.apache.cassandra.replication.MutationTrackingShards.ShardValue.State;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
+import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.MetadataKeys;
 import org.apache.cassandra.tcm.MultiStepOperation;
 import org.apache.cassandra.tcm.Transformation;
@@ -193,6 +195,7 @@ public class TopologyChangeMutationTrackingShardsTest
         schemaChange("ALTER KEYSPACE " + ks + " WITH replication_type = 'untracked'");
         ClusterMetadata metadata = ClusterMetadata.current();
         Map<ShardKey, ShardValue> retained = shards(metadata, ks);
+        assertTrue(retained.values().stream().allMatch(shard -> shard.state == State.DISABLED));
 
         NodeId joining = register(local.datacenter);
         metadata = commit(prepareJoin(joining, 1_750_000_000_000_000_000L));
@@ -318,7 +321,7 @@ public class TopologyChangeMutationTrackingShardsTest
 
         Map<ShardKey, ShardValue> before = shards(prev, ks);
         Map<ShardKey, ShardValue> after = shards(result.metadata, ks);
-        before.forEach((key, value) -> assertEquals("shard " + key + " should be carried forward", value, after.get(key)));
+        assertCarriedForward(before, after, result.metadata.epoch);
 
         ReplicaGroups writesBefore = writes(prev, ks);
         Map<ShardKey, Set<Integer>> expected = new HashMap<>();
@@ -656,7 +659,7 @@ public class TopologyChangeMutationTrackingShardsTest
 
         Map<ShardKey, ShardValue> before = shards(prev, ks);
         Map<ShardKey, ShardValue> after = shards(result.metadata, ks);
-        before.forEach((key, value) -> assertEquals("shard " + key + " should be carried forward", value, after.get(key)));
+        assertCarriedForward(before, after, result.metadata.epoch);
 
         ReplicaGroups writesBefore = writes(prev, ks);
         Map<ShardKey, Set<Integer>> expected = new HashMap<>();
@@ -819,7 +822,7 @@ public class TopologyChangeMutationTrackingShardsTest
     }
 
     /**
-     * Asserts that the step carried forward all pre-existing shards unchanged, and added exactly one shard,
+     * Asserts that the step carried forward all pre-existing shards, and added exactly one shard,
      * at the step's epoch, for every write replica group modified by the step - mirroring the way
      * MutationTrackingService keys its shards by the replica group's lastModified epoch.
      *
@@ -831,7 +834,7 @@ public class TopologyChangeMutationTrackingShardsTest
         Map<ShardKey, ShardValue> prior = shards(before, ks);
         Map<ShardKey, ShardValue> current = shards(after, ks);
 
-        prior.forEach((key, value) -> assertEquals("shard " + key + " should be carried forward", value, current.get(key)));
+        assertCarriedForward(prior, current, after.epoch);
 
         Map<ShardKey, Set<Integer>> added = new HashMap<>();
         Map<ShardKey, ShardValue> addedShards = new HashMap<>();
@@ -859,11 +862,49 @@ public class TopologyChangeMutationTrackingShardsTest
     }
 
     /**
-     * For every write replica group, the most recent shard over exactly its range must have the group's participants.
+     * Asserts that every pre-existing shard is carried forward with unchanged participants, that the ACTIVE ones
+     * overlapping a newly added shard transition to SEALING at {@code epoch} while all others stay unchanged,
+     * and that newly added shards start out ACTIVE.
+     */
+    private static void assertCarriedForward(Map<ShardKey, ShardValue> prior, Map<ShardKey, ShardValue> current, Epoch epoch)
+    {
+        List<ShardKey> added = new ArrayList<>();
+        current.forEach((key, value) -> {
+            if (!prior.containsKey(key))
+            {
+                added.add(key);
+                assertEquals("new shard " + key + " should be created at " + epoch, epoch.getEpoch(), key.sinceEpoch);
+                assertEquals("new shard " + key + " should start out ACTIVE", State.ACTIVE, value.state);
+                assertEquals("new shard " + key + " should have no sealing epoch", ShardValue.UNSET, value.sealingEpoch);
+            }
+        });
+
+        prior.forEach((key, value) -> {
+            ShardValue carried = current.get(key);
+            assertNotNull("shard " + key + " should be carried forward", carried);
+            assertEquals("shard " + key + " should keep its participants", value.participants, carried.participants);
+
+            boolean obsoleted = value.state == State.ACTIVE && added.stream().anyMatch(k -> k.range.intersects(key.range));
+            if (obsoleted)
+            {
+                assertEquals("shard " + key + " should be marked SEALING", State.SEALING, carried.state);
+                assertEquals("shard " + key + " should be marked SEALING at " + epoch, epoch.getEpoch(), carried.sealingEpoch);
+            }
+            else
+            {
+                assertEquals("shard " + key + " should be carried forward unchanged", value, carried);
+            }
+        });
+    }
+
+    /**
+     * For every write replica group, the most recent shard over exactly its range must have the group's participants
+     * and be ACTIVE; all other shards must have been marked SEALING after their creation.
      */
     private static void assertLatestShardsMatchWrites(ClusterMetadata metadata, String ks)
     {
         Map<ShardKey, ShardValue> shards = shards(metadata, ks);
+        Set<ShardKey> latestKeys = new HashSet<>();
         writes(metadata, ks).forEach((range, endpoints) -> {
             ShardKey latest = null;
             for (ShardKey key : shards.keySet())
@@ -874,6 +915,15 @@ public class TopologyChangeMutationTrackingShardsTest
             assertTrue(latest + " predates the last modification of its range at " + endpoints.lastModified(),
                        latest.sinceEpoch >= endpoints.lastModified().getEpoch());
             assertEquals(participants(metadata, endpoints), shards.get(latest).participants.asSet());
+            latestKeys.add(latest);
+        });
+
+        shards.forEach((key, value) -> {
+            assertEquals("unexpected state of shard " + key, latestKeys.contains(key), value.state == State.ACTIVE);
+            if (value.state == State.ACTIVE || value.state == State.DISABLED)
+                assertEquals(value.state + " shard " + key + " should have no sealing epoch", ShardValue.UNSET, value.sealingEpoch);
+            else
+                assertTrue("shard " + key + " should have been marked SEALING after creation", value.sealingEpoch > key.sinceEpoch);
         });
     }
 
