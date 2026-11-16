@@ -21,13 +21,14 @@ package org.apache.cassandra.tcm.sequences;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Supplier;
 
+import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
 import org.apache.cassandra.tcm.transformations.Assassinate;
 
 public interface LeaveStreams
 {
-    void execute(NodeId leaving, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException;
+    void execute(NodeId leaving, Epoch startLeaveEpoch, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException;
     Kind kind();
     String status();
 

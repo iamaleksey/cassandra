@@ -38,6 +38,7 @@ import org.apache.cassandra.replication.MutationTrackingService;
 import org.apache.cassandra.replication.SealingCoordinator;
 import org.apache.cassandra.streaming.DataMovement;
 import org.apache.cassandra.tcm.ClusterMetadata;
+import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.MovementMap;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
@@ -53,7 +54,7 @@ public class RemoveNodeStreams implements LeaveStreams
     private DataMovements.ResponseTracker responseTracker;
 
     @Override
-    public void execute(NodeId leaving, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException
+    public void execute(NodeId leaving, Epoch startLeaveEpoch, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException
     {
         ClusterMetadata metadata = ClusterMetadata.current();
         MovementMap movements = movementMap(metadata.directory.endpoint(leaving),
@@ -64,7 +65,7 @@ public class RemoveNodeStreams implements LeaveStreams
         // Before streaming to the new write replicas, seal the pre-leave shards obsoleted
         // by START_LEAVE among the surviving participants (side-stepping the dead node).
         if (MutationTrackingService.isEnabled())
-            SealingCoordinator.sealShardsAtMidLeave(metadata, startLeave, leaving, kind());
+            SealingCoordinator.sealShardsAtMidLeave(metadata, startLeaveEpoch, leaving, kind());
 
         String operationId = leaving.toUUID().toString();
         responseTracker = DataMovements.instance.registerMovements(RESTORE_REPLICA_COUNT, operationId, movements);

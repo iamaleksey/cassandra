@@ -42,6 +42,7 @@ import org.apache.cassandra.replication.MutationJournal;
 import org.apache.cassandra.replication.MutationTrackingShards.ShardKey;
 import org.apache.cassandra.replication.MutationTrackingShards.ShardValue;
 import org.apache.cassandra.replication.MutationTrackingShards.ShardValue.State;
+import org.apache.cassandra.replication.MutationTrackingShardsTest;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Epoch;
@@ -835,6 +836,14 @@ public class TopologyChangeMutationTrackingShardsTest
         Map<ShardKey, ShardValue> current = shards(after, ks);
 
         assertCarriedForward(prior, current, after.epoch);
+
+        Set<ShardKey> markedSealing = new HashSet<>();
+        prior.forEach((key, value) -> {
+            if (value.state == State.ACTIVE && current.get(key).state == State.SEALING)
+                markedSealing.add(key);
+        });
+        assertEquals("markedSealingAt() should return exactly the shards marked SEALING by the step",
+                     markedSealing, MutationTrackingShardsTest.keys(after.mutationTrackingShards.markedSealingAt(after.epoch), ks));
 
         Map<ShardKey, Set<Integer>> added = new HashMap<>();
         Map<ShardKey, ShardValue> addedShards = new HashMap<>();

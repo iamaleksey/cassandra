@@ -229,6 +229,9 @@ public class BootstrapAndReplace extends MultiStepOperation<Epoch>
                 {
                     ClusterMetadata metadata = ClusterMetadata.current();
 
+                    if (MutationTrackingService.isEnabled())
+                        SealingCoordinator.sealShardsAtMidReplace(metadata, latestModification, startReplace.replaced());
+
                     if (streamData)
                     {
                         MovementMap movements = movementMap(metadata.directory.endpoint(startReplace.replaced()), startReplace.delta());
@@ -312,8 +315,7 @@ public class BootstrapAndReplace extends MultiStepOperation<Epoch>
                     if (MutationTrackingService.isEnabled())
                     {
                         SealingCoordinator.sealShardsAtFinishReplace(ClusterMetadata.current(),
-                                                                     latestModification.getEpoch(),
-                                                                     finishReplace.delta(),
+                                                                     latestModification,
                                                                      startReplace.replaced());
                     }
                     metadata = ClusterMetadataService.instance().commit(retireSequence());

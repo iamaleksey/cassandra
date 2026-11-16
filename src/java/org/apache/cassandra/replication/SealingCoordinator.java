@@ -49,27 +49,17 @@ import org.apache.cassandra.exceptions.RequestFailure;
 import org.apache.cassandra.io.UnversionedSerializer;
 import org.apache.cassandra.io.util.DataInputPlus;
 import org.apache.cassandra.io.util.DataOutputPlus;
-import org.apache.cassandra.locator.EndpointsByReplica;
-import org.apache.cassandra.locator.EndpointsForRange;
 import org.apache.cassandra.locator.InetAddressAndPort;
-import org.apache.cassandra.locator.RangesAtEndpoint;
-import org.apache.cassandra.locator.Replica;
 import org.apache.cassandra.net.IVerbHandler;
 import org.apache.cassandra.net.Message;
 import org.apache.cassandra.net.MessagingService;
 import org.apache.cassandra.net.RequestCallback;
 import org.apache.cassandra.net.Verb;
-import org.apache.cassandra.schema.KeyspaceMetadata;
 import org.apache.cassandra.tcm.ClusterMetadata;
 import org.apache.cassandra.tcm.ClusterMetadataService;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
-import org.apache.cassandra.tcm.ownership.DataPlacement;
-import org.apache.cassandra.tcm.ownership.MovementMap;
-import org.apache.cassandra.tcm.ownership.PlacementDeltas;
-import org.apache.cassandra.tcm.ownership.VersionedEndpoints;
 import org.apache.cassandra.tcm.sequences.LeaveStreams;
-import org.apache.cassandra.utils.CollectionSerializers;
 import org.apache.cassandra.utils.concurrent.AsyncPromise;
 import org.apache.cassandra.utils.concurrent.Future;
 import org.apache.cassandra.utils.concurrent.FutureCombiner;
@@ -131,7 +121,7 @@ public final class SealingCoordinator
      *    + (10,20] | {n20,n30,n35,n40} | e2 | ACTIVE
      *      (20,30] | {n30,n40,n50}     | e0 | ACTIVE
      *    + (20,30] | {n30,n35,n40,n50} | e2 | ACTIVE
-     *      (30,40] | {n40,n50,n60}     | e0 | ACTIVE
+     *    S (30,40] | {n40,n50,n60}     | e0 | SEALED
      *      (30,35] | {n40,n50,n60}     | e1 | ACTIVE
      *    + (30,35] | {n35,n40,n50,n60} | e2 | ACTIVE
      *      (35,40] | {n40,n50,n60}     | e1 | ACTIVE
@@ -142,7 +132,7 @@ public final class SealingCoordinator
      *      (10,20] | {n20,n30,n35,n40} | e2 | ACTIVE
      *    S (20,30] | {n30,n40,n50}     | e0 | SEALED
      *      (20,30] | {n30,n35,n40,n50} | e2 | ACTIVE
-     *    S (30,40] | {n40,n50,n60}     | e0 | SEALED
+     *      (30,40] | {n40,n50,n60}     | e0 | SEALED
      *    S (30,35] | {n40,n50,n60}     | e1 | SEALED
      *      (30,35] | {n35,n40,n50,n60} | e2 | ACTIVE
      *      (35,40] | {n40,n50,n60}     | e1 | ACTIVE
@@ -183,19 +173,27 @@ public final class SealingCoordinator
      */
 
     /**
-     * Seal the shards obsoleted by bootstrap before the new node starts streaming.
+     * Seal the shards obsoleted by PREPARE_JOIN (range splits) before committing START_JOIN.
      */
-    public static void sealShardsAtMidJoin(ClusterMetadata metadata, MovementMap movements)
+    public static void sealShardsAtStartJoin(ClusterMetadata metadata, Epoch prepareEpoch)
     {
-        seal(discoverShardsAtMidJoinOrReplace(metadata, movements), metadata.epoch);
+        seal(metadata, prepareEpoch);
+    }
+
+    /**
+     * Seal the shards obsoleted by START_JOIN at MID_JOIN, before the new node starts streaming (if it streams at all).
+     */
+    public static void sealShardsAtMidJoin(ClusterMetadata metadata, Epoch startEpoch)
+    {
+        seal(metadata, startEpoch);
     }
 
     /**
      * Seal the intermediate, over-replicated shards created during START_JOIN and obsoleted by FINISH_JOIN.
      */
-    public static void sealShardsAtFinishJoin(ClusterMetadata metadata, long finishEpoch, PlacementDeltas finishDelta)
+    public static void sealShardsAtFinishJoin(ClusterMetadata metadata, Epoch finishEpoch)
     {
-        seal(discoverShardsAtFinishJoinOrReplace(metadata, finishEpoch, finishDelta, null), metadata.epoch);
+        seal(metadata, finishEpoch);
     }
 
     /*
@@ -265,99 +263,21 @@ public final class SealingCoordinator
      */
 
     /**
-     * Seal the shards obsoleted by host replacement before the replacement node starts streaming.
+     * Seal the shards obsoleted by START_REPLACE at MID_REPLACE, before the replacement node starts streaming (if it streams at all).
      * The {@code deadNode} node cannot participate in the sealing.
      */
-    public static void sealShardsAtMidReplace(ClusterMetadata metadata, MovementMap movements, @Nonnull NodeId deadNode)
+    public static void sealShardsAtMidReplace(ClusterMetadata metadata, Epoch startEpoch, @Nonnull NodeId deadNode)
     {
-        seal(discoverShardsAtMidJoinOrReplace(metadata, movements), deadNode, metadata.epoch);
+        seal(metadata, startEpoch, deadNode);
     }
 
     /**
      * Seal the intermediate, over-replicated shards created during START_REPLACE and obsoleted by FINISH_REPLACE.
      * The {@code deadNode} node cannot participate in the sealing.
      */
-    public static void sealShardsAtFinishReplace(ClusterMetadata metadata, long finishEpoch, PlacementDeltas finishDelta, @Nonnull NodeId deadNode)
+    public static void sealShardsAtFinishReplace(ClusterMetadata metadata, Epoch finishEpoch, @Nonnull NodeId deadNode)
     {
-        seal(discoverShardsAtFinishJoinOrReplace(metadata, finishEpoch, finishDelta, deadNode), deadNode, metadata.epoch);
-    }
-
-    /**
-     * Discover all shards that need to be sealed at MID_JOIN or MID_REPLACE.
-     */
-    private static Set<ShardMetadata> discoverShardsAtMidJoinOrReplace(ClusterMetadata metadata, MovementMap movements)
-    {
-        List<Future<Set<ShardMetadata>>> futures = new ArrayList<>();
-
-        for (KeyspaceMetadata ksm : metadata.schema.getKeyspaces())
-        {
-            if (!ksm.params.replicationType.isTracked())
-                continue;
-
-            EndpointsByReplica acquired = movements.get(ksm.params.replication);
-            if (acquired.isEmpty()) // when the keyspace is not replicated to this DC
-                continue;
-
-            DataPlacement placement = metadata.placements.get(ksm.params.replication);
-
-            for (Map.Entry<Replica, EndpointsForRange> entry : acquired.entrySet())
-            {
-                Range<Token> range = entry.getKey().range();
-                Set<InetAddressAndPort> endpoints = entry.getValue().endpoints();
-                // cutoff: the epoch this node was added to the write placement for the range;
-                // shards over the range with sinceEpoch < cutoff are obsoleted by this bootstrap or replace.
-                long beforeEpoch = placement.writes.forRange(range).lastModified().getEpoch();
-                futures.add(FetchShards.fetch(ksm.name, beforeEpoch, range, endpoints));
-            }
-        }
-
-        Set<ShardMetadata> shards = new HashSet<>();
-        try
-        {
-            for (Set<ShardMetadata> fetched : FutureCombiner.allOf(futures).get(DatabaseDescriptor.getShardSealingTimeout(MILLISECONDS), MILLISECONDS))
-                shards.addAll(fetched);
-        }
-        catch (InterruptedException e)
-        {
-            throw new UncheckedInterruptedException(e);
-        }
-        catch (ExecutionException | TimeoutException e)
-        {
-            throw new RuntimeException("Failed to fetch shards to seal", e);
-        }
-        return shards;
-    }
-
-    /**
-     * Discover all shards that need to be sealed at FINISH_JOIN or FINISH_REPLACE.
-     */
-    private static Set<ShardMetadata> discoverShardsAtFinishJoinOrReplace(
-        ClusterMetadata metadata, long finishEpoch, PlacementDeltas finishDelta, @Nullable NodeId deadNode)
-    {
-        Set<ShardMetadata> shards = new HashSet<>();
-        for (KeyspaceMetadata ksm : metadata.schema.getKeyspaces())
-        {
-            if (!ksm.params.replicationType.isTracked())
-                continue;
-
-            DataPlacement placement = metadata.placements.get(ksm.params.replication);
-            finishDelta.get(ksm.params.replication).writes.removals.flattenValues().forEach(removed -> {
-                Set<Integer> nodeIDs = new HashSet<>();
-                for (InetAddressAndPort ep : placement.writes.forRange(removed.range()).endpoints())
-                    nodeIDs.add(metadata.directory.peerId(ep).id());
-                nodeIDs.add(deadNode != null ? deadNode.id() : metadata.directory.peerId(removed.endpoint()).id());
-                Participants participants = new Participants(nodeIDs);
-
-                MutationTrackingService.instance().forEachShardInKeyspace(ksm.name, shard -> {
-                    if (shard.sinceEpoch < finishEpoch
-                        && shard.range.equals(removed.range())
-                        && shard.participants.equals(participants)
-                        && !shard.isSealed())
-                        shards.add(new ShardMetadata(shard.keyspace, shard.sinceEpoch, shard.range, shard.participants));
-                });
-            });
-        }
-        return shards;
+        seal(metadata, finishEpoch, deadNode);
     }
 
     /*
@@ -434,110 +354,36 @@ public final class SealingCoordinator
     /**
      * Seal the shards obsoleted by START_LEAVE before streaming, for both UNBOOTSTRAP and REMOVENODE.
      */
-    public static void sealShardsAtMidLeave(ClusterMetadata metadata, PlacementDeltas startDelta, NodeId leavingOrDeparted, LeaveStreams.Kind kind)
+    public static void sealShardsAtMidLeave(ClusterMetadata metadata, Epoch startEpoch, NodeId leavingOrDeparted, LeaveStreams.Kind kind)
     {
-        InetAddressAndPort leavingOrDepartedEndpoint = metadata.directory.endpoint(leavingOrDeparted);
-
-        List<Future<Set<ShardMetadata>>> futures = new ArrayList<>();
-        for (KeyspaceMetadata ksm : metadata.schema.getKeyspaces())
-        {
-            if (!ksm.params.replicationType.isTracked())
-                continue;
-
-            DataPlacement placement = metadata.placements.get(ksm.params.replication);
-            startDelta.get(ksm.params.replication).writes.additions.flattenValues().forEach(added -> {
-                Range<Token> range = added.range();
-                long beforeEpoch = placement.writes.forRange(range).lastModified().getEpoch();
-                Set<InetAddressAndPort> survivors = new HashSet<>(placement.writes.forRange(range).endpoints());
-                survivors.remove(leavingOrDepartedEndpoint);
-                futures.add(FetchShards.fetch(ksm.name, beforeEpoch, range, survivors));
-            });
-        }
-
-        Set<ShardMetadata> shards = new HashSet<>();
-        try
-        {
-            for (Set<ShardMetadata> fetched : FutureCombiner.allOf(futures).get(DatabaseDescriptor.getShardSealingTimeout(MILLISECONDS), MILLISECONDS))
-                for (ShardMetadata shard : fetched)
-                    if (shard.participants.contains(leavingOrDeparted.id()))
-                        shards.add(shard);
-        }
-        catch (InterruptedException e)
-        {
-            throw new UncheckedInterruptedException(e);
-        }
-        catch (ExecutionException | TimeoutException e)
-        {
-            throw new RuntimeException("Failed to fetch shards to seal for leave", e);
-        }
-
-        seal(shards, kind == LeaveStreams.Kind.UNBOOTSTRAP ? null : leavingOrDeparted, metadata.epoch);
+        seal(metadata, startEpoch, kind == LeaveStreams.Kind.UNBOOTSTRAP ? null : leavingOrDeparted);
     }
 
     /**
      * Seal the shards obsoleted by FINISH_LEAVE, for both UNBOOTSTRAP and REMOVENODE: the departed node's
      * over-replicated generations created during START_LEAVE, plus the merge-half folded into its range.
      */
-    public static void sealShardsAtFinishLeave(ClusterMetadata metadata, long finishEpoch, PlacementDeltas finishDelta, NodeId leavingOrDeparted, LeaveStreams.Kind kind)
+    public static void sealShardsAtFinishLeave(ClusterMetadata metadata, Epoch finishEpoch, NodeId leavingOrDeparted, LeaveStreams.Kind kind)
     {
-        InetAddressAndPort leavingOrDepartedEndpoint = metadata.directory.endpoint(leavingOrDeparted);
-
-        List<Future<Set<ShardMetadata>>> futures = new ArrayList<>();
-        for (KeyspaceMetadata ksm : metadata.schema.getKeyspaces())
-        {
-            if (!ksm.params.replicationType.isTracked())
-                continue;
-
-            DataPlacement placement = metadata.placements.get(ksm.params.replication);
-            RangesAtEndpoint removals = finishDelta.get(ksm.params.replication).writes.removals.get(leavingOrDepartedEndpoint);
-            for (Replica removedReplica : removals)
-            {
-                // FINISH_LEAVE merges the leavingOrDeparted node's (pre-merge) range with an adjacent one. Query the *merged*
-                // range (not the pre-merge range) so discovery covers both the leavingOrDeparted node's own obsoleted
-                // generations and the merge-half - the adjacent pre-merge range folded into the merged range, whose
-                // shard never listed the leavingOrDeparted node. matchRange() yields the containing merged group + its
-                // current (survivor) write endpoints.
-                VersionedEndpoints.ForRange group = placement.writes.matchRange(removedReplica.range());
-                Range<Token> mergedRange = group.range();
-                Set<InetAddressAndPort> survivors = new HashSet<>(group.endpoints());
-                survivors.remove(leavingOrDepartedEndpoint);
-                futures.add(FetchShards.fetch(ksm.name, finishEpoch, mergedRange, survivors));
-            }
-        }
-
-        Set<ShardMetadata> shards = new HashSet<>();
-        try
-        {
-            for (Set<ShardMetadata> fetched : FutureCombiner.allOf(futures).get(DatabaseDescriptor.getShardSealingTimeout(MILLISECONDS), MILLISECONDS))
-                shards.addAll(fetched);
-        }
-        catch (InterruptedException e)
-        {
-            throw new UncheckedInterruptedException(e);
-        }
-        catch (ExecutionException | TimeoutException e)
-        {
-            throw new RuntimeException("Failed to fetch shards to seal for leave finish", e);
-        }
-
-        seal(shards, kind == LeaveStreams.Kind.UNBOOTSTRAP ? null : leavingOrDeparted, metadata.epoch);
+        seal(metadata, finishEpoch, kind == LeaveStreams.Kind.UNBOOTSTRAP ? null : leavingOrDeparted);
     }
 
     /*
-     * Sealing logic.
+     * Sealing logic. The shards to seal at a step are those marked SEALING by the transformation committed at the given epoch.
      */
 
-    private static void seal(Set<ShardMetadata> shards, Epoch epoch)
+    private static void seal(ClusterMetadata metadata, Epoch markedSealingAt)
     {
-        seal(shards, null, epoch);
+        seal(metadata, markedSealingAt, null);
     }
 
-    private static void seal(Set<ShardMetadata> shards, @Nullable NodeId withoutNode, Epoch epoch)
+    private static void seal(ClusterMetadata metadata, Epoch markedSealingAt, @Nullable NodeId withoutNode)
     {
-        awaitEpoch(shards, withoutNode, epoch); // wait for all involved replicas to catch up to the relevant TCM epoch
-        drain(shards, withoutNode);             // drain in-flight local writes
-        reconcile(shards, withoutNode);         // wait for logs to reconcile
-        complete(shards, withoutNode);          // SEALING -> SEALED for each Shard
+        Set<ShardMetadata> shards = metadata.mutationTrackingShards.markedSealingAt(markedSealingAt);
+        awaitEpoch(shards, withoutNode, metadata.epoch); // wait for all involved replicas to catch up to the relevant TCM epoch
+        drain(shards, withoutNode);                      // drain in-flight local writes
+        reconcile(shards, withoutNode);                  // wait for logs to reconcile
+        complete(shards, withoutNode);                   // SEALING -> SEALED for each Shard
     }
 
     /**
@@ -812,148 +658,6 @@ public final class SealingCoordinator
     {
         executeWithRetry("completing sealing", shards, withoutNode, (shard, endpoints) ->
             CompleteSealing.complete(shard.keyspace, shard.sinceEpoch, shard.range, endpoints));
-    }
-
-    /**
-     * A bootstrapping node knows nothing about the shards that currently exist,
-     * so it must collect the list of shards from the existing replicas before
-     * it can proceed with the rest of the sealing steps.
-     */
-    public static final class FetchShards
-    {
-        public static final class Request
-        {
-            final String keyspace;
-            final long beforeEpoch;
-            final Range<Token> range;
-
-            Request(String keyspace, long beforeEpoch, Range<Token> range)
-            {
-                this.keyspace = keyspace;
-                this.beforeEpoch = beforeEpoch;
-                this.range = range;
-            }
-        }
-
-        public static final class Response
-        {
-            final Set<ShardMetadata> shards;
-
-            Response(Set<ShardMetadata> shards)
-            {
-                this.shards = shards;
-            }
-        }
-
-        /**
-         * Query all replicas in a group in parallel for the shards over {@code ranges} obsoleted by an
-         * in-flight topology change (those with {@code sinceEpoch < beforeEpoch}). Resembles
-         * {@link ShardMetadataRequest#queryPeers}, but waits for every (live) replica to respond and
-         * merges their deduplicated shards rather than taking the first response.
-         */
-        private static AsyncPromise<Set<ShardMetadata>> fetch(
-            String keyspace, long beforeEpoch, Range<Token> range, Set<InetAddressAndPort> endpoints)
-        {
-            checkArgument(!endpoints.isEmpty());
-            AsyncPromise<Set<ShardMetadata>> promise = new AsyncPromise<>();
-            Set<ShardMetadata> merged = ConcurrentHashMap.newKeySet();
-
-            RequestCallback<Response> callback = new RequestCallback<>()
-            {
-                private final AtomicInteger remaining = new AtomicInteger(endpoints.size());
-
-                @Override
-                public void onResponse(Message<Response> msg)
-                {
-                    merged.addAll(msg.payload.shards);
-                    if (remaining.decrementAndGet() == 0)
-                        promise.trySuccess(merged);
-                }
-
-                @Override
-                public void onFailure(InetAddressAndPort from, RequestFailure failure)
-                {
-                    // happy path assumes all replicas are up; fail the whole fetch if any can't respond
-                    promise.tryFailure(new RuntimeException(format("Failed to fetch shards to seal from %s for keyspace %s: %s", from, keyspace, failure)));
-                }
-
-                @Override
-                public boolean invokeOnFailure()
-                {
-                    return true;
-                }
-            };
-
-            Message<Request> message = Message.out(Verb.MT_FETCH_SHARDS_REQ, new Request(keyspace, beforeEpoch, range));
-            for (InetAddressAndPort peer : endpoints)
-                MessagingService.instance().sendWithCallback(message, peer, callback);
-
-            return promise;
-        }
-
-        public static final IVerbHandler<Request> verbHandler = message ->
-        {
-            MutationTrackingService.ensureEnabled();
-            Request request = message.payload;
-            Set<ShardMetadata> shards = new HashSet<>();
-            MutationTrackingService.instance().forEachShardInKeyspace(request.keyspace, shard -> {
-                if (shard.sinceEpoch < request.beforeEpoch
-                    && request.range.intersects(shard.range)
-                    && !shard.isSealed())
-                    shards.add(new ShardMetadata(shard.keyspace, shard.sinceEpoch, shard.range, shard.participants));
-            });
-            MessagingService.instance().send(message.responseWith(new Response(shards)), message.from());
-        };
-
-        public static final VersionedSerializer<Request> requestSerializer = new VersionedSerializer<>()
-        {
-            @Override
-            public void serialize(Request r, DataOutputPlus out, Version version) throws IOException
-            {
-                out.writeUTF(r.keyspace);
-                out.writeLong(r.beforeEpoch);
-                AbstractBounds.tokenSerializer.serialize(r.range, out, version.messagingVersion());
-            }
-
-            @Override
-            public Request deserialize(DataInputPlus in, Version version) throws IOException
-            {
-                String keyspace = in.readUTF();
-                long beforeEpoch = in.readLong();
-                Range<Token> range = (Range<Token>) AbstractBounds.tokenSerializer.deserialize(in, IPartitioner.global(), version.messagingVersion());
-                return new Request(keyspace, beforeEpoch, range);
-            }
-
-            @Override
-            public long serializedSize(Request r, Version version)
-            {
-                long size = TypeSizes.sizeof(r.keyspace);
-                size += TypeSizes.sizeof(r.beforeEpoch);
-                size += AbstractBounds.tokenSerializer.serializedSize(r.range, version.messagingVersion());
-                return size;
-            }
-        };
-
-        public static final VersionedSerializer<Response> responseSerializer = new VersionedSerializer<>()
-        {
-            @Override
-            public void serialize(Response r, DataOutputPlus out, Version version) throws IOException
-            {
-                CollectionSerializers.serializeCollection(r.shards, out, version, ShardMetadata.serializer);
-            }
-
-            @Override
-            public Response deserialize(DataInputPlus in, Version version) throws IOException
-            {
-                return new Response(CollectionSerializers.deserializeSet(in, version, ShardMetadata.serializer));
-            }
-
-            @Override
-            public long serializedSize(Response r, Version version)
-            {
-                return CollectionSerializers.serializedCollectionSize(r.shards, version, ShardMetadata.serializer);
-            }
-        };
     }
 
     public static final class AwaitEpoch

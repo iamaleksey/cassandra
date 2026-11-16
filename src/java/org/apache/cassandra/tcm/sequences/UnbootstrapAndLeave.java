@@ -204,6 +204,7 @@ public class UnbootstrapAndLeave extends MultiStepOperation<Epoch>
                 try
                 {
                     streams.execute(startLeave.nodeId(),
+                                    latestModification,
                                     startLeave.delta(),
                                     midLeave.delta(),
                                     finishLeave.delta());
@@ -241,8 +242,7 @@ public class UnbootstrapAndLeave extends MultiStepOperation<Epoch>
                     if (MutationTrackingService.isEnabled() && streams.kind() != LeaveStreams.Kind.ASSASSINATE)
                     {
                         SealingCoordinator.sealShardsAtFinishLeave(ClusterMetadata.current(),
-                                                                   latestModification.getEpoch(),
-                                                                   finishLeave.delta(),
+                                                                   latestModification,
                                                                    finishLeave.nodeId(),
                                                                    streams.kind());
                     }

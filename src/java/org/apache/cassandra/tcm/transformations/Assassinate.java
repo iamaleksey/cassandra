@@ -140,7 +140,7 @@ public class Assassinate extends PrepareLeave
     public static LeaveStreams LEAVE_STREAMS = new LeaveStreams()
     {
         @Override
-        public void execute(NodeId leaving, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave)
+        public void execute(NodeId leaving, Epoch startLeaveEpoch, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave)
         {
 
         }

@@ -48,6 +48,7 @@ import org.apache.cassandra.streaming.StreamOperation;
 import org.apache.cassandra.streaming.StreamPlan;
 import org.apache.cassandra.streaming.StreamState;
 import org.apache.cassandra.tcm.ClusterMetadata;
+import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.MovementMap;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
@@ -64,7 +65,7 @@ public class UnbootstrapStreams implements LeaveStreams
     }
 
     @Override
-    public void execute(NodeId leaving, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException
+    public void execute(NodeId leaving, Epoch startLeaveEpoch, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave) throws ExecutionException, InterruptedException
     {
         MovementMap movements = movementMap(ClusterMetadata.current().directory.endpoint(leaving),
                                             startLeave,
@@ -73,7 +74,7 @@ public class UnbootstrapStreams implements LeaveStreams
         started.set(true);
         try
         {
-            unbootstrap(Schema.instance.getNonLocalStrategyKeyspaces(), movements, startLeave, leaving);
+            unbootstrap(Schema.instance.getNonLocalStrategyKeyspaces(), movements, startLeaveEpoch, leaving);
         }
         catch (ExecutionException e)
         {
@@ -113,7 +114,7 @@ public class UnbootstrapStreams implements LeaveStreams
         return allMovements.build();
     }
 
-    private static void unbootstrap(Keyspaces keyspaces, MovementMap movements, PlacementDeltas startLeave, NodeId leaving) throws ExecutionException, InterruptedException
+    private static void unbootstrap(Keyspaces keyspaces, MovementMap movements, Epoch startLeaveEpoch, NodeId leaving) throws ExecutionException, InterruptedException
     {
         Supplier<Future<StreamState>> startStreaming = prepareUnbootstrapStreaming(keyspaces, movements);
 
@@ -130,10 +131,8 @@ public class UnbootstrapStreams implements LeaveStreams
         logger.info("streaming hints to other nodes");
         Future<?> hintsSuccess = StorageService.instance.streamHints();
 
-        // Seal the shards obsoleted by START_LEAVE before streaming this node's data away, mirroring the
-        // pre-streaming seal that BootstrapAndJoin.bootstrap() performs for joins.
         if (MutationTrackingService.isEnabled())
-            SealingCoordinator.sealShardsAtMidLeave(ClusterMetadata.current(), startLeave, leaving, Kind.UNBOOTSTRAP);
+            SealingCoordinator.sealShardsAtMidLeave(ClusterMetadata.current(), startLeaveEpoch, leaving, Kind.UNBOOTSTRAP);
 
         Future<StreamState> streamSuccess = startStreaming.get();
 

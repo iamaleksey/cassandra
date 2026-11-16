@@ -218,13 +218,15 @@ public class BootstrapAndJoin extends MultiStepOperation<Epoch>
             case START_JOIN:
                 try
                 {
+                    if (MutationTrackingService.isEnabled())
+                        SealingCoordinator.sealShardsAtStartJoin(ClusterMetadata.current(), latestModification);
                     SystemKeyspace.updateLocalTokens(finishJoin.tokens);
                     ClusterMetadataService.instance().commit(startJoin);
                 }
                 catch (Throwable e)
                 {
                     JVMStabilityInspector.inspectThrowable(e);
-                    logger.warn("Exception committing startJoin", e);
+                    logger.warn("Exception sealing obsoleted MT shards or committing startJoin", e);
                     return continuable();
                 }
 
@@ -237,6 +239,10 @@ public class BootstrapAndJoin extends MultiStepOperation<Epoch>
                     Pair<MovementMap, MovementMap> movements = getMovementMaps(metadata);
                     MovementMap movementMap = movements.left;
                     MovementMap strictMovementMap = movements.right;
+
+                    if (MutationTrackingService.isEnabled())
+                        SealingCoordinator.sealShardsAtMidJoin(metadata, latestModification);
+
                     if (streamData)
                     {
                         boolean dataAvailable = bootstrap(bootstrapTokens,
@@ -319,11 +325,7 @@ public class BootstrapAndJoin extends MultiStepOperation<Epoch>
                 try
                 {
                     if (MutationTrackingService.isEnabled())
-                    {
-                        SealingCoordinator.sealShardsAtFinishJoin(ClusterMetadata.current(),
-                                                                  latestModification.getEpoch(),
-                                                                  finishJoin.delta());
-                    }
+                        SealingCoordinator.sealShardsAtFinishJoin(ClusterMetadata.current(), latestModification);
                     metadata = ClusterMetadataService.instance().commit(retireSequence());
                 }
                 catch (Throwable e)
@@ -426,14 +428,6 @@ public class BootstrapAndJoin extends MultiStepOperation<Epoch>
         }
 
         StorageService.instance.repairPaxosForTopologyChange("bootstrap");
-
-        if (MutationTrackingService.isEnabled())
-        {
-            if (beingReplaced == null)
-                SealingCoordinator.sealShardsAtMidJoin(metadata, movements);
-            else
-                SealingCoordinator.sealShardsAtMidReplace(metadata, movements, metadata.directory.peerId(beingReplaced));
-        }
 
         List<Future<?>> bootstraps = new ArrayList<>();
         if (AccordService.instance().isEnabled())

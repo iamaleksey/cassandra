@@ -37,6 +37,7 @@ import org.apache.cassandra.distributed.action.GossipHelper;
 import org.apache.cassandra.distributed.api.IInvokableInstance;
 import org.apache.cassandra.service.StorageService;
 import org.apache.cassandra.tcm.ClusterMetadataService;
+import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.membership.NodeId;
 import org.apache.cassandra.tcm.ownership.PlacementDeltas;
 import org.apache.cassandra.tcm.sequences.UnbootstrapStreams;
@@ -154,7 +155,7 @@ public class DecommissionTest extends TestBaseImpl
         }
 
         @SuppressWarnings("unused")
-        public static void execute(NodeId leaving, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave,
+        public static void execute(NodeId leaving, Epoch startLeaveEpoch, PlacementDeltas startLeave, PlacementDeltas midLeave, PlacementDeltas finishLeave,
                                    @SuperCall Callable<?> zuper) throws ExecutionException, InterruptedException
         {
             if (!StorageService.instance.isDecommissionFailed())

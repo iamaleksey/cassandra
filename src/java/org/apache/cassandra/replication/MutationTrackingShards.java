@@ -20,9 +20,11 @@ package org.apache.cassandra.replication;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 
 import com.google.common.collect.ImmutableMap;
@@ -302,6 +304,21 @@ public final class MutationTrackingShards implements MetadataValue<MutationTrack
         }
 
         return updated == null ? this : new MutationTrackingShards(lastModified, ImmutableMap.copyOf(updated));
+    }
+
+    /**
+     * SEALING shards that were marked SEALING at {@code epoch}.
+     */
+    public Set<ShardMetadata> markedSealingAt(Epoch epoch)
+    {
+        Set<ShardMetadata> sealing = new HashSet<>();
+        keyspaces.forEach((keyspace, shards) -> {
+            shards.forEach((key, value) -> {
+                if (value.state == ShardValue.State.SEALING && value.sealingEpoch == epoch.getEpoch())
+                    sealing.add(new ShardMetadata(keyspace, key.sinceEpoch, key.range, value.participants));
+            });
+        });
+        return sealing;
     }
 
     private static Participants participants(String keyspace, VersionedEndpoints.ForRange endpoints, Directory directory)
