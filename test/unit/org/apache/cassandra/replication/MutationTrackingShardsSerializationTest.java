@@ -36,7 +36,7 @@ import org.apache.cassandra.replication.MutationTrackingShards.ShardValue.State;
 import org.apache.cassandra.tcm.Epoch;
 import org.apache.cassandra.tcm.serialization.Version;
 
-import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_SHARDS_VERSION;
+import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -78,7 +78,7 @@ public class MutationTrackingShardsSerializationTest
     {
         for (Version version : Version.values())
         {
-            if (!version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION) || version == Version.UNKNOWN)
+            if (!version.isAtLeast(MIN_MUTATION_TRACKING_TOPOLOGY_VERSION) || version == Version.UNKNOWN)
                 continue;
 
             try (DataOutputBuffer out = new DataOutputBuffer())

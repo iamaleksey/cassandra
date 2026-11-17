@@ -288,8 +288,7 @@ public class PrepareMove implements Transformation
                 out.writeUnsignedVInt32(tokens.size());
                 for (Token token : tokens)
                     Token.metadataSerializer.serialize(token, out, version);
-                // TODO (now): confirm that this is the Version to use
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     out.writeBoolean(((FinishMove) t).unlock);
             }
 
@@ -304,10 +303,9 @@ public class PrepareMove implements Transformation
                 for (int i = 0; i < numTokens; i++)
                     tokens.add(Token.metadataSerializer.deserialize(in, partitioner, version));
 
-                // RetireSingleNodeSequence step which follows after FinishMove was introduced in TBD_UNLOCK_STEP
+                // RetireSingleNodeSequence step which follows after FinishMove was introduced in MIN_MUTATION_TRACKING_TOPOLOGY_VERSION
                 // to support mutation tracking, and unlock now happens in that step.
-                // TODO (now): confirm the correct Version to use here.
-                boolean unlock = version.isBefore(Version.TBD_UNLOCK_STEP) || in.readBoolean();
+                boolean unlock = version.isBefore(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION) || in.readBoolean();
                 return new FinishMove(nodeId, tokens, delta, lockKey, unlock);
             }
 
@@ -318,8 +316,7 @@ public class PrepareMove implements Transformation
                 size += TypeSizes.sizeofUnsignedVInt(tokens.size());
                 for (Token token : tokens)
                     size += Token.metadataSerializer.serializedSize(token, version);
-                // TODO (now): confirm the correct Version to use here.
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     size += TypeSizes.sizeof(((FinishMove)t).unlock);
                 return size;
             }

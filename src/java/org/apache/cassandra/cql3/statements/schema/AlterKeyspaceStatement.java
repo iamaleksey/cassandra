@@ -87,7 +87,7 @@ public final class AlterKeyspaceStatement extends AlterSchemaStatement
         boolean startsTracking = keyspace != null &&
                                  !keyspace.params.replicationType.isTracked() &&
                                  attrs.asAlteredKeyspaceParams(keyspace.params).replicationType.isTracked();
-        Version required = startsTracking ? Version.MIN_MUTATION_TRACKING_SHARDS_VERSION : Version.V0;
+        Version required = startsTracking ? Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION : Version.V0;
         return metadata.directory.commonSerializationVersion.isAtLeast(required);
     }
 

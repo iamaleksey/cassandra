@@ -74,7 +74,7 @@ public final class CreateKeyspaceStatement extends AlterSchemaStatement
     public boolean compatibleWith(ClusterMetadata metadata)
     {
         Version required = attrs.asNewKeyspaceParams().replicationType.isTracked()
-                         ? Version.MIN_MUTATION_TRACKING_SHARDS_VERSION
+                         ? Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION
                          : Version.V0;
         return metadata.directory.commonSerializationVersion.isAtLeast(required);
     }

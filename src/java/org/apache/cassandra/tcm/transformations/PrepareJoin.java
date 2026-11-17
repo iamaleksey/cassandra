@@ -350,8 +350,7 @@ public class PrepareJoin implements Transformation
                 out.writeUnsignedVInt32(tokens.size());
                 for (Token token : tokens)
                     Token.metadataSerializer.serialize(token, out, version);
-                // TODO (now): confirm that this is the Version to use
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     out.writeBoolean(((FinishJoin) t).unlock);
             }
 
@@ -366,10 +365,9 @@ public class PrepareJoin implements Transformation
                 IPartitioner partitioner = ClusterMetadata.current().partitioner;
                 for (int i = 0; i < numTokens; i++)
                     tokens.add(Token.metadataSerializer.deserialize(in, partitioner, version));
-                // RetireSingleNodeSequence step which follows after FinishJoin was introduced in TBD_UNLOCK_STEP
+                // RetireSingleNodeSequence step which follows after FinishJoin was introduced in MIN_MUTATION_TRACKING_TOPOLOGY_VERSION
                 // to support mutation tracking, and unlock now happens in that step.
-                // TODO (now): confirm the correct Version to use here.
-                boolean unlock = version.isBefore(Version.TBD_UNLOCK_STEP) || in.readBoolean();
+                boolean unlock = version.isBefore(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION) || in.readBoolean();
                 return new FinishJoin(nodeId, tokens, delta, lockKey, unlock);
             }
 
@@ -381,8 +379,7 @@ public class PrepareJoin implements Transformation
                 size += TypeSizes.sizeofUnsignedVInt(tokens.size());
                 for (Token token : tokens)
                     size += Token.metadataSerializer.serializedSize(token, version);
-                // TODO (now): confirm the correct Version to use here.
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     size += TypeSizes.sizeof(((FinishJoin)t).unlock);
                 return size;
             }

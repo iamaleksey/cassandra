@@ -276,18 +276,16 @@ public interface Transformation
         PREPARE_DROP_ACCORD_TABLE(41, Version.MIN_ACCORD_VERSION, () -> PrepareDropAccordTable.serializer),
         FINISH_DROP_ACCORD_TABLE(42, Version.MIN_ACCORD_VERSION, () -> FinishDropAccordTable.serializer),
         ACCORD_MARK_HARD_REMOVED(43, Version.MIN_ACCORD_VERSION, () -> AccordMarkHardRemoved.serializer),
-        ADVANCE_MUTATION_TRACKING_MIGRATION(44, Version.MIN_MUTATION_TRACKING_VERSION, () -> AdvanceMutationTrackingMigration.serializer),
 
+        ADVANCE_MUTATION_TRACKING_MIGRATION(44, Version.MIN_MUTATION_TRACKING_VERSION, () -> AdvanceMutationTrackingMigration.serializer),
+        MARK_SHARDS_SEALED(45, Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION, () -> MarkShardsSealed.serializer),
         /*
          * Additional final step for JOIN/MOVE/LEAVE/REPLACE sequences that seal the
          * intermediate mutation tracking shards before cleaning up the MSO from
          * ClusterMetadata::inProgressSequences and unlocking the affected ranges.
          * See o.a.c.replication.SealingCoordinator comments for additional context.
-         * TODO (now): what should be the correct introducedIn version for these?
          */
-        RETIRE_SINGLE_NODE_SEQUENCE(45, Version.TBD_UNLOCK_STEP, () -> RetireSingleNodeSequence.serializer),
-
-        MARK_SHARDS_SEALED(46, Version.MIN_MUTATION_TRACKING_SHARDS_VERSION, () -> MarkShardsSealed.serializer),
+        RETIRE_SINGLE_NODE_SEQUENCE(46, Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION, () -> RetireSingleNodeSequence.serializer),
         ;
 
         /**

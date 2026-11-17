@@ -15,7 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 package org.apache.cassandra.tcm.transformations;
 
 import java.io.IOException;
@@ -78,7 +77,10 @@ public class MarkShardsSealed implements Transformation
             }
         }
 
-        ClusterMetadata.Transformer next = prev.transformer().with(prev.mutationTrackingShards.withSealed(shards, prev.nextEpoch()));
+        ClusterMetadata.Transformer next =
+            prev.transformer()
+                .with(prev.mutationTrackingShards.withSealed(shards, prev.nextEpoch()));
+
         return Transformation.success(next, LockedRanges.AffectedRanges.EMPTY);
     }
 

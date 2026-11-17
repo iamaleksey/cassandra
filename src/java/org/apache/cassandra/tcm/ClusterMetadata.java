@@ -93,7 +93,7 @@ import static com.google.common.collect.ImmutableSet.toImmutableSet;
 import static org.apache.cassandra.config.CassandraRelevantProperties.LINE_SEPARATOR;
 import static org.apache.cassandra.db.TypeSizes.sizeof;
 import static org.apache.cassandra.tcm.serialization.Version.MIN_ACCORD_VERSION;
-import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_SHARDS_VERSION;
+import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION;
 import static org.apache.cassandra.tcm.serialization.Version.MIN_MUTATION_TRACKING_VERSION;
 
 public class ClusterMetadata
@@ -1193,7 +1193,7 @@ public class ClusterMetadata
                 AccordStaleReplicas.serializer.serialize(metadata.accordStaleReplicas, out, version);
             }
 
-            if (version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION))
+            if (version.isAtLeast(MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                 MutationTrackingShards.serializer.serialize(metadata.mutationTrackingShards, out, metadata.partitioner, version);
 
             if (version.isAtLeast(MIN_MUTATION_TRACKING_VERSION))
@@ -1256,7 +1256,7 @@ public class ClusterMetadata
                 staleReplicas = AccordStaleReplicas.EMPTY;
             }
 
-            MutationTrackingShards mutationTrackingShards = version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION)
+            MutationTrackingShards mutationTrackingShards = version.isAtLeast(MIN_MUTATION_TRACKING_TOPOLOGY_VERSION)
                                                           ? MutationTrackingShards.serializer.deserialize(in, partitioner, version)
                                                           : MutationTrackingShards.EMPTY;
 
@@ -1336,7 +1336,7 @@ public class ClusterMetadata
                         AccordStaleReplicas.serializer.serializedSize(metadata.accordStaleReplicas, version);
             }
 
-            if (version.isAtLeast(MIN_MUTATION_TRACKING_SHARDS_VERSION))
+            if (version.isAtLeast(MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                 size += MutationTrackingShards.serializer.serializedSize(metadata.mutationTrackingShards, metadata.partitioner, version);
 
             if (version.isAtLeast(MIN_MUTATION_TRACKING_VERSION))

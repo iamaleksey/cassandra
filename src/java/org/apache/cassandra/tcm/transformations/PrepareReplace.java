@@ -371,8 +371,7 @@ public class PrepareReplace implements Transformation
             public void serialize(Transformation t, DataOutputPlus out, Version version) throws IOException
             {
                 super.serialize(t, out, version);
-                // TODO (now): confirm that this is the Version to use
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     out.writeBoolean(((FinishReplace) t).unlock);
             }
 
@@ -383,10 +382,9 @@ public class PrepareReplace implements Transformation
                 NodeId replacement = NodeId.serializer.deserialize(in, version);
                 PlacementDeltas delta = PlacementDeltas.serializer.deserialize(in, version);
                 LockedRanges.Key lockKey = LockedRanges.Key.serializer.deserialize(in, version);
-                // RetireSingleNodeSequence step which follows after FinishReplace was introduced in TBD_UNLOCK_STEP
+                // RetireSingleNodeSequence step which follows after FinishReplace was introduced in MIN_MUTATION_TRACKING_TOPOLOGY_VERSION
                 // to support mutation tracking, and unlock now happens in that step.
-                // TODO (now): confirm the correct Version to use here.
-                boolean unlock = version.isBefore(Version.TBD_UNLOCK_STEP) || in.readBoolean();
+                boolean unlock = version.isBefore(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION) || in.readBoolean();
                 return new FinishReplace(replaced, replacement, delta, lockKey, unlock);
             }
 
@@ -394,8 +392,7 @@ public class PrepareReplace implements Transformation
             public long serializedSize(Transformation t, Version version)
             {
                 long size = super.serializedSize(t, version);
-                // TODO (now): confirm the correct Version to use here.
-                if (version.isAtLeast(Version.TBD_UNLOCK_STEP))
+                if (version.isAtLeast(Version.MIN_MUTATION_TRACKING_TOPOLOGY_VERSION))
                     size += TypeSizes.sizeof(((FinishReplace)t).unlock);
                 return size;
             }

@@ -86,6 +86,8 @@ public enum Version
 
     /**
      * - MutationTrackingShards
+     * - RetireSingleNodeSequence as the final step of JOIN/MOVE/LEAVE/REPLACE sequences
+     * - Finish(Join|Move|Leave|Replace) serialize whether they unlock the affected ranges themselves
      */
     V10(10),
 
@@ -96,9 +98,8 @@ public enum Version
      */
     public static final Version MIN_ACCORD_VERSION = V7;
 
-    public static final Version MIN_MUTATION_TRACKING_VERSION = V8;
-    public static final Version TBD_UNLOCK_STEP = V9;
-    public static final Version MIN_MUTATION_TRACKING_SHARDS_VERSION = V10;
+    public static final Version MIN_MUTATION_TRACKING_VERSION = V9;
+    public static final Version MIN_MUTATION_TRACKING_TOPOLOGY_VERSION = V10;
 
     private static Map<Integer, Version> values = new HashMap<>();
 
